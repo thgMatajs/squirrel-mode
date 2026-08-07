@@ -39,7 +39,7 @@ A per-project record of the current mental model: what is being worked on, the s
 _Avoid_: state file, session file, memory, context file
 
 **Done log**:
-The accumulated list of completed work inside a checkpoint. Its purpose is emotional, not operational: ADHD blurs the memory of one's own accomplishments, so the record is shown back to the user first.
+The accumulated list of completed work inside a checkpoint. Its purpose is emotional, not operational: it exists to be read back to the user before anything else. See [RESEARCH.md](./docs/RESEARCH.md) for what the evidence does and does not support here — the stronger framing this project started with turned out to be unsourced.
 _Avoid_: history, changelog, completed tasks
 
 **Parking lot**:

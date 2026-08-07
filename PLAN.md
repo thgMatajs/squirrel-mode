@@ -50,25 +50,48 @@ day to day. `squirrel-mode` calibrates.
 
 Every rule must trace to a finding below. `docs/RESEARCH.md` carries the full version.
 
-**Citation policy — non-negotiable.** Every citation is verified against the primary source before it
-enters the repo, and every finding is tagged with the **population it was measured in**:
-`ADHD` / `general working memory` / `borrowed from adjacent accessibility work`. The repo's entire
-claim is "evidence-based, not aesthetic"; a reader who checks one citation and finds it wrong
-discounts everything. Three errors already found and corrected during planning are marked ⚠ below.
+**[`docs/RESEARCH.md`](./docs/RESEARCH.md) is the authoritative citation list.** This section is the
+design argument — findings and the rules they justify. Every citation was verified against its primary
+source during the S6 build; the verified identities, population tags, links, and a record of the
+corrections live in `RESEARCH.md`. Do not add a citation here without adding it there first, or the two
+will drift — which is exactly how the errors below got in.
+
+**Citation policy — non-negotiable.** Before a citation enters the repo, verify **all four**:
+
+1. **Identity** — exact title, full author list in order, year, venue, working link.
+2. **Support** — that the paper's own abstract or results actually state the thing we attribute to it.
+3. **Whose finding it is** — that the sentence we are leaning on is the paper's *own* result, not its
+   summary of someone else's. A paper citing a third party is not evidence; cite the third party.
+4. **Population** — tag it `ADHD` / `general working memory` /
+   `borrowed from adjacent accessibility work`, and never inflate.
+
+**Item 2 is the one that gets skipped, and skipping it is worse than a typo.** The first verification
+pass on this section checked identity only and passed four citations that were bibliographically
+pristine and substantively wrong — including the opening claim, whose flagship source states in its own
+abstract that it found *no* ADHD-specific working-memory-by-load effect. A correctly cited paper used
+to support something it does not say is the failure a hostile reader finds first.
+
 If a search yields nothing solid, the claim comes out — no filler citations.
+
+**Five misattributions and three unsourced claims were found in this section's first draft.** The
+verification pass was worth more than everything it cost. Corrected inline below and recorded in full
+in `RESEARCH.md`.
 
 **Working memory capacity is the bottleneck.** `general working memory`
 Working memory holds ~3–5 chunks and abandons content when new stimuli arrive (Baddeley & Hitch;
 Cowan, 2010, *The Magical Mystery Four*; Sweller, Cognitive Load Theory). Adults with ADHD show
-reduced working-memory accuracy across all load conditions, degrading further as load increases
-(Karalunas et al., *Constraints on Information Processing Capacity in Adults with ADHD* — verify
-PMC6996017 before citing). `ADHD`
+⚠ Adolescents and young adults with ADHD show a **disproportionate** accuracy drop as working-memory
+load rises — a significant diagnosis-by-load interaction (Mukherjee et al., 2021, *NeuroImage:
+Clinical* 30). The draft credited this to "Karalunas et al." and then, after the first correction, to
+Roberts, Milich & Fillmore — whose abstract reports **no** group difference in load-driven disruption
+on the working-memory task. Both were wrong; this one was checked against the paper's own result. `ADHD`
 → **Rules:** max 3–5 items per list; one concept per paragraph; never more than one decision at a time.
 
-**Incremental presentation and external cues reduce load.** `ADHD`
-External storage, cues, and incrementally added information reduce working-memory load (Salari et
-al., *Neural basis of working memory in ADHD: Load versus complexity*, NeuroImage: Clinical, 2021;
-Martinussen et al., 2005 meta-analysis).
+**Incremental presentation and external cues reduce load.** `general working memory`
+⚠ **Retagged, and its ADHD sourcing withdrawn.** No ADHD study tests cues or incremental presentation
+directly. Mukherjee's sentence to that effect is in his *Introduction*, attributed to unspecified
+"earlier work" — not his result — and Martinussen et al. (2005) is a diagnostic meta-analysis that
+never mentions cues. This is inference from general cognitive-load reasoning, labelled as such.
 → **Rules:** numbered steps (the numbers *are* the external cues); progress restated across turns;
 checklists over prose.
 
@@ -80,7 +103,9 @@ sentences; never bury the action item mid-paragraph.
 
 **Extraneous content is not neutral — it destroys held information.** `general working memory` + `borrowed`
 Working-memory content is abandoned to make room for new stimuli; extraneous cognitive load directly
-harms task performance (Sweller, intrinsic vs. extraneous load). ⚠ The code-presentation
+harms task performance (**Sweller & Chandler**, 1994, *Cognition and Instruction* 12(3) — ⚠ the draft
+cited a bare "Sweller"; the 1988 paper does not contain the words "intrinsic" or "extraneous" and was
+removed repo-wide). ⚠ The code-presentation
 application — Speicher & Chandrasekar, *Theoretical basis for code presentation: A case for cognitive
 load*, arXiv:2511.14636 — studies **blind and low-vision developers, not ADHD**. It is sound CLT
 reasoning borrowed from an adjacent accessibility population and must be labelled as such.
@@ -97,24 +122,35 @@ numbered; each step independently actionable.
 ⚠ Working-memory weaknesses in ADHD manifest as context-switching problems and difficulty
 remembering what one was doing — **Liebel, Langlois & Gama**, *Challenges, Strengths, and Strategies
 of Software Engineers with ADHD: A Case Study*, ICSE-SEIS 2024, arXiv:2312.05029. (The planning draft
-cited this as "Gama et al." three times; Gama is the third author.) ⚠ The ~23-minute
-interruption-recovery figure is **Gloria Mark's** work at UC Irvine, not an APA original — cite Mark.
+cited this as "Gama et al." three times; Gama is the third author.) ⚠ **The "~23 minutes to recover
+from an interruption" figure was removed entirely.** It has no primary source — it traces to an
+unpublished 2006 interview, and the CHI 2008 paper most often cited for it reports the *opposite*,
+that interrupted tasks were completed faster. The claim now rests on Liebel et al. alone, which is
+enough: it is ADHD-specific and it is real.
 → **Features:** automatic per-project checkpoints; `/squirrel:pickup`; a one-line "resume available"
 notice at session start.
 
-**Hyperfocus has a stopping problem.** `ADHD`
-ADHD developers tend toward over-engineering enjoyable tasks and have trouble stopping, tied to
-response-inhibition regulation (Liebel et al., arXiv:2312.05029).
+**Starting and finishing is where the difficulty lands.** `ADHD`
+⚠ **The "over-engineering enjoyable tasks" claim was retired.** It is Liebel et al. *quoting* Gama &
+Lacerda (2023) — someone else's finding — and Gama & Lacerda's own abstract does not contain it. What
+is Liebel et al.'s own case-study result, coded from their interviews, is that *Doing Boring Tasks* and
+*Starting and Finishing* are the reported challenges, tied to response-inhibition regulation.
 → **Rule:** the scope guard — when the conversation drifts from the declared task, flag it in ONE
-line and offer to park it. Never lecture.
+line and offer to park it. Never lecture. The step from "difficulty stopping a task" to "drifting off
+the declared one" is an **inference**, not a measured result, and `RESEARCH.md` says so.
 
-**ADHD blurs the memory of one's own accomplishments.** `ADHD` (practitioner + case-study accounts)
-Memory issues blur the personal success record, feeding demotivation.
-→ **Feature:** the Done log; `/squirrel:pickup` opens with recent wins.
+**Negative memory bias.** `ADHD`
+⚠ The draft claimed "ADHD blurs the memory of one's own accomplishments" on the strength of
+"practitioner accounts". No source supports that framing. What is supported is narrower and adjacent:
+a negative memory bias associated with ADHD symptom severity (Vrijsen et al., 2018, *ADHD* 10(2)) —
+measured in a non-clinical, dimensionally scored sample, which `RESEARCH.md` states plainly.
+→ **Feature:** the Done log; `/squirrel:pickup` opens with recent wins. The feature stands on the
+narrower claim; it did not need the overreach.
 
 **Time blindness breaks estimation.** `ADHD`
 Time-discrimination difficulty affects deadline management and estimation (Liebel et al.).
-Practitioner guidance converges on task atomicity: units of ≤45 minutes.
+⚠ The ≤45-minute task-atomicity figure has **no** convergent source — published practitioner guidance
+ranges from 15 to 60 minutes. It is a **design choice**, labelled as one, not a finding.
 → **Rules:** every Phase-1 step in `/squirrel:plan` carries a concrete estimate and must be ≤45 min;
 concrete time language everywhere.
 
