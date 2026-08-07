@@ -1,0 +1,10 @@
+# The plugin auto-approves writes to its own checkpoint directory
+
+Checkpoints only pay off if they are already written when an interruption arrives, which means Claude has to update them as work completes rather than when asked. Every such update is a `Write` tool call, and a permission prompt per completed step would make an anti-interruption plugin the loudest source of interruptions in the session. Plugins cannot pre-grant permissions — a plugin's `settings.json` accepts only `agent` and `subagentStatusLine` — so we use a `PreToolUse` hook whose `if` field matches `Write($HOME/.claude/squirrel/checkpoints/**)` and returns `permissionDecision: "allow"`. The `if` field uses permission-rule syntax, so the path gate is declarative and evaluated before our script runs.
+
+## Consequences
+
+- **A plugin auto-approves its own file writes.** This is the kind of thing a security reviewer must find documented rather than discover in `hooks.json`, so README states it under privacy alongside the no-telemetry claim. The scope is one directory the plugin owns; nothing else is auto-approved, and the `if` gate means the hook cannot widen its own scope at runtime.
+- **"Silently" was the wrong word in the spec and is corrected everywhere.** Tool calls are always visible in the transcript. What we can guarantee is no prose about it in the response, not invisibility. Promising silence would have been a promise we cannot keep.
+- **Write frequency is capped** at one checkpoint update per turn, and only when `Doing` or `Next` actually changed. Without a cap, "whenever a meaningful unit of work completes" becomes a write per step.
+- Users who never want this can delete the hook from the installed plugin, at the cost of a permission prompt per checkpoint update.
