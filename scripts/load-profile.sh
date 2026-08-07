@@ -6,6 +6,18 @@
 #   - the user's ~/.claude/squirrel/profile.md, if it exists, with a
 #     line stating its fields override the output style's defaults; or
 #     a single short line suggesting /squirrel:init if it does not.
+#   - the literal `cwd` this hook was invoked with, as
+#     "Session working directory: <cwd>" (ADR-0005, amended, cycle 3
+#     BLOCKER fix: /squirrel:off and /squirrel:on need this exact string
+#     to write a sentinel the check-off-flag.sh hook can later match
+#     against ITS OWN `cwd` - a value the model computes itself, e.g. by
+#     running a shell command, can disagree with that even on a healthy
+#     machine (a symlinked project path, a trailing slash, a different
+#     shell context), and the failure is silent: the sentinel just never
+#     matches. This line is ALWAYS emitted, even when `cwd` is empty, so
+#     the skill has a definite, always-present "missing or empty" case to
+#     branch on - the same discipline `/squirrel:pickup` already applies
+#     to the checkpoint-path line below).
 #   - the RESOLVED, absolute checkpoint path for this project's `cwd`
 #     (tech-lead Decision 1: the model cannot compute the project-slug
 #     algorithm itself, so the path must be handed to it, always, even
@@ -376,6 +388,7 @@ $profile_body"
 
   context="$context
 
+Session working directory: $cwd
 Project checkpoint path: $checkpoint_file"
 
   if [ -n "$home_dir" ] && [ -f "$checkpoint_file" ]; then

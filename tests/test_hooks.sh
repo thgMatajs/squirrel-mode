@@ -1680,4 +1680,604 @@ else
 fi
 assert_eq "yes" "$fp34_leaks" "FAILURE PROOF (scenario 34): a cap_profile_body mutant with strip_incomplete_utf8_tail removed must leave the dangling euro lead byte (0xE2) in raw output when the byte cap lands mid-character - proving scenario 34's zero-count assertion is not vacuous"
 
+# ==========================================================================
+# 38. check-off-flag.sh - ADR-0005 (amended): a PENDING.<random> sentinel
+#     whose contents match THIS invocation's cwd is claimed (renamed to
+#     off/<session_id>), and the counter-instruction fires on the SAME
+#     invocation that does the claiming - not merely on some later
+#     prompt. A single call captures both stdout and the exit code, so
+#     the claim and the injection are proven to come from one call, not
+#     two calls that would let the first one's side effect quietly
+#     satisfy the second.
+# ==========================================================================
+home38=$(new_home)
+mkdir -p "$home38/.claude/squirrel/off"
+cwd38="$home38/project-pending-match-38"
+pending38="$home38/.claude/squirrel/off/PENDING.matchtoken38"
+printf '%s\n' "$cwd38" >"$pending38"
+stdin38=$(printf '{"session_id":"sess-pending-38","cwd":"%s"}' "$cwd38")
+
+if out38=$(printf '%s' "$stdin38" | HOME="$home38" "$check_off_flag_script" 2>/dev/null); then
+  exit38=0
+else
+  exit38=$?
+fi
+assert_eq "0" "$exit38" "check-off-flag.sh must exit 0 for the single invocation that claims a matching PENDING sentinel"
+assert_contains "$out38" "squirrel-mode is OFF" "ADR-0005: the counter-instruction must fire on the SAME invocation that claims a matching PENDING sentinel, not merely on some later prompt"
+assert_file_exists "$home38/.claude/squirrel/off/sess-pending-38" "ADR-0005: a matching PENDING sentinel must be renamed to off/<session_id>"
+assert_file_absent "$pending38" "ADR-0005: the original PENDING sentinel must no longer exist after being claimed"
+
+# ==========================================================================
+# 39. check-off-flag.sh - ADR-0005: a PENDING sentinel whose recorded cwd
+#     does NOT match this invocation's cwd must NOT be claimed - no
+#     rename, no off/<session_id> flag, no counter-instruction.
+# ==========================================================================
+home39=$(new_home)
+mkdir -p "$home39/.claude/squirrel/off"
+cwd39_actual="$home39/project-real-39"
+cwd39_pending="$home39/project-different-39"
+pending39="$home39/.claude/squirrel/off/PENDING.mismatch39"
+printf '%s\n' "$cwd39_pending" >"$pending39"
+stdin39=$(printf '{"session_id":"sess-mismatch-39","cwd":"%s"}' "$cwd39_actual")
+
+exit39=$(capture_exit "$check_off_flag_script" "$home39" "$stdin39")
+assert_eq "0" "$exit39" "check-off-flag.sh must exit 0 when a PENDING sentinel's cwd does not match this invocation's cwd"
+
+out39=$(capture_stdout "$check_off_flag_script" "$home39" "$stdin39")
+assert_eq "" "$out39" "ADR-0005: a cwd-mismatched PENDING sentinel must not be claimed, so no counter-instruction fires"
+assert_file_exists "$pending39" "ADR-0005: a cwd-mismatched PENDING sentinel must survive untouched (not renamed)"
+assert_file_absent "$home39/.claude/squirrel/off/sess-mismatch-39" "ADR-0005: no off/<session_id> flag must be created from a cwd-mismatched PENDING sentinel"
+
+# ==========================================================================
+# 40. check-off-flag.sh - ADR-0005: two PENDING sentinels for different
+#     directories present at once - only the one matching THIS
+#     invocation's cwd is claimed; the other is left exactly as it was.
+# ==========================================================================
+home40=$(new_home)
+mkdir -p "$home40/.claude/squirrel/off"
+cwd40_a="$home40/project-a-40"
+cwd40_b="$home40/project-b-40"
+pending40_a="$home40/.claude/squirrel/off/PENDING.dirA40"
+pending40_b="$home40/.claude/squirrel/off/PENDING.dirB40"
+printf '%s\n' "$cwd40_a" >"$pending40_a"
+printf '%s\n' "$cwd40_b" >"$pending40_b"
+stdin40=$(printf '{"session_id":"sess-two-pending-40","cwd":"%s"}' "$cwd40_b")
+
+exit40=$(capture_exit "$check_off_flag_script" "$home40" "$stdin40")
+assert_eq "0" "$exit40" "check-off-flag.sh must exit 0 with two competing PENDING sentinels present"
+
+assert_file_absent "$pending40_b" "ADR-0005: the PENDING sentinel matching THIS invocation's cwd must be claimed (removed by rename)"
+assert_file_exists "$pending40_a" "ADR-0005: a PENDING sentinel for a DIFFERENT directory must be left untouched when another one matches"
+assert_file_exists "$home40/.claude/squirrel/off/sess-two-pending-40" "ADR-0005: the matching PENDING sentinel must be renamed to off/<session_id>"
+
+# ==========================================================================
+# 41. check-off-flag.sh - ADR-0005: a matching CLEAR sentinel removes an
+#     existing off/<session_id> flag, and the deletion happens before the
+#     existence check in the SAME invocation (no counter-instruction from
+#     that same call either).
+# ==========================================================================
+home41=$(new_home)
+mkdir -p "$home41/.claude/squirrel/off"
+touch "$home41/.claude/squirrel/off/sess-clear-41"
+cwd41="$home41/project-clear-41"
+clear41="$home41/.claude/squirrel/off/CLEAR.token41"
+printf '%s\n' "$cwd41" >"$clear41"
+stdin41=$(printf '{"session_id":"sess-clear-41","cwd":"%s"}' "$cwd41")
+
+if out41=$(printf '%s' "$stdin41" | HOME="$home41" "$check_off_flag_script" 2>/dev/null); then
+  exit41=0
+else
+  exit41=$?
+fi
+assert_eq "0" "$exit41" "check-off-flag.sh must exit 0 for the single invocation that claims a matching CLEAR sentinel"
+assert_eq "" "$out41" "ADR-0005: once a matching CLEAR sentinel removes the off flag, no counter-instruction must fire, even on the claiming invocation itself"
+assert_file_absent "$home41/.claude/squirrel/off/sess-clear-41" "ADR-0005: a matching CLEAR sentinel must delete the existing off/<session_id> flag"
+assert_file_absent "$clear41" "ADR-0005: the CLEAR sentinel itself must be deleted once claimed"
+
+# ==========================================================================
+# 42. check-off-flag.sh - ADR-0005: a symlinked sentinel must be ignored
+#     outright (same posture as allow-checkpoint.sh's own `[ -L ]`
+#     defence), regardless of what it points at. Two sub-cases: a
+#     symlinked PENDING and a symlinked CLEAR, both pointing at a file
+#     whose contents WOULD otherwise match this invocation's cwd exactly
+#     - proving the rejection is the symlink check itself, not a content
+#     mismatch.
+# ==========================================================================
+home42=$(new_home)
+mkdir -p "$home42/.claude/squirrel/off"
+cwd42="$home42/project-symlink-42"
+real_pending42="$home42/.claude/squirrel/real-pending-content-42"
+printf '%s\n' "$cwd42" >"$real_pending42"
+ln -s "$real_pending42" "$home42/.claude/squirrel/off/PENDING.symlinked42"
+stdin42a=$(printf '{"session_id":"sess-symlink-pending-42","cwd":"%s"}' "$cwd42")
+
+exit42a=$(capture_exit "$check_off_flag_script" "$home42" "$stdin42a")
+assert_eq "0" "$exit42a" "check-off-flag.sh must exit 0 with a symlinked PENDING sentinel present"
+out42a=$(capture_stdout "$check_off_flag_script" "$home42" "$stdin42a")
+assert_eq "" "$out42a" "ADR-0005: a symlinked PENDING sentinel must be ignored even when its target's content matches this invocation's cwd exactly"
+assert_file_exists "$home42/.claude/squirrel/off/PENDING.symlinked42" "ADR-0005: a symlinked PENDING sentinel must survive untouched, never renamed"
+assert_file_absent "$home42/.claude/squirrel/off/sess-symlink-pending-42" "ADR-0005: a symlinked PENDING sentinel must never result in a claimed off/<session_id> flag"
+
+touch "$home42/.claude/squirrel/off/sess-symlink-clear-42"
+real_clear42="$home42/.claude/squirrel/real-clear-content-42"
+printf '%s\n' "$cwd42" >"$real_clear42"
+ln -s "$real_clear42" "$home42/.claude/squirrel/off/CLEAR.symlinked42"
+stdin42b=$(printf '{"session_id":"sess-symlink-clear-42","cwd":"%s"}' "$cwd42")
+
+exit42b=$(capture_exit "$check_off_flag_script" "$home42" "$stdin42b")
+assert_eq "0" "$exit42b" "check-off-flag.sh must exit 0 with a symlinked CLEAR sentinel present"
+out42b=$(capture_stdout "$check_off_flag_script" "$home42" "$stdin42b")
+assert_contains "$out42b" "squirrel-mode is OFF" "ADR-0005: a symlinked CLEAR sentinel must be ignored, leaving the existing off/<session_id> flag (and its counter-instruction) in place"
+assert_file_exists "$home42/.claude/squirrel/off/sess-symlink-clear-42" "ADR-0005: a symlinked CLEAR sentinel must never delete an existing off/<session_id> flag"
+assert_file_exists "$home42/.claude/squirrel/off/CLEAR.symlinked42" "ADR-0005: a symlinked CLEAR sentinel must survive untouched, never deleted"
+
+# ==========================================================================
+# 43. check-off-flag.sh - ADR-0005: when session_id sanitisation fails,
+#     every sentinel under off/ - PENDING, CLEAR, and an existing
+#     off/<session_id> flag belonging to some other session - must be
+#     left completely untouched, for a later, valid invocation.
+# ==========================================================================
+home43=$(new_home)
+mkdir -p "$home43/.claude/squirrel/off"
+cwd43="$home43/project-sanitize-fail-43"
+pending43="$home43/.claude/squirrel/off/PENDING.sanitizefail43"
+printf '%s\n' "$cwd43" >"$pending43"
+clear43="$home43/.claude/squirrel/off/CLEAR.sanitizefail43b"
+printf '%s\n' "$cwd43" >"$clear43"
+touch "$home43/.claude/squirrel/off/existing-flag-43"
+stdin43=$(printf '{"session_id":"../traversal-attempt-43","cwd":"%s"}' "$cwd43")
+
+exit43=$(capture_exit "$check_off_flag_script" "$home43" "$stdin43")
+assert_eq "0" "$exit43" "check-off-flag.sh must exit 0 when session_id sanitisation fails"
+out43=$(capture_stdout "$check_off_flag_script" "$home43" "$stdin43")
+assert_eq "" "$out43" "check-off-flag.sh must print nothing when session_id sanitisation fails"
+assert_file_exists "$pending43" "ADR-0005: a sanitisation failure must leave a pending PENDING sentinel untouched for a later, valid invocation"
+assert_file_exists "$clear43" "ADR-0005: a sanitisation failure must leave a pending CLEAR sentinel untouched for a later, valid invocation"
+assert_file_exists "$home43/.claude/squirrel/off/existing-flag-43" "ADR-0005: a sanitisation failure must not disturb an existing off/<session_id> flag belonging to some other session"
+
+# ==========================================================================
+# FAILURE PROOFS for scenarios 39 and 41 (Definition-of-done proofs:
+# "PENDING cwd-mismatch not claimed" and "CLEAR removing a flag").
+# ==========================================================================
+
+# --- Failure proof for scenario 39: the cwd comparison in claim_pending
+# is what actually keeps a mismatched PENDING sentinel from being
+# claimed. Reintroduces a claim_pending that claims UNCONDITIONALLY,
+# ignoring cwd entirely, and confirms the mismatched sentinel from
+# scenario 39's own fixture gets claimed anyway.
+# ==========================================================================
+fp39_script=$(make_script_scratch "$check_off_flag_script")
+# shellcheck disable=SC2016 # single-quoted deliberately throughout this
+# block: literal source text/replacement for check-off-flag.sh.
+fp39_start=$(line_of "$fp39_script" 'claim_pending() {')
+[ -n "$fp39_start" ] || fp39_start=0
+fp39_end=$(line_of_after "$fp39_script" "$fp39_start" '}')
+[ -n "$fp39_end" ] || fp39_end=0
+# shellcheck disable=SC2016
+fp39_unconditional_claim='claim_pending() {
+  off_dir=$1
+  session_id=$2
+  cwd=$3
+  for f in "$off_dir"/PENDING.*; do
+    [ -e "$f" ] || continue
+    mv -- "$f" "$off_dir/$session_id" 2>/dev/null || true
+  done
+  return 0
+}'
+replace_block "$fp39_script" "$fp39_start" "$fp39_end" "$fp39_unconditional_claim"
+
+fp39_home=$(new_home)
+mkdir -p "$fp39_home/.claude/squirrel/off"
+fp39_cwd_actual="$fp39_home/project-real-fp39"
+fp39_cwd_pending="$fp39_home/project-different-fp39"
+fp39_pending="$fp39_home/.claude/squirrel/off/PENDING.mismatchfp39"
+printf '%s\n' "$fp39_cwd_pending" >"$fp39_pending"
+fp39_stdin=$(printf '{"session_id":"sess-mismatch-fp39","cwd":"%s"}' "$fp39_cwd_actual")
+capture_stdout "$fp39_script" "$fp39_home" "$fp39_stdin" >/dev/null
+
+if [ -f "$fp39_home/.claude/squirrel/off/sess-mismatch-fp39" ]; then
+  fp39_wrongly_claimed=yes
+else
+  fp39_wrongly_claimed=no
+fi
+assert_eq "yes" "$fp39_wrongly_claimed" "FAILURE PROOF (scenario 39): a claim_pending mutant with the cwd comparison removed must claim a cwd-MISMATCHED PENDING sentinel anyway - proving scenario 39's 'must not be claimed' assertion is not vacuous"
+
+# --- Failure proof for scenario 41: claim_clear is what actually removes
+# an existing off/<session_id> flag on a matching CLEAR sentinel.
+# Reintroduces a decide() with the claim_clear call removed entirely (the
+# function stays defined but unused), so a matching CLEAR sentinel is
+# left inert and the flag survives.
+# ==========================================================================
+fp41_script=$(make_script_scratch "$check_off_flag_script")
+# shellcheck disable=SC2016
+fp41_line=$(line_of "$fp41_script" '  claim_clear "$off_dir" "$session_id" "$cwd"')
+[ -n "$fp41_line" ] || fp41_line=0
+replace_line "$fp41_script" "$fp41_line" ''
+
+fp41_home=$(new_home)
+mkdir -p "$fp41_home/.claude/squirrel/off"
+touch "$fp41_home/.claude/squirrel/off/sess-clear-fp41"
+fp41_cwd="$fp41_home/project-clear-fp41"
+fp41_clear="$fp41_home/.claude/squirrel/off/CLEAR.tokenfp41"
+printf '%s\n' "$fp41_cwd" >"$fp41_clear"
+fp41_stdin=$(printf '{"session_id":"sess-clear-fp41","cwd":"%s"}' "$fp41_cwd")
+capture_stdout "$fp41_script" "$fp41_home" "$fp41_stdin" >/dev/null
+
+if [ -f "$fp41_home/.claude/squirrel/off/sess-clear-fp41" ]; then
+  fp41_flag_survived=yes
+else
+  fp41_flag_survived=no
+fi
+assert_eq "yes" "$fp41_flag_survived" "FAILURE PROOF (scenario 41): a decide() mutant with the claim_clear call removed must leave an existing off/<session_id> flag in place despite a matching CLEAR sentinel - proving scenario 41's 'must delete the existing flag' assertion is not vacuous"
+
+# ==========================================================================
+# 44. load-profile.sh - cycle-3 BLOCKER fix: additionalContext must
+#     contain the literal `cwd` this hook was invoked with, as a
+#     "Session working directory: <cwd>" line - the exact value
+#     /squirrel:off and /squirrel:on now write into their sentinels
+#     verbatim, so a model-computed value (e.g. by running a shell
+#     command itself) can never disagree with what check-off-flag.sh
+#     compares against. Parallel to scenarios 3/4's own checkpoint-path
+#     checks.
+# ==========================================================================
+home44=$(new_home)
+cwd44="$home44/project-cwd-line-44"
+stdin44=$(printf '{"cwd":"%s"}' "$cwd44")
+
+out44=$(capture_stdout "$load_profile_script" "$home44" "$stdin44")
+ctx44=$(extract_ctx "$out44")
+assert_contains "$ctx44" "Session working directory: $cwd44" "BLOCKER fix: additionalContext must contain the literal 'Session working directory: <cwd>' line, matching the cwd this invocation was given verbatim"
+
+exit44=$(capture_exit "$load_profile_script" "$home44" "$stdin44")
+assert_eq "0" "$exit44" "load-profile.sh must exit 0 while emitting the Session working directory line"
+
+# ==========================================================================
+# 45. load-profile.sh - cycle-3 BLOCKER fix: the "Session working
+#     directory:" line is emitted deterministically even when `cwd` is
+#     empty or absent from stdin entirely, so the skill has a definite,
+#     ALWAYS-PRESENT line to branch a "missing or empty" case on -
+#     mirroring how /squirrel:pickup handles an absent checkpoint-path
+#     line - rather than a line that sometimes does not exist at all.
+# ==========================================================================
+home45=$(new_home)
+
+out45_empty=$(capture_stdout "$load_profile_script" "$home45" '{"cwd":""}')
+ctx45_empty=$(extract_ctx "$out45_empty")
+assert_contains "$ctx45_empty" "Session working directory:" "BLOCKER fix: the Session working directory line must still be emitted when cwd is an empty string"
+
+out45_absent=$(capture_stdout "$load_profile_script" "$home45" '{"session_id":"s"}')
+ctx45_absent=$(extract_ctx "$out45_absent")
+assert_contains "$ctx45_absent" "Session working directory:" "BLOCKER fix: the Session working directory line must still be emitted when cwd is absent from stdin entirely"
+
+# --- Failure proof for scenario 44: confirms the assertion is actually
+# bound to the real emission site, not some other coincidental text.
+# ==========================================================================
+fp44_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fp44_line=$(line_of "$fp44_script" 'Session working directory: $cwd')
+[ -n "$fp44_line" ] || fp44_line=0
+replace_line "$fp44_script" "$fp44_line" ''
+
+fp44_home=$(new_home)
+fp44_cwd="$fp44_home/project-cwd-line-fp44"
+fp44_stdin=$(printf '{"cwd":"%s"}' "$fp44_cwd")
+fp44_ctx=$(extract_ctx "$(capture_stdout "$fp44_script" "$fp44_home" "$fp44_stdin")")
+assert_not_contains "$fp44_ctx" "Session working directory:" "FAILURE PROOF (scenario 44): removing the 'Session working directory: \$cwd' line from a scratch copy must make it disappear from additionalContext - proving scenario 44 is not vacuous"
+
+# ==========================================================================
+# 46. check-off-flag.sh - cycle-3 MAJOR fix: a PENDING sentinel with TWO
+#     trailing newline bytes must NOT be claimed. Reproduces the
+#     reviewer's exact repro: `printf '%s\n\n' "$CWD" > off/PENDING.x`.
+#     Before the fix, both read_sentinel_exact's protective "X" trick
+#     and trim_one_trailing_newline's "at most one" logic were defeated
+#     by the SECOND command substitution at the call site, which
+#     stripped every trailing newline unconditionally.
+# ==========================================================================
+home46=$(new_home)
+mkdir -p "$home46/.claude/squirrel/off"
+cwd46="$home46/project-two-trailing-nl-46"
+pending46="$home46/.claude/squirrel/off/PENDING.twonl46"
+printf '%s\n\n' "$cwd46" >"$pending46"
+stdin46=$(printf '{"session_id":"sess-twonl-46","cwd":"%s"}' "$cwd46")
+
+exit46=$(capture_exit "$check_off_flag_script" "$home46" "$stdin46")
+assert_eq "0" "$exit46" "check-off-flag.sh must exit 0 for a PENDING sentinel with two trailing newlines"
+out46=$(capture_stdout "$check_off_flag_script" "$home46" "$stdin46")
+assert_eq "" "$out46" "MAJOR fix: a PENDING sentinel with TWO trailing newlines must NOT be claimed - its trimmed contents (after removing only one) still end in a newline byte the cwd itself never has"
+assert_file_exists "$pending46" "MAJOR fix: a PENDING sentinel with two trailing newlines must survive untouched, not be renamed"
+assert_file_absent "$home46/.claude/squirrel/off/sess-twonl-46" "MAJOR fix: no off/<session_id> flag must be created from a PENDING sentinel with two trailing newlines"
+
+# ==========================================================================
+# 47. check-off-flag.sh - cycle-3 MAJOR fix: the same repro as scenario
+#     46, with THREE trailing newlines - "at most one trimmed" must hold
+#     for any number greater than one, not merely for exactly two.
+# ==========================================================================
+home47=$(new_home)
+mkdir -p "$home47/.claude/squirrel/off"
+cwd47="$home47/project-three-trailing-nl-47"
+pending47="$home47/.claude/squirrel/off/PENDING.threenl47"
+printf '%s\n\n\n' "$cwd47" >"$pending47"
+stdin47=$(printf '{"session_id":"sess-threenl-47","cwd":"%s"}' "$cwd47")
+
+exit47=$(capture_exit "$check_off_flag_script" "$home47" "$stdin47")
+assert_eq "0" "$exit47" "check-off-flag.sh must exit 0 for a PENDING sentinel with three trailing newlines"
+out47=$(capture_stdout "$check_off_flag_script" "$home47" "$stdin47")
+assert_eq "" "$out47" "MAJOR fix: a PENDING sentinel with THREE trailing newlines must NOT be claimed"
+assert_file_exists "$pending47" "MAJOR fix: a PENDING sentinel with three trailing newlines must survive untouched"
+
+# ==========================================================================
+# 48. check-off-flag.sh - cycle-3 MAJOR fix sanity: exactly ONE trailing
+#     newline (the normal, expected case /squirrel:off itself writes)
+#     must still be claimed - the fix must not become overzealous and
+#     start rejecting the ordinary case along with the malformed one.
+# ==========================================================================
+home48=$(new_home)
+mkdir -p "$home48/.claude/squirrel/off"
+cwd48="$home48/project-one-trailing-nl-48"
+pending48="$home48/.claude/squirrel/off/PENDING.onenl48"
+printf '%s\n' "$cwd48" >"$pending48"
+stdin48=$(printf '{"session_id":"sess-onenl-48","cwd":"%s"}' "$cwd48")
+
+out48=$(capture_stdout "$check_off_flag_script" "$home48" "$stdin48")
+assert_contains "$out48" "squirrel-mode is OFF" "MAJOR fix sanity: a PENDING sentinel with EXACTLY one trailing newline must still be claimed"
+assert_file_exists "$home48/.claude/squirrel/off/sess-onenl-48" "MAJOR fix sanity: exactly one trailing newline must still result in a claimed off/<session_id> flag"
+assert_file_absent "$pending48" "MAJOR fix sanity: the claimed PENDING sentinel with exactly one trailing newline must no longer exist as PENDING.*"
+
+# --- Failure proof for scenario 46: reproduces the HISTORICAL BUG'S
+# VISIBLE EFFECT - a single unconditional command substitution collapsing
+# ALL trailing newlines, exactly what happened when the old caller wrapped
+# an already-safe read in a second `$(...)` - and confirms it wrongly
+# claims the two-trailing-newline sentinel scenario 46 uses. Patches only
+# claim_pending's own call to read_sentinel_trimmed (the first occurrence
+# in the file), leaving the champion-precompute logic untouched and
+# correct, to isolate the proof to the exact call site the bug lived in.
+# ==========================================================================
+fp46_script=$(make_script_scratch "$check_off_flag_script")
+# shellcheck disable=SC2016
+fp46_line=$(line_of "$fp46_script" '    read_sentinel_trimmed "$f"')
+[ -n "$fp46_line" ] || fp46_line=0
+# shellcheck disable=SC2016
+replace_line "$fp46_script" "$fp46_line" '    SENTINEL_CONTENTS=$(cat "$f" 2>/dev/null)'
+
+fp46_home=$(new_home)
+mkdir -p "$fp46_home/.claude/squirrel/off"
+fp46_cwd="$fp46_home/project-two-trailing-nl-fp46"
+fp46_pending="$fp46_home/.claude/squirrel/off/PENDING.twonlfp46"
+printf '%s\n\n' "$fp46_cwd" >"$fp46_pending"
+fp46_stdin=$(printf '{"session_id":"sess-twonl-fp46","cwd":"%s"}' "$fp46_cwd")
+capture_stdout "$fp46_script" "$fp46_home" "$fp46_stdin" >/dev/null
+
+if [ -f "$fp46_home/.claude/squirrel/off/sess-twonl-fp46" ]; then
+  fp46_wrongly_claimed=yes
+else
+  fp46_wrongly_claimed=no
+fi
+assert_eq "yes" "$fp46_wrongly_claimed" "FAILURE PROOF (scenario 46): a claim_pending mutant using a single unconditional command substitution (the historical bug's visible effect) must wrongly claim a two-trailing-newline PENDING sentinel - proving scenario 46's 'must not be claimed' assertion is not vacuous"
+
+# ==========================================================================
+# 49. check-off-flag.sh - ADR-0005 (amended) MAJOR fix: when a matching
+#     PENDING sentinel is NEWER than a matching CLEAR sentinel for the
+#     same cwd, PENDING wins - the session ends up OFF. This is the
+#     reviewer's exact repro (already off, /squirrel:on then
+#     /squirrel:off before any prompt) landing correctly this time: a
+#     fixed claim-order used to always let CLEAR win regardless of which
+#     one the user actually issued last.
+# ==========================================================================
+home49=$(new_home)
+mkdir -p "$home49/.claude/squirrel/off"
+cwd49="$home49/project-newer-wins-49"
+clear49="$home49/.claude/squirrel/off/CLEAR.older49"
+pending49="$home49/.claude/squirrel/off/PENDING.newer49"
+printf '%s\n' "$cwd49" >"$clear49"
+touch -t 202001010000 "$clear49" 2>/dev/null || touch -d "30 days ago" "$clear49" 2>/dev/null || true
+printf '%s\n' "$cwd49" >"$pending49"
+stdin49=$(printf '{"session_id":"sess-newerwins-49","cwd":"%s"}' "$cwd49")
+
+exit49=$(capture_exit "$check_off_flag_script" "$home49" "$stdin49")
+assert_eq "0" "$exit49" "check-off-flag.sh must exit 0 when both a PENDING and a CLEAR sentinel match the same cwd"
+out49=$(capture_stdout "$check_off_flag_script" "$home49" "$stdin49")
+assert_contains "$out49" "squirrel-mode is OFF" "MAJOR fix: ADR-0005 - when the PENDING sentinel is newer than the CLEAR sentinel, PENDING must win: the session ends up OFF"
+assert_file_exists "$home49/.claude/squirrel/off/sess-newerwins-49" "MAJOR fix: the newer PENDING sentinel must be claimed (renamed to off/<session_id>) when it outdates a competing CLEAR sentinel"
+assert_file_absent "$pending49" "MAJOR fix: the winning PENDING sentinel must no longer exist as PENDING.* after being claimed"
+assert_file_absent "$clear49" "MAJOR fix: the losing (older) CLEAR sentinel must be discarded, not left in place to re-fire on a later prompt"
+
+# ==========================================================================
+# 50. check-off-flag.sh - ADR-0005 (amended) MAJOR fix: the mirror of
+#     scenario 49 - when a matching CLEAR sentinel is NEWER than a
+#     matching PENDING sentinel for the same cwd, CLEAR wins - the
+#     session ends up ON, even though it was off going into this
+#     invocation.
+# ==========================================================================
+home50=$(new_home)
+mkdir -p "$home50/.claude/squirrel/off"
+touch "$home50/.claude/squirrel/off/sess-newerwins-50"
+cwd50="$home50/project-newer-wins-50"
+pending50="$home50/.claude/squirrel/off/PENDING.older50"
+clear50="$home50/.claude/squirrel/off/CLEAR.newer50"
+printf '%s\n' "$cwd50" >"$pending50"
+touch -t 202001010000 "$pending50" 2>/dev/null || touch -d "30 days ago" "$pending50" 2>/dev/null || true
+printf '%s\n' "$cwd50" >"$clear50"
+stdin50=$(printf '{"session_id":"sess-newerwins-50","cwd":"%s"}' "$cwd50")
+
+exit50=$(capture_exit "$check_off_flag_script" "$home50" "$stdin50")
+assert_eq "0" "$exit50" "check-off-flag.sh must exit 0 when both a PENDING and a CLEAR sentinel match the same cwd"
+out50=$(capture_stdout "$check_off_flag_script" "$home50" "$stdin50")
+assert_eq "" "$out50" "MAJOR fix: ADR-0005 - when the CLEAR sentinel is newer than the PENDING sentinel, CLEAR must win: the session ends up ON, even though it was off going into this invocation"
+assert_file_absent "$home50/.claude/squirrel/off/sess-newerwins-50" "MAJOR fix: the pre-existing off flag must be removed once the newer CLEAR sentinel wins"
+assert_file_absent "$clear50" "MAJOR fix: the winning CLEAR sentinel must be consumed (deleted) after claiming"
+assert_file_absent "$pending50" "MAJOR fix: the losing (older) PENDING sentinel must be discarded, not left in place to re-fire on a later prompt"
+
+# ==========================================================================
+# 51. check-off-flag.sh - ADR-0005 (amended) MAJOR fix: on an EXACT
+#     mtime tie between a matching PENDING and a matching CLEAR
+#     sentinel, PENDING wins - a user asking to turn squirrel-mode off
+#     is reporting the formatting is actively in their way, and that
+#     reading takes priority. `touch -r` forces the tie deterministically
+#     (no reliance on filesystem mtime resolution or timing races).
+# ==========================================================================
+home51=$(new_home)
+mkdir -p "$home51/.claude/squirrel/off"
+cwd51="$home51/project-newer-wins-tie-51"
+pending51="$home51/.claude/squirrel/off/PENDING.tie51"
+clear51="$home51/.claude/squirrel/off/CLEAR.tie51"
+printf '%s\n' "$cwd51" >"$pending51"
+printf '%s\n' "$cwd51" >"$clear51"
+touch -r "$pending51" "$clear51"
+stdin51=$(printf '{"session_id":"sess-tie-51","cwd":"%s"}' "$cwd51")
+
+exit51=$(capture_exit "$check_off_flag_script" "$home51" "$stdin51")
+assert_eq "0" "$exit51" "check-off-flag.sh must exit 0 when a PENDING and a CLEAR sentinel match the same cwd with an exact mtime tie"
+out51=$(capture_stdout "$check_off_flag_script" "$home51" "$stdin51")
+assert_contains "$out51" "squirrel-mode is OFF" "MAJOR fix: ADR-0005 - on an EXACT mtime tie between a matching PENDING and CLEAR sentinel, PENDING must win: the session ends up OFF"
+assert_file_exists "$home51/.claude/squirrel/off/sess-tie-51" "MAJOR fix: on a tie, the PENDING sentinel must be claimed"
+assert_file_absent "$clear51" "MAJOR fix: on a tie, the CLEAR sentinel must be discarded, not left in place"
+
+# ==========================================================================
+# 52. check-off-flag.sh - MINOR (missing coverage): a directory that
+#     happens to match the PENDING.* glob must be ignored outright, the
+#     same posture is_unclaimable_sentinel already takes for a symlink.
+# ==========================================================================
+home52=$(new_home)
+mkdir -p "$home52/.claude/squirrel/off"
+cwd52="$home52/project-dirsentinel-52"
+mkdir -p "$home52/.claude/squirrel/off/PENDING.dirshaped52"
+stdin52=$(printf '{"session_id":"sess-dirshaped-52","cwd":"%s"}' "$cwd52")
+
+exit52=$(capture_exit "$check_off_flag_script" "$home52" "$stdin52")
+assert_eq "0" "$exit52" "check-off-flag.sh must exit 0 when a directory happens to match the PENDING.* glob"
+out52=$(capture_stdout "$check_off_flag_script" "$home52" "$stdin52")
+assert_eq "" "$out52" "MINOR: a directory-shaped entry matching PENDING.* must be ignored, not treated as a sentinel"
+if [ -d "$home52/.claude/squirrel/off/PENDING.dirshaped52" ]; then
+  dirshaped52_survived=yes
+else
+  dirshaped52_survived=no
+fi
+assert_eq "yes" "$dirshaped52_survived" "MINOR: a directory-shaped PENDING.* entry must survive untouched (assert_file_exists uses '-f', which a directory fails, so this checks '-d' directly)"
+
+# ==========================================================================
+# 53. check-off-flag.sh - MINOR (missing coverage): an empty or entirely
+#     absent cwd must claim nothing, even against a sentinel whose own
+#     (malformed) content is also empty.
+# ==========================================================================
+home53=$(new_home)
+mkdir -p "$home53/.claude/squirrel/off"
+pending53="$home53/.claude/squirrel/off/PENDING.emptycwd53"
+printf '\n' >"$pending53"
+stdin53_empty=$(printf '{"session_id":"sess-emptycwd-53","cwd":""}')
+exit53_empty=$(capture_exit "$check_off_flag_script" "$home53" "$stdin53_empty")
+assert_eq "0" "$exit53_empty" "check-off-flag.sh must exit 0 when cwd is an empty string"
+out53_empty=$(capture_stdout "$check_off_flag_script" "$home53" "$stdin53_empty")
+assert_eq "" "$out53_empty" "MINOR: an empty cwd must claim nothing, even against a sentinel whose own trimmed content is also empty"
+assert_file_exists "$pending53" "MINOR: a sentinel must survive when the invocation's own cwd is empty"
+
+stdin53_absent=$(printf '{"session_id":"sess-emptycwd-53b"}')
+exit53_absent=$(capture_exit "$check_off_flag_script" "$home53" "$stdin53_absent")
+assert_eq "0" "$exit53_absent" "check-off-flag.sh must exit 0 when cwd is absent from stdin entirely"
+out53_absent=$(capture_stdout "$check_off_flag_script" "$home53" "$stdin53_absent")
+assert_eq "" "$out53_absent" "MINOR: an absent cwd must claim nothing"
+
+# ==========================================================================
+# 54. check-off-flag.sh - MINOR (missing coverage): a matching CLEAR
+#     sentinel with NO existing off/<session_id> flag to remove must
+#     still exit 0, print nothing, and still consume the sentinel.
+# ==========================================================================
+home54=$(new_home)
+mkdir -p "$home54/.claude/squirrel/off"
+cwd54="$home54/project-clear-noexisting-54"
+clear54="$home54/.claude/squirrel/off/CLEAR.noexisting54"
+printf '%s\n' "$cwd54" >"$clear54"
+stdin54=$(printf '{"session_id":"sess-clearnoexisting-54","cwd":"%s"}' "$cwd54")
+
+exit54=$(capture_exit "$check_off_flag_script" "$home54" "$stdin54")
+assert_eq "0" "$exit54" "MINOR: check-off-flag.sh must exit 0 for a matching CLEAR sentinel when no off/<session_id> flag exists to remove"
+out54=$(capture_stdout "$check_off_flag_script" "$home54" "$stdin54")
+assert_eq "" "$out54" "MINOR: no counter-instruction fires when a CLEAR sentinel is claimed and there was no flag to begin with"
+assert_file_absent "$clear54" "MINOR: the CLEAR sentinel itself must still be consumed even when there was no flag to remove"
+
+# ==========================================================================
+# 55. check-off-flag.sh - MINOR (missing coverage): a sentinel FILENAME
+#     containing a space and a shell metacharacter must still be
+#     processed correctly - file_path/filenames are opaque text here,
+#     the same posture allow-checkpoint.sh's own scenario 35 exercises.
+# ==========================================================================
+home55=$(new_home)
+mkdir -p "$home55/.claude/squirrel/off"
+cwd55="$home55/project-metachar-55"
+# Built from separately-quoted segments, exactly like allow-checkpoint.sh's
+# own scenario 35 fixtures, so the literal '$(' text is never live shell
+# syntax at any point in THIS test file either.
+# shellcheck disable=SC2016
+pending55="$home55/.claude/squirrel/off/PENDING.odd name"'$(x)'"55"
+printf '%s\n' "$cwd55" >"$pending55"
+stdin55=$(printf '{"session_id":"sess-metachar-55","cwd":"%s"}' "$cwd55")
+
+exit55=$(capture_exit "$check_off_flag_script" "$home55" "$stdin55")
+assert_eq "0" "$exit55" "MINOR: check-off-flag.sh must exit 0 for a sentinel filename containing a space and a shell metacharacter"
+out55=$(capture_stdout "$check_off_flag_script" "$home55" "$stdin55")
+assert_contains "$out55" "squirrel-mode is OFF" "MINOR: a PENDING sentinel whose FILENAME contains a space and a shell metacharacter must still be claimed normally when its content matches cwd"
+assert_file_exists "$home55/.claude/squirrel/off/sess-metachar-55" "MINOR: the odd-named PENDING sentinel must still be claimed (renamed) correctly"
+assert_file_absent "$pending55" "MINOR: the odd-named PENDING sentinel must no longer exist after being claimed"
+
+# ==========================================================================
+# 56. check-off-flag.sh - MINOR (missing coverage): off/<session_id>
+#     ITSELF is a symlink pointing outside off/ entirely. A matching
+#     CLEAR sentinel must unlink the symlink (never follow it), and the
+#     file it points at must survive completely untouched.
+# ==========================================================================
+home56=$(new_home)
+mkdir -p "$home56/.claude/squirrel/off" "$home56/outside-target-56"
+target56="$home56/outside-target-56/real-flag-56"
+touch "$target56"
+ln -s "$target56" "$home56/.claude/squirrel/off/sess-symlinkflag-56"
+cwd56="$home56/project-symlinkflag-56"
+clear56="$home56/.claude/squirrel/off/CLEAR.symlinkflag56"
+printf '%s\n' "$cwd56" >"$clear56"
+stdin56=$(printf '{"session_id":"sess-symlinkflag-56","cwd":"%s"}' "$cwd56")
+
+exit56=$(capture_exit "$check_off_flag_script" "$home56" "$stdin56")
+assert_eq "0" "$exit56" "MINOR: check-off-flag.sh must exit 0 when off/<session_id> itself is a symlink pointing outside off/"
+out56=$(capture_stdout "$check_off_flag_script" "$home56" "$stdin56")
+assert_eq "" "$out56" "MINOR: once the matching CLEAR sentinel removes a symlinked off/<session_id>, no counter-instruction must fire"
+assert_file_absent "$home56/.claude/squirrel/off/sess-symlinkflag-56" "MINOR: a symlinked off/<session_id> must itself be unlinked when a matching CLEAR sentinel claims it"
+assert_file_exists "$target56" "MINOR: unlinking a symlinked off/<session_id> must NEVER remove the file it points at"
+
+# ==========================================================================
+# 57. check-off-flag.sh - MINOR: no timing bound existed on this
+#     per-prompt hook. Measured (pre-existing, on the reviewer's
+#     machine): empty off/ 0.025s; 100 stale sentinels 0.39s; 200
+#     sentinels 0.73s - and pruning only happens at the 7-day threshold,
+#     so a growing off/ is the normal long-run state, not an edge case.
+#     100 PENDING/CLEAR-shaped sentinels (50/50, none matching this
+#     invocation's own cwd) exercise the full cost of this hook's
+#     per-prompt scan, including the newer-wins champion precompute
+#     added by the MAJOR fix above. Whole-second `date +%s` timestamps
+#     only (no GNU-only `%N`), matching scenario 33's own technique.
+# ==========================================================================
+home57=$(new_home)
+mkdir -p "$home57/.claude/squirrel/off"
+n57=1
+while [ "$n57" -le 50 ]; do
+  printf '/tmp/unrelated-dir-a-%s\n' "$n57" >"$home57/.claude/squirrel/off/PENDING.stale$n57"
+  printf '/tmp/unrelated-dir-b-%s\n' "$n57" >"$home57/.claude/squirrel/off/CLEAR.stale$n57"
+  n57=$((n57 + 1))
+done
+cwd57="$home57/project-timing-57"
+stdin57=$(printf '{"session_id":"sess-timing-57","cwd":"%s"}' "$cwd57")
+
+t0_57=$(date +%s)
+out57=$(capture_stdout "$check_off_flag_script" "$home57" "$stdin57")
+t1_57=$(date +%s)
+delta57=$((t1_57 - t0_57))
+
+exit57=$(capture_exit "$check_off_flag_script" "$home57" "$stdin57")
+assert_eq "0" "$exit57" "check-off-flag.sh must exit 0 with 100 stale PENDING/CLEAR-shaped sentinels under off/"
+assert_eq "" "$out57" "check-off-flag.sh must print nothing for a session with no matching sentinel, even with 100 unrelated stale sentinels present"
+
+if [ "$delta57" -le 3 ]; then
+  fast57=yes
+else
+  fast57=no
+fi
+assert_eq "yes" "$fast57" "MINOR timing bound: check-off-flag.sh must process 100 stale PENDING/CLEAR sentinels in a stated bound (3s or less; took ${delta57}s) on the hot path of every prompt, so a future change that makes this materially worse is caught"
+
 assert_report

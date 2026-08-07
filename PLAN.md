@@ -308,12 +308,29 @@ is no 1:1 mapping and the spec must not claim one.
 | # | Question | Sets |
 | :-- | :-- | :-- |
 | 1 | Language | `language` |
-| 2 | **What breaks your focus most?** (A: long text · B: disorganized · C: too many options) | `step_style`, `explanation_budget`, `extras_section`, `tone` |
+| 2 | **What breaks your focus most?** (see the value mapping below) | `step_style`, `explanation_budget`, `extras_section`, `tone` |
 | 3 | Where should the answer go? | `answer_position` |
 | 4 | Code first, or steps first? | `code_style` |
 | 5 | How long a list before it stops helping? | `max_list_items` |
 | 6 | One recommendation, or alternatives? | `options_per_answer` |
 | 7 | Recap progress and confirm topic switches? | `progress_recap`, `confirm_topic_switch` |
+
+**Question 2's value mapping is authoritative — do not improvise it.** The three answers describe
+different *modes* of overwhelm, and each maps to a distinct combination. If two answers produced the
+same values the question would be doing no work.
+
+| Answer | Overwhelm mode | `step_style` | `explanation_budget` | `extras_section` | `tone` |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| **A** — long walls of text | volume | `checklist` | 1 | `no` | `terse` |
+| **B** — jumps around, disorganized | structure | `numbered` | 3 | `yes` | `neutral` |
+| **C** — too many options at once | decision load | `numbered` | 2 | `no` | `neutral` |
+
+The reasoning, so a future edit does not undo it: A is drowning in words, so cut words and drop the
+Extra section. B can handle content but needs scaffolding, so keep a normal budget and allow a clearly
+labelled Extra — a reader who wants structure tolerates one more *labelled* section. C is paralysed by
+choice, so `extras_section: no` — an Extra section is one more thing to evaluate, which is exactly the
+load C is reporting. Answering C also strongly suggests `options_per_answer: 1` at question 6, but
+question 6 asks that directly and its answer wins.
 
 `/squirrel:tune` exposes all 11 fields individually — that is where the long tail is discoverable.
 
@@ -355,7 +372,8 @@ output, so apply the same treatment inbound.
 <the SINGLE first thing to do — concrete, startable in under 10 minutes>
 
 ## Breakdown
-1. <step — independently actionable>
+<steps in the form set by `step_style` — `numbered` gives 1./2./3., `checklist` gives - [ ] items —
+ each one independently actionable>
 (respect max_list_items; if more, group into phases and expand only phase 1)
 
 ## Priority
@@ -405,7 +423,7 @@ them.
 <the minimal version that already delivers value — days, not months>
 
 ## Plan
-Phase 1 — <name> (expand fully, numbered, respect max_list_items)
+Phase 1 — <name> (expand fully, in the form set by `step_style`, respect max_list_items)
 Phase 2 — <name> (one-line summary only)
 Phase 3 — <name> (one-line summary only)
 
