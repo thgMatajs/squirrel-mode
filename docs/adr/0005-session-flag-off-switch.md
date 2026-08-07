@@ -6,5 +6,9 @@ Because the base rules live in the system prompt ([ADR-0001](./0001-output-style
 
 - A hook runs on every prompt for the lifetime of the plugin, not only when disabled. It is a short shell script, but it is on the hot path of every message.
 - The flag is keyed by session, so it does not leak into other sessions or other projects — matching the "session only" scope the feature promises.
-- Flag files accumulate. The `SessionStart` hook prunes stale ones.
+- Flag files accumulate. The `SessionStart` hook prunes any older than **7 days**. The threshold is
+  arbitrary and deliberately generous: a flag outliving its session is inert, since the file is keyed
+  by `session_id` and no future session will ever match it, so the only cost of keeping one too long
+  is a stray file. Pruning too eagerly, on the other hand, could re-enable squirrel-mode underneath a
+  user who is still in the session that disabled it. Pruning never fails the hook.
 - `/plugin disable squirrel` plus `/clear` remains the hard off, and README documents it as such: it is the only path that truly removes the rules from the system prompt.

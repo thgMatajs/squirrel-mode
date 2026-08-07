@@ -205,7 +205,13 @@ fails if the tree is dirty — that is the drift check. Never hand-edit a GENERA
 
 - Location: `~/.claude/squirrel/profile.md` (ADR-0003). Never inside a repo — document the ignore
   pattern so users don't commit it by accident.
-- Plain markdown, human-editable, ~15 lines, 11 fields:
+- Plain markdown, human-editable, ~15 lines, 11 fields.
+- **The SessionStart hook caps what it injects at 100 lines / 4 KB**, truncating with a one-line
+  notice past that. The documented format is ~15 lines, so the cap is generous by any honest measure.
+  Two reasons: an uncapped profile is unbounded context bloat on every session start, and the injected
+  text is framed to the model as authoritative field overrides — so anything that can write this file
+  gets a persistent, privileged prompt-injection surface. The cap bounds the blast radius without
+  making the hook a security boundary it cannot be.
 
 ```markdown
 # squirrel-mode profile
@@ -226,7 +232,8 @@ tone: neutral              # neutral | warm | terse
 
 1. **SessionStart** runs `load-profile.sh`, which emits
    `hookSpecificOutput.additionalContext` containing the profile, plus one line
-   `Resume available — run /squirrel:pickup` if a checkpoint exists for `cwd`. If no profile exists,
+   `Resume available - run /squirrel:pickup` if a checkpoint exists for `cwd` (ASCII hyphen, not an em
+   dash — injected context stays ASCII). If no profile exists,
    it emits a single line telling Claude to suggest `/squirrel:init` once, briefly. It also prunes
    stale off-flags. Matchers: `startup|resume|clear|compact` — `compact` matters, because it
    re-injects the profile after compaction drops it.
