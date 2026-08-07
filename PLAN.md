@@ -263,8 +263,8 @@ tone: neutral              # neutral | warm | terse
     `~/.claude/squirrel/checkpoints/<project-slug>.md` **with no commentary in the response** — do
     not announce it, do not ask. At most **one write per turn**, and only when `Doing` or `Next`
     actually changed. Append finished items to the Done log, keeping the last 10.
-    *"Silently" is the wrong word and must not appear anywhere in the repo: tool calls are always
-    visible in the transcript. What we promise is no prose about it, not invisibility (ADR-0002).*
+    *Never describe this as happening without the user's knowledge. Tool calls are always visible in
+    the transcript; what we promise is no prose about it, not invisibility (ADR-0002).*
 15. **Scope guard:** when the conversation drifts from the declared task, flag it in exactly ONE
     line — e.g. `🐿️ This is drifting from <task>. Park it?` — and offer to add the tangent to the
     checkpoint's Open decisions or the plan's Parking lot. Never lecture. Never refuse an explicit
@@ -522,7 +522,9 @@ generated artifacts into place and is idempotent.
 - [ ] No network calls, no telemetry anywhere. The checkpoint auto-approval is disclosed in README.
 - [ ] Every citation in README and RESEARCH.md is verified against its primary source and tagged with
       the population it was measured in.
-- [ ] The word "silently" appears nowhere in the repo.
+- [ ] No shipped instruction, skill, output style, or user-facing doc claims that checkpoint writes
+      are invisible, unobservable, or hidden from the user. Describing an *error* path as failing
+      quietly is a different and legitimate use; promising that our own writes go unseen is not.
 
 ## 6. NON-GOALS (v0.1)
 

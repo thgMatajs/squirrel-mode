@@ -1,0 +1,23 @@
+{
+  "name": "squirrel-mode",
+  "owner": {
+    "name": "Thiago Matajs"
+  },
+  "description": "Marketplace for squirrel-mode — ADHD-friendly AI responses for Claude Code, Codex, and Cursor.",
+  "plugins": [
+    {
+      "name": "squirrel",
+      "source": "./",
+      "description": "ADHD-friendly AI responses: answer first, zero fluff. 🐿️",
+      "author": {
+        "name": "Thiago Matajs"
+      },
+      "category": "productivity",
+      "tags": [
+        "adhd",
+        "accessibility",
+        "output-style"
+      ]
+    }
+  ]
+}

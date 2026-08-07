@@ -1,0 +1,12 @@
+# Repo-root shellcheck config.
+#
+# Every tests/test_*.sh sources tests/lib/assert.sh via `. "$script_dir/lib/assert.sh"`,
+# where $script_dir is resolved at runtime relative to the sourcing script, not to the
+# caller's cwd. `shellcheck -x` alone still looks for the sourced path relative to the
+# *current working directory* the shellcheck process was invoked from, not relative to
+# the file that contains the `.` — so running `shellcheck --shell=sh tests/*.sh
+# tests/lib/*.sh` from the repo root (as CI does) fails to resolve the source and reports
+# SC1091, even with -x. `source-path=SCRIPTDIR` tells shellcheck to resolve sourced paths
+# relative to the directory of the script doing the sourcing instead, which matches how
+# the shell itself behaves here and is what actually fixes it.
+source-path=SCRIPTDIR

@@ -1,0 +1,19 @@
+{
+  "name": "squirrel",
+  "displayName": "squirrel-mode",
+  "version": "0.1.0",
+  "description": "ADHD-friendly AI responses: answer first, zero fluff. 🐿️",
+  "author": {
+    "name": "Thiago Matajs"
+  },
+  "homepage": "https://github.com/thgMatajs/squirrel-mode",
+  "repository": "https://github.com/thgMatajs/squirrel-mode",
+  "license": "MIT",
+  "keywords": [
+    "adhd",
+    "accessibility",
+    "output-style",
+    "neurodivergent",
+    "productivity"
+  ]
+}
