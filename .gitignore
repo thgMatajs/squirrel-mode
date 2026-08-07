@@ -1,3 +1,8 @@
 .build-checkpoint.md
 .claude/settings.local.json
 .DS_Store
+
+# scripts/build.sh writes .<name>.tmp.<pid> beside each artifact and moves it into
+# place. Its trap removes them, but SIGKILL, an OOM kill, or a power loss cannot be
+# trapped, and a leftover would otherwise be swept into a commit by `git add -A`.
+.*.tmp.[0-9]*

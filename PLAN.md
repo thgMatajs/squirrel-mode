@@ -155,7 +155,7 @@ squirrel-mode/                       # repo name (brand)
 ├── output-styles/
 │   └── squirrel-mode.md             # GENERATED — the real mechanism (ADR-0001)
 ├── skills/
-│   ├── squirrel-mode/SKILL.md       # GENERATED — thin manual fallback
+│   ├── rules/SKILL.md               # GENERATED — thin manual fallback (/squirrel:rules)
 │   ├── init/SKILL.md                # /squirrel:init
 │   ├── tune/SKILL.md                # /squirrel:tune
 │   ├── digest/SKILL.md              # /squirrel:digest
@@ -482,7 +482,7 @@ generated artifacts into place and is idempotent.
 2. **Write `rules/base-rules.md`** — all 16 rules, the single source of truth.
 3. **Write `scripts/build.sh`** — generates `output-styles/squirrel-mode.md`
    (`keep-coding-instructions: true`, `force-for-plugin: true`), the thin
-   `skills/squirrel-mode/SKILL.md`, `targets/codex/`, and `targets/cursor/`. Run it; commit the output.
+   `skills/rules/SKILL.md`, `targets/codex/`, and `targets/cursor/`. Run it; commit the output.
 4. **Write the 7 command skills.** Set `disable-model-invocation: true` on `init`, `tune`, `off`,
    `on` — the model must never start an interview or flip the plugin's state on its own. Leave
    `digest`, `plan`, `pickup` model-invocable, with descriptions tight enough not to hijack ordinary
