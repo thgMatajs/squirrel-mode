@@ -18,8 +18,9 @@ anyone who prefers direct, structured answers) can actually process the output. 
 It installs into three **targets** — Claude Code, Codex, Cursor — and has five parts:
 
 1. **The base rules** — response-formatting constraints that apply to every answer: answer first,
-   numbered steps, no preamble, no tangents, hard length limits. Each rule traces to a specific
-   research finding. This is the product; everything else delivers or adapts it.
+   numbered steps, no preamble, no tangents, hard length limits. 10 of the 16 base rules trace to
+   a specific research finding; the other 6 rules are stated design decisions, not empirical
+   claims (see `docs/RESEARCH.md`). This is the product; everything else delivers or adapts it.
 2. **Calibration** (`/squirrel:init`) — a guided interview (7 multiple-choice questions, one per
    message) that writes a personal **profile**. The rules adapt to the individual.
 3. **Adjustment** (`/squirrel:tune`) — change any profile field later without redoing the interview.
@@ -48,7 +49,10 @@ day to day. `squirrel-mode` calibrates.
 
 ## 2. WHY — Research foundation
 
-Every rule must trace to a finding below. `docs/RESEARCH.md` carries the full version.
+Rules in this document are either backed by a finding below, or are instead declared a design
+decision in `docs/RESEARCH.md`'s "Rules with no research claim behind them" section — never
+neither. `docs/RESEARCH.md` carries the full version, including exactly which of the two groups
+each one falls into.
 
 **[`docs/RESEARCH.md`](./docs/RESEARCH.md) is the authoritative citation list.** This section is the
 design argument — findings and the rules they justify. Every citation was verified against its primary
@@ -380,8 +384,8 @@ that question 2 set as a bundle.
 
 `/squirrel:off` writes `~/.claude/squirrel/off/<session_id>` and confirms in one line.
 `/squirrel:on` removes it. Suppression is delivered by the `UserPromptSubmit` hook, not by an
-in-conversation instruction (ADR-0005). README documents `/plugin disable squirrel` + `/clear` as the
-hard off.
+in-conversation instruction (ADR-0005). README documents `/plugin disable squirrel@squirrel-mode`,
+then a new session, as the hard off.
 
 ### `/squirrel:digest`
 
@@ -519,7 +523,7 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 
 ### Codex and Cursor (ADR-0004)
 
-| Target | Always-on rules | Commands | Auto profile | Auto checkpoints |
+| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
 | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **7** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |

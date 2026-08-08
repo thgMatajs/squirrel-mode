@@ -32,6 +32,8 @@ codex_install="$repo_root/targets/codex/install.sh"
 cursor_install="$repo_root/targets/cursor/install.sh"
 other_tools_doc="$repo_root/docs/OTHER-TOOLS.md"
 cursor_mdc="$repo_root/targets/cursor/squirrel-mode.mdc"
+readme_doc="$repo_root/README.md"
+plan_doc="$repo_root/PLAN.md"
 
 cleanup_dirs=""
 trap 'rm -rf $cleanup_dirs' EXIT
@@ -1374,5 +1376,85 @@ cleanup_dirs="$cleanup_dirs $home32f"
 mkdir -p "$home32f/.cursor"
 if HOME="$home32f" "$cursor_install" --yes >/dev/null 2>&1; then :; else :; fi
 assert_file_absent "$home32f/.cursor/.squirrel-install.lock" "the lock must be absent immediately after a normal, uncontended --yes run completes (cursor)"
+
+# ==========================================================================
+# 33 (S8, invariant 6e). README.md's "Parity across targets" table must
+#    match docs/OTHER-TOOLS.md's "Parity at a glance" table EXACTLY - the
+#    task brief's own requirement, and exactly the multi-file drift class
+#    invariant 6e exists to catch mechanically instead of trusting a
+#    reviewer's memory (S6 was rejected twice for the unenforced version
+#    of this same failure). This same table also appears, near-verbatim,
+#    in PLAN.md Section 3 ("Codex and Cursor (ADR-0004)") - pinned here
+#    too, as a third copy of the identical table. It is NOT extended to
+#    docs/adr/0004-tiered-parity-across-targets.md's own copy: that one
+#    is a deliberately different rendering (unbolded "7 namespaced
+#    skills", "skills in `~/.agents/skills/`" instead of the specific
+#    per-file path, "instructed file read only" without ", best-effort",
+#    no `**N**` counts) written when the ADR was drafted, before the
+#    counts and paths were finalized - a design-history record, not a
+#    live copy meant to track later edits, so forcing it to match would
+#    misrepresent what that document is. Checked against the real files
+#    (expect identical, line for line, for README.md/OTHER-TOOLS.md/
+#    PLAN.md), then against a scratch copy of README.md with one cell of
+#    its table edited (expect the tables to differ).
+# ==========================================================================
+assert_file_exists "$readme_doc" "README.md must exist"
+assert_file_exists "$plan_doc" "PLAN.md must exist"
+
+extract_parity_table() {
+  # extract_parity_table <file> - prints the 5-line "| Target | Always-on
+  # rules | Commands | Auto profile injection | Auto checkpoints |" table
+  # (header, separator, and the three target rows) verbatim, or nothing
+  # if no such table exists in <file>.
+  file=$1
+  awk '
+    BEGIN { capture = 0 }
+    /^\| Target \| Always-on rules \| Commands \| Auto profile injection \| Auto checkpoints \|$/ { capture = 1; print; next }
+    capture == 1 && /^\|/ { print; next }
+    capture == 1 { capture = 0 }
+  ' "$file" 2>/dev/null
+}
+
+other_tools_parity_table=$(extract_parity_table "$other_tools_doc")
+readme_parity_table=$(extract_parity_table "$readme_doc")
+plan_parity_table=$(extract_parity_table "$plan_doc")
+
+# Vacuous-pass guard: docs/OTHER-TOOLS.md's own table must yield exactly
+# 5 lines (header + separator + 3 target rows), or "identical" below
+# could be true for the wrong reason (nothing parsed on either side).
+other_tools_parity_line_count=$(printf '%s\n' "$other_tools_parity_table" | sed '/^$/d' | wc -l | awk '{print $1}')
+assert_eq "5" "$other_tools_parity_line_count" "parsing docs/OTHER-TOOLS.md's parity table must yield exactly 5 lines: header + separator + 3 targets (vacuous-pass guard for scenario 33)"
+
+assert_eq "$other_tools_parity_table" "$readme_parity_table" "README.md's parity table must match docs/OTHER-TOOLS.md's parity table exactly, line for line"
+assert_eq "$other_tools_parity_table" "$plan_parity_table" "PLAN.md Section 3's parity table must match docs/OTHER-TOOLS.md's parity table exactly, line for line (the third copy of the same table)"
+
+# --- Failure proof: a scratch copy of README.md with one cell of its ---
+#     parity table edited must no longer match docs/OTHER-TOOLS.md's.
+parity_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-parity-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $parity_mutant_dir"
+parity_mutant="$parity_mutant_dir/README.md"
+# shellcheck disable=SC2016 # single-quoted deliberately: the backtick-quoted
+# text below is a literal sed pattern to match in README.md's own markdown,
+# not command substitution to evaluate.
+sed 's/| Codex | `~\/.codex\/AGENTS.md` global layer |/| Codex | some other description entirely |/' "$readme_doc" >"$parity_mutant"
+mutant_parity_table=$(extract_parity_table "$parity_mutant")
+if [ "$mutant_parity_table" = "$other_tools_parity_table" ]; then
+  parity_mutant_matches=yes
+else
+  parity_mutant_matches=no
+fi
+assert_eq "no" "$parity_mutant_matches" "FAILURE PROOF (scenario 33): editing one cell of README.md's parity table in a scratch copy must make the line-for-line equality check fail"
+
+# --- Failure proof: a scratch copy of PLAN.md's header word reverted to
+#     the pre-fix wording ("Auto profile" instead of "Auto profile
+#     injection") must no longer be found by the same exact-header match
+#     the extractor requires - proving the PLAN.md pin is not vacuous.
+plan_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-plan-parity-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $plan_mutant_dir"
+plan_mutant="$plan_mutant_dir/PLAN.md"
+sed 's/| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |/| Target | Always-on rules | Commands | Auto profile | Auto checkpoints |/' "$plan_doc" >"$plan_mutant"
+plan_mutant_table=$(extract_parity_table "$plan_mutant")
+plan_mutant_line_count=$(printf '%s\n' "$plan_mutant_table" | sed '/^$/d' | wc -l | awk '{print $1}')
+assert_eq "0" "$plan_mutant_line_count" "FAILURE PROOF (scenario 33, PLAN.md): reverting PLAN.md's table header to the old 'Auto profile' wording in a scratch copy must make the exact-header extractor find no table at all"
 
 assert_report

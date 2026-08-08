@@ -30,4 +30,4 @@ Nothing depends on Claude Code internals, and the binding is done by the only pa
   by `session_id` and no future session will ever match it, so the only cost of keeping one too long
   is a stray file. Pruning too eagerly, on the other hand, could re-enable squirrel-mode underneath a
   user who is still in the session that disabled it. Pruning never fails the hook.
-- `/plugin disable squirrel` plus `/clear` remains the hard off, and README documents it as such: it is the only path that truly removes the rules from the system prompt.
+- `/plugin disable squirrel@squirrel-mode`, then a new session, remains the hard off, and README documents it as such: it is the only path that truly removes the rules from the system prompt. `/reload-plugins` alone is not enough — its documented reload list (plugins, skills, agents, hooks, plugin MCP servers, plugin LSP servers) never names output styles, so it does not reliably drop a `force-for-plugin` style on its own.

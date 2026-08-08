@@ -21,7 +21,7 @@ _Avoid_: platform, host, client, IDE
 ### What shapes the output
 
 **Base rules**:
-The formatting constraints that apply to every response — answer first, numbered steps, no preamble, no tangents. Each one traces to a specific research finding. They are the product; everything else exists to deliver or adapt them.
+The formatting constraints that apply to every response — answer first, numbered steps, no preamble, no tangents. Most trace to a specific research finding; the rest are declared design decisions instead — see [RESEARCH.md](./docs/RESEARCH.md) for which is which. They are the product; everything else exists to deliver or adapt them.
 _Avoid_: formatting rules, style rules, the skill, instructions
 
 **Profile**:

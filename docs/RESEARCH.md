@@ -2,9 +2,34 @@
 
 ## What this document is
 
-This is the evidence log for `squirrel-mode`. Every rule in `rules/base-rules.md` traces to at
-least one finding below, and every finding carries the citations behind it and the population
-those citations were actually measured in.
+This is the evidence log for `squirrel-mode`. 10 of the 16 base rules in `rules/base-rules.md`
+trace to at least one finding below; every finding carries the citations behind it and the
+population those citations were actually measured in. The other 6 rules are stated design
+decisions with no research claim behind them — named plainly in "Rules with no research claim
+behind them" below, not folded into the findings as if they had citations they do not have.
+
+## Rules with no research claim behind them
+
+Six of squirrel-mode's sixteen base rules are product and ergonomic decisions, not empirical
+claims. They appear in no `Rules justified:` line below because there is nothing to cite —
+inventing a citation for a product choice is exactly the failure this document exists to prevent.
+Named plainly instead:
+
+- **Rule 5 (Respect code style).** Whether someone processes code better seeing the block first or
+  the steps first is a preference, not a measured effect; `code_style` is a switch, not a citation.
+- **Rule 9 (Answer multiple questions in order).** Answering fewer questions than were asked is a
+  correctness bug for any user, in any population — it needs no ADHD-specific citation to justify
+  it.
+- **Rule 10 (Confirm before switching topics).** Not silently changing the subject on someone is
+  ordinary conversational courtesy, not a cognitive-load finding.
+- **Rule 12 (Respond in the user's language).** Table-stakes usability: no citation makes an
+  assistant answering in the wrong language acceptable, and none is needed to make it
+  unacceptable.
+- **Rule 13 (Safety override).** A deliberate product guardrail — brevity rules never suppress a
+  warning about a destructive operation, security issue, or data loss — because the other fifteen
+  rules exist, not because of a finding about ADHD.
+- **Rule 16 (Match tone).** `tone` is a register preference (`neutral`/`warm`/`terse`); nothing
+  here claims one register improves comprehension over another for anyone.
 
 ## What this document is not
 
@@ -611,7 +636,7 @@ reframed rather than kept with a hedge.
   10.1145/3613372.3613384, a real pilot study of ADHD and autistic developers), but its own abstract
   or results could not be read to confirm check 2. Every route tried failed: the ACM Digital Library
   abstract and full-text pages both return HTTP 403; Google Scholar and the authors' institutional
-  pages list the paper with no PDF link; ResearchGate and Semantic Scholar do not host a full-text
+  pages list the paper with no PDF link; ResearchGate and Semantic Scholar carry no full-text
   copy; Unpaywall returns no open-access location for its DOI; the OpenAlex-indexed abstract is a
   general pilot-study summary that does not itself mention over-engineering. The claim is retired
   from Finding 7 rather than kept on the strength of a paper this file could not actually read — see

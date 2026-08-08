@@ -5,7 +5,7 @@ disable-model-invocation: true
 
 # squirrel-mode off
 
-/squirrel:off suppresses squirrel-mode's formatting rules for the rest of the current session only. It does not touch any other session, and it does not change the profile.
+/squirrel:off suppresses squirrel-mode's base rules for the rest of the current session only. It does not touch any other session, and it does not change the profile.
 
 ## Why this cannot flip a flag directly (ADR-0005)
 
@@ -29,7 +29,7 @@ If that line is missing entirely, or present but empty after the colon, tell the
 - Nothing changes for the message you are answering right now. Starting with your *next* message in this session, a `UserPromptSubmit` hook claims the sentinel written above and begins injecting a counter-instruction on every prompt, overriding squirrel-mode's formatting for the rest of this session. `/squirrel:on` reverses it, in this same session only.
 - Every other session, and every other project, is unaffected. The sentinel only binds to a session once a hook confirms it was written from that session's own working directory.
 - This write is a tool call like any other and appears in the transcript the same way every other tool call does.
-- This is a soft off: the base rules stay loaded, and a per-prompt check keeps overriding them for the rest of this session once the sentinel is claimed. For a hard off that removes the rules from the system prompt entirely, run `/plugin disable squirrel`, then `/clear`.
+- This is a soft off: the base rules stay loaded, and a per-prompt check keeps overriding them for the rest of this session once the sentinel is claimed. For a hard off that removes the rules from the system prompt entirely, run `/plugin disable squirrel@squirrel-mode`, then start a new session.
 
 ## Language
 

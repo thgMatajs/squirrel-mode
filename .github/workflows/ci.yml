@@ -1,0 +1,48 @@
+# This file's layout is CANONICAL and held to it by tests/test_ci.sh, which parses this workflow's
+# structure with plain awk instead of a real YAML parser (no new dependency; the harness has only
+# jq and shellcheck - see tests/test_ci.sh's own top-of-file comment for why a general parser is
+# out of scope). That parser understands exactly ONE shape:
+#   - 2-space indentation per nesting level - never 4-space, and never a tab.
+#   - Each step starts with its own "- name:" or "- uses:" line as the FIRST key in the mapping -
+#     never "shell:" or any other key reordered ahead of it.
+#   - Every multi-line command uses a "run: |" block scalar; a single-line command uses
+#     "run: <command>" with no pipe.
+#   - Scalar values (e.g. the runs-on: image) are unquoted.
+# Six equally-valid-YAML variations on this shape (reordered keys, 4-space indentation, a quoted
+# scalar, a blank line inside a run: | block, CRLF line endings, trailing whitespace) will fail
+# tests/test_ci.sh even though GitHub itself would run them identically. CRLF and trailing
+# whitespace are normalised away automatically (editor/transport artifacts, not a real layout
+# choice); the other four are not - restore this canonical layout, or update tests/test_ci.sh's
+# parser deliberately if the layout is changing on purpose. Either way, a failure here means
+# "look at tests/test_ci.sh," never "the parser is broken."
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq and shellcheck
+        shell: sh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq shellcheck
+
+      - name: Run test suite
+        shell: sh
+        run: sh tests/run.sh
+
+      - name: Drift check - rebuild generated artifacts and diff
+        shell: sh
+        run: |
+          sh scripts/build.sh
+          git diff --exit-code
+          test -z "$(git status --porcelain)"

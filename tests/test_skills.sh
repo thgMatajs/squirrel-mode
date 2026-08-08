@@ -773,4 +773,176 @@ else
 fi
 assert_eq "no" "$fp_lang_still_there" "FAILURE PROOF (init language fallback): removing the 'maps to D (auto)' wording from a scratch copy must make the positive-requirement assertion fail - proving this scenario is not vacuous"
 
+# ==========================================================================
+# 26. S8: profile.example.md cross-checked against rules/base-rules.md's
+#     Defaults table (canonical - see rules/base-rules.md's own header
+#     comment) and against init's own step-4 literal shape. Three
+#     independent things must hold, each with its own mutation proof:
+#       a) profile.example.md's "Defaults" table is byte-identical, row
+#          for row, to rules/base-rules.md's - this alone covers "all
+#          11 fields present, no extra fields" AND "every stated default
+#          and allowed-value set matches exactly", since any removed
+#          row, added row, or changed cell breaks byte equality.
+#       b) The fenced example block's SHAPE (heading line + the 11
+#          field names, in order, values stripped) is identical to the
+#          shape init/SKILL.md step 4 specifies.
+#       c) Every field's VALUE inside that fenced block equals the
+#          Default column value from profile.example.md's own
+#          (already-verified-identical) Defaults table - i.e. the
+#          worked example genuinely shows the defaults, not arbitrary
+#          stand-in values.
+# ==========================================================================
+base_rules_file="$repo_root/rules/base-rules.md"
+profile_example_file="$repo_root/profile.example.md"
+
+assert_file_exists "$profile_example_file" "profile.example.md must exist at the repo root"
+
+extract_defaults_table() {
+  # extract_defaults_table <file> - prints the "| Field | Default | Allowed values |" table
+  # (header row, separator row, and every data row) verbatim, or nothing if no such table exists.
+  file=$1
+  awk '
+    BEGIN { capture = 0 }
+    /^\| Field \| Default \| Allowed values \|$/ { capture = 1; print; next }
+    capture == 1 && /^\| :-- \| :-- \| :-- \|$/ { capture = 2; print; next }
+    capture == 2 && /^\|/ { print; next }
+    capture == 2 { capture = 0 }
+  ' "$file" 2>/dev/null
+}
+
+extract_first_fenced_block() {
+  # extract_first_fenced_block <file> <lang> - prints the content of the FIRST fenced code block
+  # opened with "```<lang>" through its matching closing "```", exclusive of both fence lines.
+  file=$1
+  lang=$2
+  awk -v opener="\`\`\`$lang" '
+    BEGIN { capture = 0; done = 0 }
+    $0 == opener && done == 0 { capture = 1; next }
+    capture == 1 && /^```$/ { capture = 0; done = 1; next }
+    capture == 1 { print }
+  ' "$file" 2>/dev/null
+}
+
+skeleton_of() {
+  # skeleton_of <block_text> - prints line 1 (the heading) verbatim, then one "field:" token per
+  # subsequent non-blank "field: value" line (the value stripped), preserving order. Compares the
+  # SHAPE of a profile block (heading + field names + their order) independent of the literal
+  # values it holds - init's own block uses "<value>" placeholders, profile.example.md uses real
+  # defaults, and this function makes both comparable on shape alone.
+  block=$1
+  printf '%s\n' "$block" | awk '
+    NR == 1 { print; next }
+    /^[A-Za-z_]+:/ { sub(/:.*/, ":"); print }
+  '
+}
+
+field_value_from_block() {
+  # field_value_from_block <block_text> <field> - prints the value half of that field's
+  # "field: value" line inside <block_text>, or nothing if that field's line is absent.
+  block=$1
+  field=$2
+  printf '%s\n' "$block" | awk -v f="$field:" '
+    index($0, f) == 1 { sub("^" f "[ \t]*", ""); print; exit }
+  '
+}
+
+default_value_for_field() {
+  # default_value_for_field <field> <table_text> - prints the Default column value for <field>
+  # from a "| Field | Default | Allowed values |"-shaped table (see extract_defaults_table above).
+  field=$1
+  table=$2
+  printf '%s\n' "$table" | awk -F'|' -v f="$field" '
+    {
+      col2 = $2; gsub(/^[ \t]+|[ \t]+$/, "", col2)
+      if (col2 == f) {
+        col3 = $3; gsub(/^[ \t]+|[ \t]+$/, "", col3)
+        print col3
+        exit
+      }
+    }
+  '
+}
+
+# --- (a) The two Defaults tables must be byte-identical, row for row -----
+base_defaults_table=$(extract_defaults_table "$base_rules_file")
+example_defaults_table=$(extract_defaults_table "$profile_example_file")
+
+# Vacuous-pass guard: rules/base-rules.md's table must itself yield 13 lines
+# (1 header + 1 separator + 11 data rows), or "0 differences" below could
+# be true for the wrong reason (nothing parsed, rather than everything
+# actually matching).
+base_defaults_line_count=$(printf '%s\n' "$base_defaults_table" | sed '/^$/d' | wc -l | awk '{print $1}')
+assert_eq "13" "$base_defaults_line_count" "parsing rules/base-rules.md's Defaults table must yield exactly 13 lines: header + separator + 11 fields (vacuous-pass guard for scenario 26)"
+
+assert_eq "$base_defaults_table" "$example_defaults_table" "profile.example.md's Defaults table must match rules/base-rules.md's Defaults table exactly, row for row (all 11 fields, no extras, same defaults, same allowed values)"
+
+# --- (b) The fenced example block's shape must match init step 4's ------
+init_block=$(extract_first_fenced_block "$init_file" "markdown")
+example_block=$(extract_first_fenced_block "$profile_example_file" "markdown")
+init_skeleton=$(skeleton_of "$init_block")
+example_skeleton=$(skeleton_of "$example_block")
+
+init_skeleton_line_count=$(printf '%s\n' "$init_skeleton" | sed '/^$/d' | wc -l | awk '{print $1}')
+assert_eq "12" "$init_skeleton_line_count" "init step 4's example block must itself yield exactly 12 lines: 1 heading + 11 fields (vacuous-pass guard for scenario 26)"
+
+assert_eq "$init_skeleton" "$example_skeleton" "profile.example.md's example block must match init step 4's exact shape (same heading line, same 11 field names, same order)"
+
+# --- (c) Every field's value in the example block equals the Default ----
+#         column value from profile.example.md's own Defaults table.
+for field in language answer_position step_style max_list_items code_style explanation_budget options_per_answer confirm_topic_switch progress_recap extras_section tone; do
+  expected_default=$(default_value_for_field "$field" "$example_defaults_table")
+  actual_block_value=$(field_value_from_block "$example_block" "$field")
+  assert_eq "$expected_default" "$actual_block_value" "profile.example.md's example block must show the canonical default for '$field', not an arbitrary example value"
+done
+
+# --- Failure proofs: each mutation below is applied to a SCRATCH COPY of
+#     profile.example.md; the real, shipped file is never touched. -------
+
+# Mutation 1: a field row REMOVED from the Defaults table.
+mut1=$(skill_scratch "$profile_example_file")
+sed '/| max_list_items | 5 | 3-7 |/d' "$mut1" >"$mut1.tmp" && mv "$mut1.tmp" "$mut1"
+mut1_table=$(extract_defaults_table "$mut1")
+if [ "$mut1_table" = "$base_defaults_table" ]; then mut1_matches=yes; else mut1_matches=no; fi
+assert_eq "no" "$mut1_matches" "FAILURE PROOF (scenario 26a, field removed): deleting the max_list_items row from a scratch copy's Defaults table must make the table-equality check fail"
+
+# Mutation 2: a field's stated DEFAULT changed.
+mut2=$(skill_scratch "$profile_example_file")
+sed 's/| max_list_items | 5 | 3-7 |/| max_list_items | 6 | 3-7 |/' "$mut2" >"$mut2.tmp" && mv "$mut2.tmp" "$mut2"
+mut2_table=$(extract_defaults_table "$mut2")
+if [ "$mut2_table" = "$base_defaults_table" ]; then mut2_matches=yes; else mut2_matches=no; fi
+assert_eq "no" "$mut2_matches" "FAILURE PROOF (scenario 26a, default changed): changing max_list_items's stated default to 6 in a scratch copy must make the table-equality check fail"
+
+# Mutation 3: an EXTRA field row appended.
+mut3=$(skill_scratch "$profile_example_file")
+awk '{ print } /\| tone \| neutral \| neutral, warm, terse \|/ { print "| bogus_field | none | anything |" }' "$mut3" >"$mut3.tmp" && mv "$mut3.tmp" "$mut3"
+mut3_table=$(extract_defaults_table "$mut3")
+if [ "$mut3_table" = "$base_defaults_table" ]; then mut3_matches=yes; else mut3_matches=no; fi
+assert_eq "no" "$mut3_matches" "FAILURE PROOF (scenario 26a, extra field): appending a 'bogus_field' row to a scratch copy's Defaults table must make the table-equality check fail"
+
+# Mutation 4: an ALLOWED-VALUE SET widened/altered.
+mut4=$(skill_scratch "$profile_example_file")
+sed 's/pt-BR, en, es, auto/pt-BR, en, es, auto, fr/' "$mut4" >"$mut4.tmp" && mv "$mut4.tmp" "$mut4"
+mut4_table=$(extract_defaults_table "$mut4")
+if [ "$mut4_table" = "$base_defaults_table" ]; then mut4_matches=yes; else mut4_matches=no; fi
+assert_eq "no" "$mut4_matches" "FAILURE PROOF (scenario 26a, allowed values altered): widening language's allowed-value set in a scratch copy must make the table-equality check fail"
+
+# Mutation 5: a field line REMOVED from the fenced example block (shape).
+mut5=$(skill_scratch "$profile_example_file")
+sed '/^tone: neutral$/d' "$mut5" >"$mut5.tmp" && mv "$mut5.tmp" "$mut5"
+mut5_block=$(extract_first_fenced_block "$mut5" "markdown")
+mut5_skeleton=$(skeleton_of "$mut5_block")
+if [ "$mut5_skeleton" = "$init_skeleton" ]; then mut5_matches=yes; else mut5_matches=no; fi
+assert_eq "no" "$mut5_matches" "FAILURE PROOF (scenario 26b, field removed from example block): deleting the tone line from a scratch copy's example block must make the shape-equality check fail"
+
+# Mutation 6: the example block's VALUE for a field drifts from the
+# canonical default while the Defaults table itself stays untouched.
+mut6=$(skill_scratch "$profile_example_file")
+sed 's/^language: auto$/language: pt-BR/' "$mut6" >"$mut6.tmp" && mv "$mut6.tmp" "$mut6"
+mut6_block=$(extract_first_fenced_block "$mut6" "markdown")
+mut6_table=$(extract_defaults_table "$mut6")
+mut6_default=$(default_value_for_field "language" "$mut6_table")
+mut6_blockvalue=$(field_value_from_block "$mut6_block" "language")
+if [ "$mut6_default" = "$mut6_blockvalue" ]; then mut6_matches=yes; else mut6_matches=no; fi
+assert_eq "no" "$mut6_matches" "FAILURE PROOF (scenario 26c, example value drift): changing the example block's language value away from the canonical default in a scratch copy must make the per-field value check fail"
+
 assert_report

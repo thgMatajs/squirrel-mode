@@ -28,7 +28,7 @@ If that line is missing entirely, or present but empty after the colon, tell the
 
 - Nothing changes for the message you are answering right now. Starting with your *next* message in this session, a `UserPromptSubmit` hook claims the sentinel written above, removes this session's suppression flag if one exists, and squirrel-mode's rules resume.
 - This only ever affects this one session, once a hook confirms the sentinel was written from that session's own working directory. It never touches other sessions or other projects.
-- The hard off is `/plugin disable squirrel` followed by `/clear`. Running `/plugin enable squirrel` and starting a new or cleared session restores squirrel-mode from that state; `/squirrel:on` is unrelated to that path and only ever matters after a `/squirrel:off` in the same session.
+- The hard off is `/plugin disable squirrel@squirrel-mode`, then a new session. Running `/plugin enable squirrel@squirrel-mode`, then a new session, restores squirrel-mode from that state; `/squirrel:on` is unrelated to that path and only ever matters after a `/squirrel:off` in the same session.
 
 ## Language
 

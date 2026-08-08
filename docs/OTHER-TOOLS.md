@@ -17,7 +17,7 @@ feature set; this page states the practical consequences plainly, with no hedgin
 
 | Command | Claude Code | Codex | Cursor | Reason |
 | :-- | :-- | :-- | :-- | :-- |
-| `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the host. |
+| `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the target. |
 | `plan` | ✅ | ✅ | ✅ | Same. |
 | `init` | ✅ | ✅ | ❌ | Writes `~/.claude/squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |

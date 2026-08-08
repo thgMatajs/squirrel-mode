@@ -50,17 +50,104 @@
 #      verification pass" subheading — so the count and the list cannot silently drift apart
 #      again (this is exactly the item-2 bug this cycle fixed: the prose said four, the list had
 #      five).
+#  19. README.md drift check, part A (S8): the identical author-year citation-drift check as 16,
+#      extended to the whole of README.md (which has no "## 2. WHY"-shaped section to scope to).
+#      Unlike PLAN.md Section 2, README.md legitimately carries zero author-year citations by
+#      design — it links to docs/RESEARCH.md rather than restating findings by name — so a real
+#      "0" here is an expected pass; the mutation fixture is what proves the extractor still
+#      catches a real fabricated citation.
+#  20. README.md drift check, part B (S8): the identical retired-name check as 17
+#      (check_retired_name_violations takes a file path and was already fully generic — no
+#      README-specific variant was needed), applied directly to README.md.
+#  21. Rules-coverage cross-check, part A (S8, review cycle 1, S8-1): every rule number appearing
+#      in any "**Rules justified:**" line in docs/RESEARCH.md, collected and de-duplicated, must
+#      equal an explicitly declared expected set. Catches a future edit that adds a citation for a
+#      rule without this test file being updated to expect it (or vice versa).
+#  22. Rules-coverage cross-check, part B: every rule number named as "- **Rule N (...)**" under
+#      the "## Rules with no research claim behind them" section must equal an explicitly declared
+#      expected set — the six rules with no citation. Catches a future edit to that section
+#      drifting from the rules it is supposed to name.
+#  23. Rules-coverage cross-check, part C: every rule number 1..16 (parsed from
+#      rules/base-rules.md, never hardcoded) is accounted for in EXACTLY ONE of the two groups
+#      above — no rule cited AND named as design-decision, no rule in neither. This is the
+#      assertion that must go red if someone adds a "Rules justified:" line without updating the
+#      design-decisions section, or removes a rule from that section without adding a citation.
+#  24. [REWRITTEN, S8 review cycle 2, T1 BLOCKER; WIDENED, S8 review cycle 3, U2 BLOCKER] No
+#      tracked markdown-family file — scanned via `git ls-files "*.$ext"` once per extension in
+#      MARKDOWN_FAMILY_EXTENSIONS ("md mdc" today), SCAN-ALL-BY-DEFAULT, not a hardcoded filename
+#      list — contains an absolute "every/each/all rule(s) ... trace(s) to a finding" style claim,
+#      in any of the phrasings this project has now shipped twice: README.md and docs/RESEARCH.md
+#      in cycle 1; CONTEXT.md and PLAN.md (twice) in cycle 2. The cycle-1 fix wired the guard to
+#      those first two filenames by name, which is exactly why the identical sentence, unnoticed,
+#      shipped in three MORE files the very next cycle — a hardcoded allowlist inverts the
+#      fail-safe default, since a new document is unscanned until someone remembers to add it.
+#      Cycle 2's fix widened the scan to every tracked file matching `git ls-files '*.md'`, but
+#      that glob structurally cannot match targets/cursor/squirrel-mode.mdc — a tracked,
+#      markdown-family, GENERATED FILE with a different extension — so the identical class of bug
+#      shipped a third time (U2 BLOCKER). The cycle-3 fix generalizes the extension itself into
+#      MARKDOWN_FAMILY_EXTENSIONS, a real, checked constant, plus a standing watchdog
+#      (check_uncovered_markdown_extensions) that lists any DISTINCT extension actually present
+#      among tracked files whose content looks markdown-family-shaped but isn't yet named in that
+#      constant — so a future ".mdx"/".markdown"/".mkd" file fails this test the moment it's
+#      added, rather than silently going unscanned. The detector itself is also broadened past the
+#      original two exact strings into a co-occurrence class (an absolute quantifier over "rule"
+#      paired with a trace/finding/citation/research term in the same paragraph) — see
+#      check_absolute_rule_claim_present's own comment for exactly what that class does and does
+#      not cover. Checked against the real repo (expect 0 files flagged, over the full real
+#      per-extension `git ls-files` list — captured and asserted to cover every tracked
+#      markdown-family file, no more and no fewer), then against scratch copies of FIVE different
+#      files — README.md, docs/RESEARCH.md (the original two), CONTEXT.md, a docs/adr/ file (the
+#      two cycle-1 missed), and targets/cursor/squirrel-mode.mdc (U2's actual gap) — each with the
+#      claim injected, proving the detector is not still silently scoped to the original pair or to
+#      the .md extension. A declared, asserted exemption list (empty today) is also checked:
+#      equality-asserted against an expected constant so an exemption cannot be added without a
+#      matching, visible test update, plus a real scratch git repository with both a .md and a .mdc
+#      offender, proving the scan-all driver catches a violation in either extension when a file was
+#      never on any list, and that the exemption is per-file (not per-extension) when only one of
+#      the two is exempted.
+#  25. The retired "success amnesia" / "blurs the memory of one's own accomplishments" / "own
+#      recent progress" framing docs/RESEARCH.md Finding 8 explicitly retired stays dead in
+#      README.md (S8-2's BLOCKER). Scoped to README.md only, deliberately: docs/RESEARCH.md's own
+#      "What we could not verify" section legitimately names both exact phrases while explaining
+#      why they were retired, so a file-generic ban would wrongly fail the real, correct
+#      docs/RESEARCH.md. Checked against the real README.md (expect 0), then against a scratch
+#      copy with all three phrases appended (expect 3).
+#  26. The "N of the 16" / "other M rules" prose counts in README.md, docs/RESEARCH.md's, AND (added
+#      this cycle, T1) PLAN.md's opening statements are literally derived from the same declared
+#      expected-set sizes checks 21/22 compare against — not just eyeballed to currently match them.
+#      This is a TWO-STEP mechanism, not a one-shot one, and the comment above the assertions
+#      themselves says so explicitly: editing docs/RESEARCH.md's actual "Rules justified:"/design-
+#      decision lines reddens checks 21/22/23 FIRST (the extracted set no longer matches the
+#      declared EXPECTED_CITED_RULES/EXPECTED_DESIGN_RULES constants); only once a maintainer
+#      updates those constants to match does the prose-count needle derived from them change,
+#      reddening THIS check next because the prose itself has not been rewritten yet. Two separate,
+#      sequential prompts toward two separate fixes, not one failure that "goes red everywhere at
+#      once" (S8 review cycle 3, U8 MINOR fix — the comment used to read that way).
 #
-# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, and 18 are checked twice each: once against the
-# real, committed file(s) (expecting zero violations), and once against a scratch copy
-# deliberately corrupted to contain exactly the bad pattern the check exists to catch (expecting
-# the check to report a violation). Scenario 14 is checked once directly against the real file
-# with the generic assert_not_contains helper, plus a subshell-isolated proof that the helper
-# itself reports FAIL when the phrase is present, so the check is not vacuously true. Every check
-# is implemented as a function taking a file path, specifically so the same code path can run
-# against both the real file and a corrupted scratch fixture — a check that can only ever run
-# against the one real file it was written to match proves nothing about whether it would catch
-# a real regression.
+# [REMOVED, S8 review cycle 3, U4 MAJOR fix] A co-occurrence tripwire ("scenario 27") briefly lived
+# here, flagging any sentence that paired an ADHD/memory term with an own-work term, with one
+# sanctioned sentence exempted by exact text. It was deleted rather than narrowed. The tech lead's
+# own six-sentence fixture (four legitimate sentences that must pass, plus the reviewer's paraphrase
+# and the original retired sentence that must fail) proved narrowing cannot save it: any own-work
+# term list broad enough to catch the paraphrase ("...unable to recall how much they've already
+# gotten done...", which shares no vocabulary with the retired sentence at all) is also broad enough
+# to flag ordinary prose about the Done log or /squirrel:pickup, and — independent of how the list is
+# tuned — a CORRECTLY HEDGED restatement of Finding 8 that explicitly distinguishes it from the
+# retired claim must still NAME the retired claim's own vocabulary to reject it, which no bag-of-
+# words check can tell apart from asserting that vocabulary live. That is a structural limit, not a
+# tuning problem: see check_retired_success_amnesia_phrasing's own comment, further down, for what
+# replaces this class of check.
+#
+# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, and 26 are
+# checked twice each: once against the real, committed file(s) (expecting zero violations), and
+# once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
+# exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
+# against the real file with the generic assert_not_contains helper, plus a subshell-isolated proof
+# that the helper itself reports FAIL when the phrase is present, so the check is not vacuously
+# true. Every check is implemented as a function taking a file path, specifically so the same code
+# path can run against both the real file and a corrupted scratch fixture — a check that can only
+# ever run against the one real file it was written to match proves nothing about whether it would
+# catch a real regression.
 #
 # See tests/lib/assert.sh for why `set -eu` here does not abort on the first failed assertion.
 set -eu
@@ -81,6 +168,7 @@ research_file="$repo_root/docs/RESEARCH.md"
 base_rules_file="$repo_root/rules/base-rules.md"
 docs_dir="$repo_root/docs"
 plan_file="$repo_root/PLAN.md"
+readme_file="$repo_root/README.md"
 
 # --- Scratch fixtures, cleaned up on exit no matter how the script ends -----------------------
 scratch_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-research-test.XXXXXX")
@@ -473,11 +561,45 @@ extract_plan_section2() {
 # retired name and its original (wrong) year typically DO still appear somewhere in RESEARCH.md —
 # in the Corrections prose explaining why the citation was wrong. See
 # check_retired_name_violations below for the complementary check that catches that case.
+#
+# The actual extraction + corroboration logic lives in check_citation_drift_in_text below,
+# parameterized on a flat text blob rather than a specific file+section, so this function and
+# check_readme_citation_drift (S8: the same drift check extended to README.md) share ONE
+# implementation instead of two copies that could themselves drift apart from each other — the
+# exact failure class invariant 6e exists to prevent, applied to the test code itself.
 check_plan_citation_drift() {
   plan_file=$1
   research_file=$2
-  bad=0
   flat=$(extract_plan_section2 "$plan_file" | sed -e 's/\*//g' -e 's/`//g' | tr '\n' ' ')
+  check_citation_drift_in_text "$flat" "$research_file"
+}
+
+# check_readme_citation_drift <readme_file> <research_file> — the identical check as
+# check_plan_citation_drift above, applied to the WHOLE of README.md rather than one named
+# section (README.md has no "## 2. WHY"-shaped section to scope to). Unlike PLAN.md Section 2,
+# which is guaranteed to carry several author-year citations (it IS the research rationale
+# section), README.md legitimately carries zero: the safest README states design rationale and
+# links to docs/RESEARCH.md rather than restating individual findings by name and year (see the
+# task brief this file's own S8 build step follows). A real-file result of "0 violations" here is
+# therefore an expected, non-vacuous pass, not a sign the check found nothing to look at — the
+# mutation-proof fixture below is what actually demonstrates the extractor still catches a real
+# fabricated citation if one is ever added.
+check_readme_citation_drift() {
+  readme_file=$1
+  research_file=$2
+  flat=$(sed -e 's/\*//g' -e 's/`//g' "$readme_file" 2>/dev/null | tr '\n' ' ')
+  check_citation_drift_in_text "$flat" "$research_file"
+}
+
+# check_citation_drift_in_text <flat_text> <research_file> — prints the count of author-year
+# style citations found in <flat_text> that docs/RESEARCH.md does not corroborate. See
+# check_plan_citation_drift's comment above for the full rationale (pattern shape, deliberately
+# loose corroboration, and known blind spot re: retired names) — this function is that same
+# logic, extracted so both callers stay byte-identical in behavior.
+check_citation_drift_in_text() {
+  flat=$1
+  research_file=$2
+  bad=0
   research_body=$(cat "$research_file" 2>/dev/null || true)
   matches=$(printf '%s' "$flat" | grep -oE "[A-Z][A-Za-z'.-]+(, [A-Z][A-Za-z'.-]+)*( (&|and) [A-Z][A-Za-z'.-]+)?( et al\.)?,? *\(?(19|20)[0-9][0-9]\)?" 2>/dev/null || true)
   if [ -n "$matches" ]; then
@@ -636,6 +758,374 @@ check_substance_failure_count_ok() {
   else
     echo no
   fi
+}
+
+# ------------------------------------------------------------------------------------------------
+# Rules-coverage cross-check (S8, review cycle 1, S8-1).
+#
+# "No rule ships without a citation" was false: only 10 of 16 rules appear in a "Rules justified:"
+# line. The fix is not to invent citations for the other six, it is to say so plainly and prove it
+# mechanically: every rule number must land in EXACTLY ONE of {cited-by-a-finding,
+# named-as-a-design-decision}, and both groups are checked against an explicitly declared expected
+# set below (not just against each other), so a silent, simultaneous drift in both places at once
+# cannot slip through as "still balances."
+# ------------------------------------------------------------------------------------------------
+
+# The two groups this file expects rules/base-rules.md's 16 rules to partition into. Declared
+# here, explicitly, rather than derived from anything else — the whole point of this check is to
+# catch docs/RESEARCH.md drifting away from a value someone actually decided on.
+EXPECTED_CITED_RULES="1 2 3 4 6 7 8 11 14 15"
+EXPECTED_DESIGN_RULES="5 9 10 12 13 16"
+
+# extract_all_justified_numbers <file> — prints every distinct rule number that appears in any
+# "**Rules justified:** ..." line in <file>, numerically sorted and space-joined. Shares the same
+# extraction pattern as check_rule_ref_violations above, but collects the full de-duplicated SET
+# rather than counting violations against rules/base-rules.md.
+extract_all_justified_numbers() {
+  file=$1
+  lines=$(grep -oE '^\*\*Rules justified:\*\* [0-9]+([, ]+[0-9]+)*' "$file" 2>/dev/null || true)
+  result=""
+  if [ -n "$lines" ]; then
+    old_ifs=$IFS
+    IFS='
+'
+    for line in $lines; do
+      numlist=${line#\*\*Rules justified:\*\* }
+      old_ifs2=$IFS
+      IFS=','
+      for tok in $numlist; do
+        tok=$(printf '%s' "$tok" | sed 's/^[ \t]*//; s/[ \t]*$//')
+        case "$tok" in
+          '' | *[!0-9]*) continue ;;
+        esac
+        result="$result $tok"
+      done
+      IFS=$old_ifs2
+    done
+    IFS=$old_ifs
+  fi
+  printf '%s\n' "$result" | tr ' ' '\n' | sed '/^$/d' | sort -nu | tr '\n' ' ' | sed 's/ *$//'
+}
+
+# extract_design_decision_numbers <file> — prints every distinct rule number named as
+# "- **Rule N (...)**" under the "## Rules with no research claim behind them" section of <file>,
+# numerically sorted and space-joined.
+extract_design_decision_numbers() {
+  file=$1
+  section=$(extract_section "$file" "## Rules with no research claim behind them")
+  nums=$(printf '%s\n' "$section" | grep -oE '^- \*\*Rule [0-9]+' | grep -oE '[0-9]+' || true)
+  printf '%s\n' "$nums" | sed '/^$/d' | sort -nu | tr '\n' ' ' | sed 's/ *$//'
+}
+
+# check_rule_partition <cited_list> <design_list> <all_list> — prints "ok" if every number in
+# <all_list> (space-separated) appears in EXACTLY ONE of <cited_list>/<design_list>; otherwise
+# prints a one-line description of the first rule number found in both, or in neither.
+check_rule_partition() {
+  cited=$1
+  design=$2
+  all=$3
+  problem=""
+  old_ifs=$IFS
+  IFS=' '
+  for n in $all; do
+    in_cited=no
+    in_design=no
+    for c in $cited; do
+      [ "$c" = "$n" ] && in_cited=yes
+    done
+    for d in $design; do
+      [ "$d" = "$n" ] && in_design=yes
+    done
+    if [ "$in_cited" = yes ] && [ "$in_design" = yes ]; then
+      problem="rule $n is in BOTH groups"
+      break
+    fi
+    if [ "$in_cited" = no ] && [ "$in_design" = no ]; then
+      problem="rule $n is in NEITHER group"
+      break
+    fi
+  done
+  IFS=$old_ifs
+  if [ -z "$problem" ]; then
+    echo ok
+  else
+    echo "$problem"
+  fi
+}
+
+# ------------------------------------------------------------------------------------------------
+# T1 fix (S8 review cycle 2 BLOCKER). The absolute "every rule traces to a finding" claim survived
+# cycle 1's fix in three MORE files (CONTEXT.md, PLAN.md twice) because the old guard was two
+# hardcoded exact strings, checked against two hardcoded filenames. Both halves are rewritten
+# below: the DETECTOR is broadened from two literal strings into a co-occurrence class, and the
+# DRIVER (check_absolute_rule_claim_all_md, further down) scans every tracked Markdown file by
+# default instead of a named pair.
+# ------------------------------------------------------------------------------------------------
+
+# check_absolute_rule_claim_present <file> — prints the count of PARAGRAPHS (blocks of non-blank
+# lines, the same unit check_retired_name_violations above uses) in <file> that pair an absolute
+# rule-coverage quantifier with a traceability/evidence term, case-insensitively:
+#
+#   quantifier — "every rule", "each rule", "each one traces", "all rules", "no rule ships without"
+#   evidence   — "trace" (also matches traces/traced/traceability), "finding", "citation", "research"
+#
+# This is the general SHAPE of the false absolute this project has now shipped five times across
+# two review cycles ("Every rule ... traces to a finding", "Each rule traces to a specific research
+# finding", "Each one traces to a specific research finding", "No rule ships without a citation
+# ..."), not just the original two exact strings.
+#
+# What this DOES NOT guarantee, stated plainly: this is a tripwire over vocabulary, not a proof of
+# falsehood. It cannot distinguish a false absolute from a true statement that happens to share the
+# same words — which is exactly why PLAN.md's and CONTEXT.md's rewritten sentences (this cycle's
+# T1 fix) route AROUND the five quantifiers by construction ("10 of the 16 rules trace...", "Most
+# trace...", "Rules in this document are either...") rather than being exempted after the fact. A
+# future paraphrase using a sixth quantifier this list does not enumerate (e.g. "every single rule",
+# "not a single rule ships uncited") would not be caught: enumerating every possible English
+# quantifier is not a grep/awk problem, and this check does not claim to solve it.
+#
+# Paragraph-level scoping is used here to match this file's other structural checks, and is
+# coarser than sentence-level: a hypothetical future
+# paragraph that legitimately discusses "research" in one sentence and, elsewhere in the SAME
+# paragraph, uses one of the five quantifier phrases in an unrelated, safe way would false-positive.
+# That has not happened anywhere in this repo as of this fix — every real, repo-wide occurrence of
+# the five quantifier phrases was one of the five now-corrected false absolutes, confirmed by grep
+# before this fix shipped — and paragraph-level is the same tradeoff check_retired_name_violations
+# above already accepts, for the same reason (a structural boundary over a distance heuristic).
+check_absolute_rule_claim_present() {
+  file=$1
+  bad=0
+  paragraphs=$(awk 'BEGIN { RS = "" } { gsub(/\n/, " "); print }' "$file" 2>/dev/null || true)
+  if [ -n "$paragraphs" ]; then
+    old_ifs=$IFS
+    IFS='
+'
+    for p in $paragraphs; do
+      lower=$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')
+      has_quantifier=no
+      case "$lower" in
+        *"every rule"* | *"each rule"* | *"each one traces"* | *"all rules"* | *"no rule ships without"*)
+          has_quantifier=yes
+          ;;
+      esac
+      has_evidence_term=no
+      case "$lower" in
+        *"trace"* | *"finding"* | *"citation"* | *"research"*)
+          has_evidence_term=yes
+          ;;
+      esac
+      if [ "$has_quantifier" = yes ] && [ "$has_evidence_term" = yes ]; then
+        bad=$((bad + 1))
+      fi
+    done
+    IFS=$old_ifs
+  fi
+  echo "$bad"
+}
+
+# ABSOLUTE_CLAIM_EXEMPT_FILES — repo-relative paths (newline-separated) allowed to contain the
+# check_absolute_rule_claim_present pattern, and why each one is there. Empty today: no shipped
+# file needs this phrasing — PLAN.md's and CONTEXT.md's own rewritten sentences route around the
+# tripwire by construction (see the comment above), not by exemption. Declared as a real, checked
+# value rather than left as a comment specifically so it cannot grow silently:
+# EXPECTED_ABSOLUTE_CLAIM_EXEMPT below is asserted equal to it, so adding a filename here without
+# a matching, visible update to that expected constant fails the suite instead of quietly taking a
+# file out of scope — the exact "silent allowlist growth" failure mode that let T1 happen at all.
+ABSOLUTE_CLAIM_EXEMPT_FILES=""
+
+# EXPECTED_ABSOLUTE_CLAIM_EXEMPT — declared independently of ABSOLUTE_CLAIM_EXEMPT_FILES (not
+# derived from it) so the assertion comparing the two actually proves something: if this were
+# `EXPECTED_ABSOLUTE_CLAIM_EXEMPT="$ABSOLUTE_CLAIM_EXEMPT_FILES"`, the two would be equal by
+# construction and the check below would pass no matter what either one said.
+EXPECTED_ABSOLUTE_CLAIM_EXEMPT=""
+
+# file_is_absolute_claim_exempt <repo-relative-path> <exempt-list> — prints "yes"/"no". The exempt
+# list is passed in explicitly, not read from the global, so the git-repo round-trip proof further
+# down can exercise the skip branch with a temporary, test-local list without touching the real
+# ABSOLUTE_CLAIM_EXEMPT_FILES the rest of this file relies on.
+file_is_absolute_claim_exempt() {
+  needle=$1
+  list=$2
+  found=no
+  old_ifs=$IFS
+  IFS='
+'
+  for f in $list; do
+    [ "$f" = "$needle" ] && found=yes
+  done
+  IFS=$old_ifs
+  echo "$found"
+}
+
+# ------------------------------------------------------------------------------------------------
+# U2 fix (S8 review cycle 3 BLOCKER). check_absolute_rule_claim_all_md below scanned
+# `git ls-files '*.md'` only. targets/cursor/squirrel-mode.mdc is a tracked, markdown-family,
+# GENERATED file with a DIFFERENT extension — the one file the '*.md' glob structurally cannot
+# match — and it carries a static, hand-written sentence with no source in rules/base-rules.md
+# (scripts/build.sh's write_cursor_mdc). The previous fixer argued this file's prose was all
+# derived from rules/base-rules.md and therefore already covered by scanning that file; that
+# argument is false, proven by injecting a false absolute into write_cursor_mdc's own literal,
+# rebuilding, and watching the suite stay green (see the DoD proof this fix ships with).
+#
+# The fix widens the glob, but doing that by simply adding a second hardcoded '*.mdc' string would
+# repeat cycle 1's original mistake one level up: a hardcoded EXTENSION list is exactly as brittle
+# as cycle 1's hardcoded FILENAME list was, just at a different granularity. So this file declares
+# the covered extensions as a real, checked constant (MARKDOWN_FAMILY_EXTENSIONS, immediately
+# below) and separately, permanently watches for a tracked file with an UNCOVERED markdown-family
+# extension ever appearing (check_uncovered_markdown_extensions, further below) — so a future
+# ".mdx", ".markdown", or ".mkd" file fails this suite loudly the moment it is added, instead of
+# silently falling through the same gap ".mdc" just fell through for an entire review cycle.
+# ------------------------------------------------------------------------------------------------
+
+# MARKDOWN_FAMILY_EXTENSIONS — every file extension (no leading dot, space-separated) this repo's
+# absolute-claim scan treats as "markdown-family" and therefore scans. Extend this list, together
+# with EXPECTED at check_uncovered_markdown_extensions' call site further down, the moment a
+# tracked file with a new markdown-family extension is added on purpose.
+MARKDOWN_FAMILY_EXTENSIONS="md mdc"
+
+# check_uncovered_markdown_extensions <repo_root> <covered-extensions> — prints every DISTINCT
+# extension, among ALL tracked files in <repo_root>, that looks markdown-family (its extension,
+# lower-cased, contains the substring "md" — matching .md, .mdc, .markdown, .mdown, .mkd, .mkdn,
+# .mdx, and similar) but is NOT already listed in <covered-extensions>. Empty output means
+# MARKDOWN_FAMILY_EXTENSIONS above still covers every markdown-family file actually tracked. This
+# is the "assert explicitly which extensions are covered, and fail if an uncovered one appears"
+# half of the U2 fix: rather than trying to enumerate every markdown-adjacent extension that could
+# ever exist (not a solvable grep/awk problem, and not attempted), it watches for one showing up
+# UNCOVERED and fails loudly the moment it does.
+check_uncovered_markdown_extensions() {
+  repo_root=$1
+  covered=$2
+  bad=""
+  files=$(git -C "$repo_root" ls-files 2>/dev/null || true)
+  old_ifs=$IFS
+  IFS='
+'
+  for f in $files; do
+    case "$f" in
+      *.*) ext=${f##*.} ;;
+      *) continue ;;
+    esac
+    ext=$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')
+    case "$ext" in
+      *md*) ;;
+      *) continue ;;
+    esac
+    is_covered=no
+    # $covered ("md mdc", ...) is space-separated, but IFS is newline-only here (for the outer
+    # file loop above) - switch to space just for this inner split, then back to newline
+    # immediately after, or every entry in $covered collapses into a single word and this loop
+    # never matches anything real, wrongly flagging every already-covered extension as uncovered.
+    IFS=' '
+    for c in $covered; do
+      [ "$c" = "$ext" ] && is_covered=yes
+    done
+    IFS='
+'
+    if [ "$is_covered" = no ]; then
+      case " $bad " in
+        *" $ext "*) ;;
+        *) bad="$bad $ext" ;;
+      esac
+    fi
+  done
+  IFS=$old_ifs
+  printf '%s\n' "$bad" | sed 's/^ *//; s/ *$//'
+}
+
+# check_absolute_rule_claim_all_md <repo_root> <exempt-list> — prints two lines:
+#   BAD_COUNT=<n>   the number of scanned, non-exempt markdown-family files with a nonzero
+#                   check_absolute_rule_claim_present count
+#   SCANNED=<space-joined list of every scanned file path the scan considered, exempt or not>
+# Scans `git -C <repo_root> ls-files` once per extension in $MARKDOWN_FAMILY_EXTENSIONS (currently
+# "*.md" and "*.mdc") — every tracked markdown-family file — rather than a hardcoded list. This is
+# the actual T1 structural fix, widened again by U2: cycle 1 hardcoded README.md and
+# docs/RESEARCH.md; cycle 2's three new violations landed in exactly the files that list omitted;
+# cycle 3's found that the widened-but-still-'*.md'-only glob itself omitted a whole EXTENSION
+# (targets/cursor/squirrel-mode.mdc). A file or extension this scan does not enumerate is a file or
+# extension that reverts to that same class of bug.
+check_absolute_rule_claim_all_md() {
+  repo_root=$1
+  exempt_list=$2
+  bad_files=0
+  scanned=""
+  files=""
+  old_ifs=$IFS
+  for ext in $MARKDOWN_FAMILY_EXTENSIONS; do
+    ext_files=$(git -C "$repo_root" ls-files "*.$ext" 2>/dev/null || true)
+    if [ -n "$ext_files" ]; then
+      files="$files
+$ext_files"
+    fi
+  done
+  IFS='
+'
+  for relpath in $files; do
+    [ -z "$relpath" ] && continue
+    scanned="$scanned $relpath"
+    if [ "$(file_is_absolute_claim_exempt "$relpath" "$exempt_list")" = yes ]; then
+      continue
+    fi
+    count=$(check_absolute_rule_claim_present "$repo_root/$relpath")
+    if [ "$count" -gt 0 ]; then
+      bad_files=$((bad_files + 1))
+    fi
+  done
+  IFS=$old_ifs
+  printf 'BAD_COUNT=%s\n' "$bad_files"
+  printf 'SCANNED=%s\n' "$(printf '%s' "$scanned" | sed 's/^ *//')"
+}
+
+# RETIRED_SUCCESS_AMNESIA_PHRASES — the exact phrases (newline-separated) check_retired_success_
+# amnesia_phrasing below bans from README.md: the literal phrase "blurs the memory of one's own
+# accomplishments", the literal phrase "success amnesia", or the fragment "own recent progress"
+# (which catches the specific "own recent progress ... unprompted" construction the S8-2 BLOCKER
+# review found, and any close rewording of the same sentence, without needing to match the whole
+# retired sentence verbatim). Declared as a named constant, not inline literals, specifically so a
+# failure message can point at "RETIRED_SUCCESS_AMNESIA_PHRASES in tests/test_research.sh" as the
+# one concrete place to look — see the U4 fix note directly below for why this exact-phrase list is
+# now this project's ONLY mechanical defense against a resurrected retired claim.
+RETIRED_SUCCESS_AMNESIA_PHRASES="blurs the memory of one's own accomplishments
+success amnesia
+own recent progress"
+
+# ------------------------------------------------------------------------------------------------
+# U4 fix (S8 review cycle 3 MAJOR). A broader co-occurrence tripwire used to sit alongside this
+# exact-phrase check (any sentence pairing an ADHD/memory term with an own-work term, one sentence
+# exempted by name). It was DELETED, not narrowed, after a six-sentence fixture — four legitimate
+# sentences that must pass, plus the reviewer's paraphrase and the original retired sentence that
+# must fail — proved no term list threads the needle:
+#   - Any own-work vocabulary broad enough to catch the reviewer's paraphrase ("...unable to recall
+#     how much they've already gotten done...", which shares essentially no vocabulary with the
+#     retired sentence) is also broad enough to flag ordinary, correct prose about the Done log or
+#     /squirrel:pickup ("remembering where you left off", "recent wins", "your own progress").
+#   - Narrowing the own-work vocabulary down to words unique to the retired sentence itself
+#     ("accomplishments", "success amnesia", ...) stops flagging that ordinary prose, but ALSO stops
+#     catching the paraphrase entirely (it shares none of those words) — and, independent of any
+#     tuning, still wrongly flags a CORRECTLY HEDGED restatement of Finding 8 that explicitly
+#     distinguishes it from the retired claim, because such a sentence must NAME the retired claim's
+#     own vocabulary in order to reject it. No bag-of-words check can tell "citing a claim to reject
+#     it" from "asserting that claim" apart — that is a structural limit of grep/awk pattern
+#     matching, not a tuning problem, and no amount of narrowing removes it.
+# What actually guarantees README.md's research claims stay accurate is PLAN.md Section 2's
+# four-check citation policy (identity, support, whose finding it is, population), applied by a
+# human reviewer reading the paper's own text — not a grep tripwire. The exact-phrase ban above is
+# the honest, narrower thing this file can still mechanically guarantee: it kills the ONE retired
+# sentence dead, in all three of its known phrasings, forever. A future paraphrase carrying the same
+# retired inference in yet other words is a review-time catch, not a test-suite one.
+# ------------------------------------------------------------------------------------------------
+check_retired_success_amnesia_phrasing() {
+  file=$1
+  body=$(cat "$file" 2>/dev/null || true)
+  bad=0
+  old_ifs=$IFS
+  IFS='
+'
+  for phrase in $RETIRED_SUCCESS_AMNESIA_PHRASES; do
+    case "$body" in
+      *"$phrase"*) bad=$((bad + 1)) ;;
+    esac
+  done
+  IFS=$old_ifs
+  echo "$bad"
 }
 
 # ================================================================================================
@@ -975,5 +1465,337 @@ substance_count_fixture="$scratch_dir/bad_substance_count.md"
 sed 's/found five citations that were bibliographically correct/found four citations that were bibliographically correct/' "$research_file" >"$substance_count_fixture"
 fixture_substance_count_ok=$(check_substance_failure_count_ok "$substance_count_fixture")
 assert_eq "no" "$fixture_substance_count_ok" "FAILURE PROOF (scenario 18): a stated count of four against five enumerated items must be caught"
+
+# ================================================================================================
+# 19. README.md <-> docs/RESEARCH.md drift check (S8), part A: the same author-year citation-drift
+#     check as scenario 16, extended to the whole of README.md. README.md must exist. Checked
+#     against the real README.md (expect 0 — by design README.md links to docs/RESEARCH.md rather
+#     than restating individual author-year citations; see check_readme_citation_drift's own
+#     comment for why a real-file "0" here is an expected pass, not a vacuous one), then against a
+#     scratch copy with a wholly fabricated citation appended (expect 1) — the actual proof that
+#     the extractor is not simply matching nothing.
+# ================================================================================================
+assert_file_exists "$readme_file" "README.md must exist for the drift check"
+
+real_readme_citation_bad=$(check_readme_citation_drift "$readme_file" "$research_file")
+assert_eq "0" "$real_readme_citation_bad" "every author-year citation in README.md must be corroborated (name and year) somewhere in docs/RESEARCH.md"
+
+readme_citation_fixture="$scratch_dir/bad_readme_citation.md"
+cp "$readme_file" "$readme_citation_fixture"
+printf '\nSome new effect was found (Fitzgerald & Owusu, 2019, *Journal of Nowhere*).\n' >>"$readme_citation_fixture"
+fixture_readme_citation_bad=$(check_readme_citation_drift "$readme_citation_fixture" "$research_file")
+assert_eq "1" "$fixture_readme_citation_bad" "FAILURE PROOF (scenario 19): a fabricated citation added to README.md, absent from docs/RESEARCH.md, must be caught"
+
+# ================================================================================================
+# 20. README.md <-> docs/RESEARCH.md drift check (S8), part B: the same retired-name check as
+#     scenario 17 (check_retired_name_violations is already file-generic — no README-specific
+#     variant needed), applied directly to README.md. A retired/wrong-identity name (Karalunas,
+#     Salari, Roberts, or a bare "Sweller" not immediately followed by "& Chandler") must not
+#     appear anywhere in README.md except inside a paragraph carrying its own "⚠" correction
+#     marker. Checked against the real README.md (expect 0), then against a scratch copy with a
+#     brand-new paragraph, carrying no "⚠", that cites "Roberts, Milich & Fillmore, 2012" and
+#     "Sweller, 1988" as if they were live evidence (expect 2, the same count scenario 17 expects
+#     for the identical injected text).
+# ================================================================================================
+real_readme_retired_name_bad=$(check_retired_name_violations "$readme_file")
+assert_eq "0" "$real_readme_retired_name_bad" "no retired name (Karalunas/Salari/Roberts/bare Sweller) may appear live in README.md outside a ⚠-marked correction paragraph"
+
+readme_retired_name_fixture="$scratch_dir/bad_readme_retired_name.md"
+cp "$readme_file" "$readme_retired_name_fixture"
+printf '\nWorking memory declines with load (Roberts, Milich & Fillmore, 2012). Also (Sweller, 1988).\n' >>"$readme_retired_name_fixture"
+fixture_readme_retired_name_bad=$(check_retired_name_violations "$readme_retired_name_fixture")
+assert_eq "2" "$fixture_readme_retired_name_bad" "FAILURE PROOF (scenario 20): a retired name (Roberts) and a bare Sweller used as live citations in README.md, outside a ⚠ paragraph, must both be caught"
+
+# ================================================================================================
+# 21. Rules-coverage cross-check, part A (S8-1 BLOCKER fix): every rule number appearing in any
+#     "**Rules justified:**" line in docs/RESEARCH.md, de-duplicated, must equal the explicitly
+#     declared EXPECTED_CITED_RULES set. Checked against the real file (expect a match), then
+#     against a scratch copy with a fabricated "**Rules justified:** 5" line appended — rule 5 is
+#     already claimed by the design-decisions section, so this is exactly "someone adds a citation
+#     without updating the design-decisions section" (expect no match, and see scenario 23 for the
+#     resulting partition break).
+# ================================================================================================
+real_cited_rules=$(extract_all_justified_numbers "$research_file")
+assert_eq "$EXPECTED_CITED_RULES" "$real_cited_rules" "the rule numbers appearing in docs/RESEARCH.md's 'Rules justified:' lines must equal the declared expected set"
+
+fake_citation_fixture="$scratch_dir/bad_fake_citation.md"
+cp "$research_file" "$fake_citation_fixture"
+printf '\n**Rules justified:** 5 — a fabricated citation for an otherwise-uncited rule.\n' >>"$fake_citation_fixture"
+fixture_cited_rules=$(extract_all_justified_numbers "$fake_citation_fixture")
+assert_eq "1 2 3 4 5 6 7 8 11 14 15" "$fixture_cited_rules" "FAILURE PROOF (scenario 21): a fabricated 'Rules justified: 5' line must change the extracted cited-rule set to include 5"
+
+# ================================================================================================
+# 22. Rules-coverage cross-check, part B (S8-1 BLOCKER fix): every rule number named as
+#     "- **Rule N (...)**" under docs/RESEARCH.md's "## Rules with no research claim behind them"
+#     section must equal the explicitly declared EXPECTED_DESIGN_RULES set. Checked against the
+#     real file (expect a match), then against a scratch copy with rule 13's bullet deleted —
+#     exactly "someone removes a rule from the design-decisions section without giving it a
+#     citation" (expect no match, and see scenario 23 for the resulting partition break).
+# ================================================================================================
+real_design_rules=$(extract_design_decision_numbers "$research_file")
+assert_eq "$EXPECTED_DESIGN_RULES" "$real_design_rules" "the rule numbers named in docs/RESEARCH.md's design-decisions section must equal the declared expected set"
+
+missing_design_fixture="$scratch_dir/bad_missing_design_rule.md"
+grep -v '^- \*\*Rule 13 (Safety override)\.\*\*' "$research_file" >"$missing_design_fixture"
+fixture_design_rules=$(extract_design_decision_numbers "$missing_design_fixture")
+assert_eq "5 9 10 12 16" "$fixture_design_rules" "FAILURE PROOF (scenario 22): deleting rule 13's bullet from the design-decisions section must drop 13 from the extracted set"
+
+# ================================================================================================
+# 23. Rules-coverage cross-check, part C (S8-1 BLOCKER fix): every rule number 1..16, parsed from
+#     rules/base-rules.md (never hardcoded — reuses $valid_rule_numbers from scenario 5 above), is
+#     accounted for in EXACTLY ONE of {cited, design-decision}. Checked against the real file
+#     (expect "ok"), then against the two scenario 21/22 fixtures independently: the fabricated
+#     "Rules justified: 5" line puts rule 5 in BOTH groups, and the deleted rule-13 bullet puts
+#     rule 13 in NEITHER — the two directions of drift invariant 6e's fix must catch.
+# ================================================================================================
+all_rules_flat=$(printf '%s\n' "$valid_rule_numbers" | sed '/^$/d' | sort -nu | tr '\n' ' ' | sed 's/ *$//')
+assert_eq "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16" "$all_rules_flat" "sanity check: rules/base-rules.md must parse to exactly rules 1 through 16 (vacuous-pass guard for scenario 23)"
+
+real_partition=$(check_rule_partition "$real_cited_rules" "$real_design_rules" "$all_rules_flat")
+assert_eq "ok" "$real_partition" "every rule 1..16 must be accounted for in exactly one of {cited, design-decision}, no overlap and no gap"
+
+fixture_partition_extra_citation=$(check_rule_partition "$fixture_cited_rules" "$real_design_rules" "$all_rules_flat")
+assert_eq "rule 5 is in BOTH groups" "$fixture_partition_extra_citation" "FAILURE PROOF (scenario 23, direction A): a fabricated citation for an already-design-decision rule must be caught as a BOTH-groups overlap"
+
+fixture_partition_missing_design=$(check_rule_partition "$real_cited_rules" "$fixture_design_rules" "$all_rules_flat")
+assert_eq "rule 13 is in NEITHER group" "$fixture_partition_missing_design" "FAILURE PROOF (scenario 23, direction B): deleting a design-decision rule's bullet without giving it a citation must be caught as a NEITHER-group gap"
+
+# ================================================================================================
+# 24. [REWRITTEN, T1 BLOCKER fix; WIDENED, U2 BLOCKER fix (S8 review cycle 3)] No tracked
+#     markdown-family file contains an absolute "every/each/all rule(s) ... trace(s) to a finding"
+#     style claim, scanned via `git ls-files` once per extension in $MARKDOWN_FAMILY_EXTENSIONS
+#     ("*.md" and, as of U2, "*.mdc") — SCAN-ALL-BY-DEFAULT — rather than the two hardcoded
+#     filenames cycle 1 used, or the single hardcoded EXTENSION cycle 1/2's '*.md'-only glob used.
+#     Checked against the real repo (expect 0 flagged files, over the real, full file list), then
+#     against scratch copies of FOUR files: the original two (README.md, docs/RESEARCH.md) plus the
+#     two kinds of file cycle 2's actual violations landed in — a top-level doc (CONTEXT.md) and a
+#     docs/adr/ file — each with the claim injected. A FIFTH proof (U2) covers the actual cycle-3
+#     BLOCKER: targets/cursor/squirrel-mode.mdc, the one tracked markdown-family file the old
+#     '*.md'-only glob structurally could not match. Extension coverage is also asserted explicitly
+#     (check_uncovered_markdown_extensions), so a future ".mdx"/".markdown"/".mkd" file fails this
+#     suite the moment it appears instead of silently falling through the same gap ".mdc" did. The
+#     exemption mechanism (empty today) is proven too: the declared list is asserted equal to an
+#     independently-declared expected constant, and a throwaway scratch git repository proves the
+#     scan-all driver both flags a violation in a file that was never on any list and correctly
+#     skips a file explicitly named as exempt — now proven across TWO extensions, not just one.
+# ================================================================================================
+real_all_md_result=$(check_absolute_rule_claim_all_md "$repo_root" "$ABSOLUTE_CLAIM_EXEMPT_FILES")
+real_absolute_claim_bad=$(printf '%s\n' "$real_all_md_result" | sed -n 's/^BAD_COUNT=//p')
+real_absolute_claim_scanned=$(printf '%s\n' "$real_all_md_result" | sed -n 's/^SCANNED=//p')
+assert_eq "0" "$real_absolute_claim_bad" "no tracked markdown-family file (scanned via git ls-files, once per extension in MARKDOWN_FAMILY_EXTENSIONS) may contain an absolute 'every/each/all rule(s) ... trace(s) to a finding' style claim"
+
+# Sanity checks on the scan itself (vacuous-pass guards): the scanned count must equal the repo's
+# own independently-computed count across every extension in MARKDOWN_FAMILY_EXTENSIONS (nothing
+# silently dropped), and the list must include files well outside the original hardcoded pair —
+# CONTEXT.md, PLAN.md, a docs/adr/ file, AND (U2) targets/cursor/squirrel-mode.mdc — which is the
+# entire T1/U2 bug in one assertion: a scan still secretly scoped to {README.md, docs/RESEARCH.md}
+# or to the '*.md' extension alone would fail this immediately.
+real_markdown_family_file_count=0
+for _ext in $MARKDOWN_FAMILY_EXTENSIONS; do
+  _ext_count=$(git -C "$repo_root" ls-files "*.$_ext" 2>/dev/null | wc -l | tr -d ' ')
+  real_markdown_family_file_count=$((real_markdown_family_file_count + _ext_count))
+done
+scanned_md_file_count=$(printf '%s\n' "$real_absolute_claim_scanned" | tr ' ' '\n' | sed '/^$/d' | wc -l | tr -d ' ')
+assert_eq "$real_markdown_family_file_count" "$scanned_md_file_count" "the absolute-claim scan must cover every tracked markdown-family file (every extension in MARKDOWN_FAMILY_EXTENSIONS), no more and no fewer (vacuous-pass guard)"
+assert_contains "$real_absolute_claim_scanned" "targets/cursor/squirrel-mode.mdc" "the scan must cover targets/cursor/squirrel-mode.mdc — U2's actual gap: the one tracked markdown-family file the old '*.md'-only glob structurally could not match"
+
+# U2 fix: extension coverage is declared, not just assumed. Checked against the real repo (expect
+# no uncovered markdown-family extension), then against a throwaway scratch git repository with a
+# brand-new ".mdx" file (expect it flagged as uncovered).
+real_uncovered_extensions=$(check_uncovered_markdown_extensions "$repo_root" "$MARKDOWN_FAMILY_EXTENSIONS")
+assert_eq "" "$real_uncovered_extensions" "every tracked file with a markdown-family extension must be listed in MARKDOWN_FAMILY_EXTENSIONS in tests/test_research.sh, or the scan silently misses it the way '*.mdc' was missed for an entire review cycle"
+
+uncovered_ext_repo="$scratch_dir/uncovered_ext_repo"
+mkdir -p "$uncovered_ext_repo"
+(
+  cd "$uncovered_ext_repo" || exit 1
+  git init -q
+  printf '# A new markdown-family extension\n\nNothing special here.\n' >sample.mdx
+  git add sample.mdx
+) >/dev/null 2>&1
+fixture_uncovered_extensions=$(check_uncovered_markdown_extensions "$uncovered_ext_repo" "$MARKDOWN_FAMILY_EXTENSIONS")
+assert_eq "mdx" "$fixture_uncovered_extensions" "FAILURE PROOF (U2, extension coverage): a brand-new '.mdx' file must be reported as an uncovered markdown-family extension"
+assert_contains "$real_absolute_claim_scanned" "README.md" "the scan must cover README.md"
+assert_contains "$real_absolute_claim_scanned" "docs/RESEARCH.md" "the scan must cover docs/RESEARCH.md"
+assert_contains "$real_absolute_claim_scanned" "CONTEXT.md" "the scan must cover CONTEXT.md — one of the two files cycle 1's hardcoded list missed"
+assert_contains "$real_absolute_claim_scanned" "PLAN.md" "the scan must cover PLAN.md — the other file cycle 1's hardcoded list missed"
+assert_contains "$real_absolute_claim_scanned" "docs/adr/0001-output-style-not-skill.md" "the scan must cover a docs/adr/ file (vacuous-pass guard: proves this is not still a two-file allowlist)"
+
+# FAILURE PROOF (scenario 24a/24b): the original two files, same injected text as before this fix,
+# run through the broadened per-file detector directly.
+absolute_readme_fixture="$scratch_dir/bad_absolute_readme.md"
+cp "$readme_file" "$absolute_readme_fixture"
+printf '\nNo rule ships without a citation, full stop.\n' >>"$absolute_readme_fixture"
+fixture_absolute_readme_bad=$(check_absolute_rule_claim_present "$absolute_readme_fixture")
+assert_eq "1" "$fixture_absolute_readme_bad" "FAILURE PROOF (scenario 24a, README.md): re-adding the retired 'No rule ships without' claim must be caught"
+
+absolute_research_fixture="$scratch_dir/bad_absolute_research.md"
+cp "$research_file" "$absolute_research_fixture"
+# shellcheck disable=SC2016 # single-quoted deliberately: the backtick-quoted
+# `rules/base-rules.md` below is literal text to inject, not a command substitution.
+printf '\nEvery rule in `rules/base-rules.md` traces to a finding, no exceptions.\n' >>"$absolute_research_fixture"
+fixture_absolute_research_bad=$(check_absolute_rule_claim_present "$absolute_research_fixture")
+assert_eq "1" "$fixture_absolute_research_bad" "FAILURE PROOF (scenario 24b, docs/RESEARCH.md): re-adding the retired 'Every rule ... traces' claim must be caught"
+
+# FAILURE PROOF (scenario 24c/24d) — T1's ACTUAL bug: a file that is NEITHER README.md NOR
+# docs/RESEARCH.md. Injected into scratch copies of CONTEXT.md's real content and a docs/adr/
+# file's real content — the two kinds of file cycle 2's violations actually landed in. Cycle 1's
+# guard, wired to the original two filenames, could not have caught either of these.
+context_file="$repo_root/CONTEXT.md"
+adr_sample_file="$repo_root/docs/adr/0001-output-style-not-skill.md"
+assert_file_exists "$context_file" "CONTEXT.md must exist for scenario 24's generalization proof"
+assert_file_exists "$adr_sample_file" "docs/adr/0001-output-style-not-skill.md must exist for scenario 24's generalization proof"
+
+absolute_context_fixture="$scratch_dir/bad_absolute_context.md"
+cp "$context_file" "$absolute_context_fixture"
+printf '\nEach rule traces to a specific research finding, no exceptions.\n' >>"$absolute_context_fixture"
+fixture_absolute_context_bad=$(check_absolute_rule_claim_present "$absolute_context_fixture")
+assert_eq "1" "$fixture_absolute_context_bad" "FAILURE PROOF (scenario 24c, CONTEXT.md — not one of the two originally hardcoded files): the retired 'Each rule traces' claim must be caught here too"
+
+absolute_adr_fixture="$scratch_dir/bad_absolute_adr.md"
+cp "$adr_sample_file" "$absolute_adr_fixture"
+printf '\nAll rules trace to a citation in the research record, without exception.\n' >>"$absolute_adr_fixture"
+fixture_absolute_adr_bad=$(check_absolute_rule_claim_present "$absolute_adr_fixture")
+assert_eq "1" "$fixture_absolute_adr_bad" "FAILURE PROOF (scenario 24d, a docs/adr/ file — not one of the two originally hardcoded files): an 'All rules trace to a citation' claim must be caught here too"
+
+# FAILURE PROOF (scenario 24, U2 BLOCKER fix) — the actual cycle-3 bug: a tracked markdown-family
+# file with an extension OTHER than .md. targets/cursor/squirrel-mode.mdc is real, tracked, and
+# GENERATED (see .build-checkpoint.md invariant 2 — never hand-edit it), so this proof injects the
+# claim into a SCRATCH COPY of its real content rather than the tracked file itself, exactly the
+# same pattern already used for README.md/docs/RESEARCH.md/CONTEXT.md/the docs/adr/ file above.
+mdc_sample_file="$repo_root/targets/cursor/squirrel-mode.mdc"
+assert_file_exists "$mdc_sample_file" "targets/cursor/squirrel-mode.mdc must exist for scenario 24's .mdc generalization proof (U2)"
+
+absolute_mdc_fixture="$scratch_dir/bad_absolute.mdc"
+cp "$mdc_sample_file" "$absolute_mdc_fixture"
+printf '\nEvery rule here traces to a specific research finding, no exceptions.\n' >>"$absolute_mdc_fixture"
+fixture_absolute_mdc_bad=$(check_absolute_rule_claim_present "$absolute_mdc_fixture")
+assert_eq "1" "$fixture_absolute_mdc_bad" "FAILURE PROOF (scenario 24, U2 BLOCKER, targets/cursor/squirrel-mode.mdc): the per-file detector itself already catches the claim in a .mdc file — U2's actual bug was that the DRIVER never handed it a .mdc path at all, proven by the widened-scan assertions above"
+
+# ------------------------------------------------------------------------------------------------
+# Exemption mechanism: declared, and ASSERTED so it cannot grow silently (scenario 24e/24f).
+# ------------------------------------------------------------------------------------------------
+assert_eq "$EXPECTED_ABSOLUTE_CLAIM_EXEMPT" "$ABSOLUTE_CLAIM_EXEMPT_FILES" "the absolute-claim exemption list must equal the declared, independently-stated expected value — an exemption added without updating this assertion must fail loudly, not silently take a file out of scope"
+
+# FAILURE PROOF (scenario 24e): simulate a future edit that adds an exemption without updating the
+# expected constant, run in the same subshell-isolated style as scenario 14's proofs so its
+# deliberate FAIL does not pollute this file's real counters.
+proof_output=$( (
+  ASSERT_PASS_COUNT=0
+  ASSERT_FAIL_COUNT=0
+  simulated_exempt_files="CONTEXT.md"
+  assert_eq "$EXPECTED_ABSOLUTE_CLAIM_EXEMPT" "$simulated_exempt_files" "proof check"
+) )
+case "$proof_output" in
+  *"FAIL:"*) fixture_silent_exemption_caught=yes ;;
+  *) fixture_silent_exemption_caught=no ;;
+esac
+assert_eq "yes" "$fixture_silent_exemption_caught" "FAILURE PROOF (scenario 24e): adding a file to the exemption list without updating EXPECTED_ABSOLUTE_CLAIM_EXEMPT must be caught"
+
+# ------------------------------------------------------------------------------------------------
+# FAILURE PROOF (scenario 24f): full round trip on real `git ls-files` plumbing, in a throwaway
+# scratch git repository (no identity/commit needed — `git ls-files` reads the index, populated by
+# `git add` alone). Proves the scan-all driver (a) flags a violation in a brand-new file that was
+# never on any historical list, and (b) correctly SKIPS that same file once it is named in the
+# exempt list passed in.
+# ------------------------------------------------------------------------------------------------
+mini_repo="$scratch_dir/mini_absolute_claim_repo"
+mkdir -p "$mini_repo"
+(
+  cd "$mini_repo" || exit 1
+  git init -q
+  printf '# Clean file\n\nNothing to see here.\n' >clean.md
+  printf '# A brand new doc\n\nEvery rule in this file traces to a finding, no exceptions.\n' >new_offender.md
+  printf '# A brand new .mdc doc\n\nEvery rule in this file traces to a finding, no exceptions.\n' >new_offender.mdc
+  git add clean.md new_offender.md new_offender.mdc
+) >/dev/null 2>&1
+
+mini_result_no_exempt=$(check_absolute_rule_claim_all_md "$mini_repo" "")
+mini_bad_no_exempt=$(printf '%s\n' "$mini_result_no_exempt" | sed -n 's/^BAD_COUNT=//p')
+assert_eq "2" "$mini_bad_no_exempt" "FAILURE PROOF (scenario 24f, part 1, widened by U2): the scan-all driver must flag a violation in BOTH a brand-new .md file and a brand-new .mdc file, neither ever on any hardcoded list"
+
+mini_result_one_exempt=$(check_absolute_rule_claim_all_md "$mini_repo" "new_offender.md")
+mini_bad_one_exempt=$(printf '%s\n' "$mini_result_one_exempt" | sed -n 's/^BAD_COUNT=//p')
+assert_eq "1" "$mini_bad_one_exempt" "FAILURE PROOF (scenario 24f, part 2, U2): exempting only the .md offender must leave the .mdc offender still flagged - proves the exemption is per-file, not per-extension"
+
+mini_result_both_exempt=$(check_absolute_rule_claim_all_md "$mini_repo" "new_offender.md
+new_offender.mdc")
+mini_bad_both_exempt=$(printf '%s\n' "$mini_result_both_exempt" | sed -n 's/^BAD_COUNT=//p')
+assert_eq "0" "$mini_bad_both_exempt" "FAILURE PROOF (scenario 24f, part 3): the scan-all driver must skip every file explicitly named in the exempt list passed to it, across both extensions"
+
+# ================================================================================================
+# 25. The retired "success amnesia" framing (docs/RESEARCH.md Finding 8's own retraction) stays
+#     dead in README.md (S8-2 BLOCKER fix). Scoped to README.md only — see
+#     check_retired_success_amnesia_phrasing's comment for why docs/RESEARCH.md is deliberately
+#     never checked by this function. Checked against the real README.md (expect 0), then against
+#     a scratch copy with all three retired phrasings appended (expect 3). This is the ONLY
+#     mechanical guard against this specific retired claim as of S8 review cycle 3 (U4 fix) — the
+#     broader co-occurrence tripwire that used to sit alongside it was deleted; see the U4 note near
+#     RETIRED_SUCCESS_AMNESIA_PHRASES, above, for why.
+# ================================================================================================
+real_readme_amnesia_bad=$(check_retired_success_amnesia_phrasing "$readme_file")
+assert_eq "0" "$real_readme_amnesia_bad" "README.md must not contain a phrase listed in RETIRED_SUCCESS_AMNESIA_PHRASES (tests/test_research.sh). If this fired on a genuinely new, correct sentence: reword that sentence to avoid these specific phrases - do not add an exemption. A paraphrase carrying the same retired inference in DIFFERENT words is not something this check can see; that class of drift is caught by a human reviewer applying PLAN.md Section 2's four-check citation policy, not by grep."
+
+amnesia_fixture="$scratch_dir/bad_amnesia.md"
+cp "$readme_file" "$amnesia_fixture"
+printf '\nADHD blurs the memory of one'"'"'s own accomplishments, sometimes called success amnesia, making their own recent progress hard to recall.\n' >>"$amnesia_fixture"
+fixture_amnesia_bad=$(check_retired_success_amnesia_phrasing "$amnesia_fixture")
+assert_eq "3" "$fixture_amnesia_bad" "FAILURE PROOF (scenario 25): all three retired success-amnesia phrasings, reintroduced into README.md, must be caught"
+
+# ================================================================================================
+# 26. The "N of the 16" / "other M rules" prose counts in README.md, docs/RESEARCH.md, AND (added
+#     this cycle as part of the T1 fix — PLAN.md now states these same specific counts, see
+#     PLAN.md's rewritten Section 1 item 1) PLAN.md's opening statements are tied to the same
+#     declared expected-set sizes checks 21/22 compare against, not just independently worded to
+#     currently match. All three files hard-wrap their prose, so the needle is checked against a
+#     FLATTENED copy of each body (newlines replaced with spaces, then runs of spaces squeezed to
+#     one — `tr -s ' '` — so a needle is never missed purely because a line-wrap boundary landed a
+#     multi-space run in the middle of it) exactly like check_citation_drift_in_text already does
+#     above for the same reason. Checked against all three real files (expect the derived needles
+#     present in each), then against a scratch copy of README.md AND a scratch copy of PLAN.md,
+#     each with the cited-rule count changed from 10 to 9 (expect the needle absent from both).
+#
+#     [CORRECTED, S8 review cycle 3, U8 MINOR fix] THIS is a two-step mechanism, not a one-shot
+#     one — a comment here used to imply every place stating a count goes red together, which is
+#     false. Editing docs/RESEARCH.md's real "Rules justified:"/design-decision lines (a genuine
+#     new citation) reddens checks 21/22/23 FIRST — the extracted set no longer matches the
+#     declared EXPECTED_CITED_RULES/EXPECTED_DESIGN_RULES constants above. THIS check stays green
+#     at that point, because its needle is derived from those constants (still unchanged) and the
+#     prose (also still unchanged) still matches them. Only once a maintainer updates those two
+#     constants to reflect the new true partition does the needle THIS check derives from change —
+#     and only THEN does this check go red, because the prose in README.md/docs/RESEARCH.md/PLAN.md
+#     has not been rewritten yet. Two separate, sequential prompts toward two separate fixes: first
+#     "update the declared rule sets," then "now rewrite the prose to match them" — never one
+#     failure lighting up everywhere at once.
+# ================================================================================================
+# Word counts via `wc -w`, not an unquoted `set -- $var` word-split, so this stays clean
+# under shellcheck's default globbing/word-splitting check.
+expected_cited_count=$(printf '%s\n' "$EXPECTED_CITED_RULES" | wc -w | tr -d ' ')
+expected_design_count=$(printf '%s\n' "$EXPECTED_DESIGN_RULES" | wc -w | tr -d ' ')
+total_rule_count=$(printf '%s\n' "$all_rules_flat" | wc -w | tr -d ' ')
+
+cited_count_needle="${expected_cited_count} of the ${total_rule_count} base rules"
+design_count_needle="other ${expected_design_count} rules are stated design decisions"
+
+readme_flat=$(tr '\n' ' ' <"$readme_file" | tr -s ' ')
+research_flat=$(tr '\n' ' ' <"$research_file" | tr -s ' ')
+plan_flat=$(tr '\n' ' ' <"$plan_file" | tr -s ' ')
+
+assert_contains "$readme_flat" "$cited_count_needle" "README.md's cited-rule-count prose must match the declared expected-set size"
+assert_contains "$research_flat" "$cited_count_needle" "docs/RESEARCH.md's cited-rule-count prose must match the declared expected-set size"
+assert_contains "$plan_flat" "$cited_count_needle" "PLAN.md's cited-rule-count prose must match the declared expected-set size"
+assert_contains "$readme_flat" "$design_count_needle" "README.md's design-decision-count prose must match the declared expected-set size"
+assert_contains "$research_flat" "$design_count_needle" "docs/RESEARCH.md's design-decision-count prose must match the declared expected-set size"
+assert_contains "$plan_flat" "$design_count_needle" "PLAN.md's design-decision-count prose must match the declared expected-set size"
+
+stale_count_fixture="$scratch_dir/bad_stale_count.md"
+sed "s/${expected_cited_count} of the ${total_rule_count} base rules/9 of the ${total_rule_count} base rules/" "$readme_file" >"$stale_count_fixture"
+stale_count_flat=$(tr '\n' ' ' <"$stale_count_fixture" | tr -s ' ')
+assert_not_contains "$stale_count_flat" "$cited_count_needle" "FAILURE PROOF (scenario 26, README.md): a README.md cited-rule count changed to 9 must no longer match the needle derived from the declared expected set"
+
+stale_plan_count_fixture="$scratch_dir/bad_stale_plan_count.md"
+sed "s/${expected_cited_count} of the ${total_rule_count} base rules/9 of the ${total_rule_count} base rules/" "$plan_file" >"$stale_plan_count_fixture"
+stale_plan_count_flat=$(tr '\n' ' ' <"$stale_plan_count_fixture" | tr -s ' ')
+assert_not_contains "$stale_plan_count_flat" "$cited_count_needle" "FAILURE PROOF (scenario 26, PLAN.md): a PLAN.md cited-rule count changed to 9 must no longer match the needle derived from the declared expected set"
 
 assert_report
