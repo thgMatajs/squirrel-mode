@@ -1,5 +1,6 @@
 #!/bin/sh
-# build.sh - generates every squirrel-mode artifact from rules/base-rules.md.
+# build.sh - generates every squirrel-mode artifact from rules/base-rules.md
+# and from the four ported command skills under skills/.
 #
 # rules/base-rules.md is the ONLY place the 16 base rules exist (see
 # .build-checkpoint.md invariant 1). This script parses it and writes:
@@ -7,6 +8,21 @@
 #   - skills/rules/SKILL.md            (all 16 rules, targets: claude-code)
 #   - targets/codex/AGENTS.md          (15 rules, targets: codex)
 #   - targets/cursor/squirrel-mode.mdc (15 rules, targets: cursor)
+#
+# It additionally ports four of the seven Claude Code command skills to
+# the other two targets, per PLAN.md's "Which commands port" table
+# (ADR-0004). Each ported artifact is generated from ONE source, the
+# corresponding skills/<name>/SKILL.md - never hand-copied:
+#   - targets/codex/skills/digest/SKILL.md   <- skills/digest/SKILL.md
+#   - targets/codex/skills/plan/SKILL.md     <- skills/plan/SKILL.md
+#   - targets/codex/skills/init/SKILL.md     <- skills/init/SKILL.md
+#   - targets/codex/skills/tune/SKILL.md     <- skills/tune/SKILL.md
+#   - targets/cursor/commands/digest.md      <- skills/digest/SKILL.md
+#   - targets/cursor/commands/plan.md        <- skills/plan/SKILL.md
+# pickup, off, and on are deliberately NOT ported to either target: each
+# depends on a lifecycle hook (SessionStart's injected checkpoint path,
+# UserPromptSubmit's sentinel-claiming) neither host has, and there is no
+# host-appropriate way to fake that.
 #
 # THE PARSER CONTRACT: a rule body runs from immediately after its
 # "<!-- targets: ... -->" marker line to the next "### <n>." heading, or
@@ -17,18 +33,27 @@
 #
 # Accepts no arguments. Resolves the repo root from this script's own
 # location, so it produces identical output regardless of the caller's
-# working directory. Idempotent: given the same rules/base-rules.md, two
-# runs produce byte-identical artifacts (no timestamps, no counters, no
-# other non-deterministic content).
+# working directory. Idempotent: given the same rules/base-rules.md and
+# skills/*/SKILL.md, two runs produce byte-identical artifacts (no
+# timestamps, no counters, no other non-deterministic content).
 #
 # Fails loudly (non-zero exit, message on stderr, no partial writes) if
 # rules/base-rules.md is missing, does not contain exactly 16 rule
 # headings numbered 1..16 with no gaps or duplicates, if any heading is
 # not followed by exactly one targets marker, or if any targets value is
-# not "all" or a comma-separated subset of claude-code/codex/cursor. All
-# validation happens before any output file is written, so a malformed
+# not "all" or a comma-separated subset of claude-code/codex/cursor; or if
+# any of skills/{digest,plan,init,tune}/SKILL.md is missing or lacks a
+# well-formed single-line double-quoted frontmatter "description" field.
+# All validation happens before any output file is written, so malformed
 # input can never produce a half-empty generated artifact.
 set -eu
+
+# A CDPATH entry containing "." makes the `cd` on the next line ECHO its
+# resolved path to stdout in addition to changing directory, corrupting
+# the command substitution below with an extra line before this script
+# ever gets to resolve its own repo root. Unset unconditionally, before
+# that `cd` runs, rather than trust the invoking shell's environment.
+unset CDPATH
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
@@ -290,6 +315,76 @@ if [ -n "$stray_marker_records" ]; then
   fail "rule $stray_rule contains a '<!-- targets: ... -->'-shaped line outside its marker zone (rule:line:text = $first_stray). Delete it, move it directly after the heading, or use inline code (backticks) if it is meant as prose about the marker syntax."
 fi
 
+# --- Availability and validation of the four ported command sources ------
+#
+# skills/<name>/SKILL.md is committed and present for all four ported
+# commands (digest, plan, init, tune) in this repository. A MISSING
+# source file is now a LOUD, WHOLE-BUILD FAILURE, exactly like a
+# malformed rules/base-rules.md above - never a silent skip of that one
+# artifact. An earlier version of this script tolerated absence (to let
+# a stripped-down scratch fixture holding only scripts/build.sh and
+# rules/base-rules.md still build the four rules-derived artifacts),
+# but that "skip if absent" escape hatch is exactly what let a deleted
+# skills/plan/SKILL.md ship a STALE targets/cursor/commands/plan.md
+# with build.sh exiting 0 - and the CI drift check could never catch
+# it, because regenerating with the same skipped source reproduces the
+# same stale artifact. The fixture problem is fixed in the fixture, not
+# here: tests/test_build.sh's make_build_scratch() now copies the four
+# real skills/{digest,plan,init,tune}/SKILL.md into its scratch tree
+# too, so it no longer needs this script to tolerate their absence.
+validate_source_skill() {
+  name=$1
+  file="$repo_root/skills/$name/SKILL.md"
+  [ -f "$file" ] || fail "skills/$name/SKILL.md not found at $file - this is one of the four ported command skills (digest, plan, init, tune); a missing source is a build failure, never a silently skipped artifact."
+  delim_count=$(awk '/^---$/ { c++ } END { print c + 0 }' "$file")
+  [ "$delim_count" -eq 2 ] || fail "skills/$name/SKILL.md must have exactly 2 '---' frontmatter delimiter lines (found $delim_count)"
+  desc_line=$(awk '
+    /^---$/ { c++; if (c == 2) exit; next }
+    c == 1 && /^description: "/ { print; exit }
+  ' "$file")
+  [ -n "$desc_line" ] || fail "skills/$name/SKILL.md's frontmatter 'description' field could not be found (expected a single double-quoted line starting 'description: \"')"
+}
+
+for ported_name in digest plan init tune; do
+  validate_source_skill "$ported_name"
+done
+
+# --- Backslash guard: awk -v escape-processes backslashes ----------------
+#
+# literal_replace, delete_exact_line, insert_paragraph_after, and
+# add_title_suffix (defined further below) all pass strings through
+# `awk -v name=value`, where the awk implementation itself, not this
+# script, silently turns "\n", "\t", "\\", etc. inside that value into
+# their escape-sequence meaning before the awk program ever sees the
+# literal text. No source text in skills/{digest,plan,init,tune}/SKILL.md
+# contains a backslash today, so this is LATENT, not yet triggered - but
+# it can never be caught by the drift check, because the corruption
+# would be a deterministic function of the source: both the committed
+# artifact and a fresh regeneration from a backslash-containing source
+# would be identically, silently wrong, and "identical to a fresh
+# regeneration" is the only thing the drift check can ever verify. The
+# fix chosen here is to turn that silent future corruption into a loud
+# failure now, not to make awk -v backslash-safe (which would mean
+# reworking every one of those four transformation functions to route
+# values through a mechanism other than awk -v, a larger change than
+# this guard).
+check_no_backslash_in_source_skills() {
+  hit=""
+  for name in digest plan init tune; do
+    file="$repo_root/skills/$name/SKILL.md"
+    # shellcheck disable=SC1003 # this single quote correctly contains
+    # one literal backslash character - the pattern grep -F is meant to
+    # search for - not an attempt to escape the closing quote.
+    if grep -qF '\' "$file"; then
+      hit="$hit skills/$name/SKILL.md"
+    fi
+  done
+  if [ -n "$hit" ]; then
+    fail "the following source skill file(s) contain a literal backslash: $hit. Every ported-artifact transformation in this script (literal_replace, delete_exact_line, insert_paragraph_after, add_title_suffix) passes text through 'awk -v', which escape-processes backslash sequences (turning a literal backslash followed by n, t, or another backslash into a newline, a tab, or a single backslash) before the awk program ever sees the literal text - a backslash in the source would be silently corrupted in every ported Codex/Cursor artifact, with no way for the drift check to detect it (the corruption is a deterministic function of the source, so a fresh regeneration would be identically wrong). Remove the backslash from the source, or rework those four functions to avoid 'awk -v' first."
+  fi
+}
+check_no_backslash_in_source_skills
+
 # --- Accessors -----------------------------------------------------------
 
 # targets_for <n>: prints the validated targets value for rule <n>.
@@ -406,6 +501,504 @@ print_generated_banner() {
 BANNER
 }
 
+# print_generated_banner_for <source_rel_path>: the same GENERATED
+# marker, but naming a source other than rules/base-rules.md - used by
+# the ported command artifacts below, whose source is
+# skills/<name>/SKILL.md, not the canonical rules file. Uses an
+# UNQUOTED heredoc (unlike print_generated_banner above) specifically
+# so $source_rel is interpolated.
+print_generated_banner_for() {
+  source_rel=$1
+  cat <<BANNER
+<!-- GENERATED FILE. Source: $source_rel. Generator: scripts/build.sh.
+     Hand edits to this file will be overwritten the next time scripts/build.sh runs. -->
+BANNER
+}
+
+# ===========================================================================
+# Ported command artifacts: Codex skills (targets/codex/skills/<name>/) and
+# Cursor commands (targets/cursor/commands/<name>.md).
+#
+# A Claude Code skill cannot ship to Codex or Cursor byte-for-byte: it
+# uses "$ARGUMENTS" (a Claude Code slash-command templating token
+# neither host implements - the text is substituted by the Claude Code
+# harness before the model ever sees it) and it refers to itself and
+# its siblings by "/squirrel:<name>" invocation syntax that names a
+# command namespace that does not exist on either host. Every such
+# reference below is rewritten by an explicit, LITERAL (never regex)
+# find-and-replace, each one sourced from and matched against the
+# CURRENT text of the Claude Code skill - never hand-authored prose
+# bolted onto the output afterwards.
+#
+# DRIFT GUARD: if a future edit to skills/<name>/SKILL.md changes or
+# removes the exact sentence one of these replacements targets, that
+# replacement silently becomes a no-op and the untouched Claude-only
+# text would survive into the generated artifact. check_no_claude_only_syntax
+# (defined below) is what catches that - but it is NOT called from
+# ported_skill_description or ported_skill_body themselves. It is
+# called exactly once per artifact, in the "Write every artifact"
+# section near the bottom of this file, against each artifact's own
+# FULLY COMPOSED text (frontmatter, the GENERATED banner, and the body,
+# with add_title_suffix and - for Cursor - the skill-to-command word
+# swap already applied) read back from its own temp file, immediately
+# before that temp file is mv'd into place (G5/G6, S7 review cycle 3;
+# this comment used to claim the scan already ran on that final text -
+# it did not, which was itself a finding). The same call also covers
+# targets/codex/AGENTS.md and targets/cursor/squirrel-mode.mdc, the two
+# base-rules-derived artifacts this check never reached before, so a
+# future rules/base-rules.md edit mentioning "Claude", a hook name, or
+# "$ARGUMENTS" fails the build instead of shipping unchecked to either
+# non-Claude-Code host. It deliberately does NOT run against
+# output-styles/squirrel-mode.md or skills/rules/SKILL.md - the two
+# Claude Code artifacts, where "Claude" and "/squirrel:" are correct.
+# Any edit to skills/digest|plan|init|tune/SKILL.md that changes one of
+# the sentences named below must update the matching substitution here,
+# or the build stops rather than emitting broken instructions.
+# ===========================================================================
+
+source_skill_body() {
+  # source_skill_body <name>: prints skills/<name>/SKILL.md's body -
+  # every line after the frontmatter's closing "---" line, verbatim.
+  name=$1
+  awk '
+    /^---$/ { c++; if (c == 2) { in_body = 1 }; next }
+    in_body { print }
+  ' "$repo_root/skills/$name/SKILL.md"
+}
+
+source_skill_description() {
+  # source_skill_description <name>: prints the RAW value (surrounding
+  # quotes stripped) of the frontmatter "description" field from
+  # skills/<name>/SKILL.md. validate_source_skill_if_present has
+  # already confirmed this field exists as a single double-quoted line
+  # in the frontmatter block, above, before this is ever called - and
+  # this is only ever called for a <name> whose have_<name>=yes.
+  name=$1
+  awk '
+    /^---$/ { c++; if (c == 2) exit; next }
+    c == 1 && /^description: "/ { print; exit }
+  ' "$repo_root/skills/$name/SKILL.md" | sed -e 's/^description: "//' -e 's/"$//'
+}
+
+literal_replace() {
+  # literal_replace <text> <old> <new>: replaces every literal
+  # (non-regex) occurrence of <old> with <new>, scanning line by line.
+  # Used instead of sed's s/// throughout this section because several
+  # <old> patterns below contain characters (parentheses, a literal
+  # "$") that sed would treat as regex metacharacters and require
+  # per-pattern escaping to match literally; awk's index()/substr()
+  # need no escaping at all, only exact text.
+  text=$1
+  old=$2
+  new=$3
+  printf '%s\n' "$text" | awk -v old="$old" -v new="$new" '
+    {
+      rest = $0
+      result = ""
+      oldlen = length(old)
+      if (oldlen == 0) { print; next }
+      while (1) {
+        pos = index(rest, old)
+        if (pos == 0) { result = result rest; break }
+        result = result substr(rest, 1, pos - 1) new
+        rest = substr(rest, pos + oldlen)
+      }
+      print result
+    }
+  '
+}
+
+delete_exact_line() {
+  # delete_exact_line <text> <line>: removes every line equal to <line>
+  # verbatim. Used to drop the Claude Code-only "Arguments: $ARGUMENTS"
+  # declaration line, which has no host-neutral equivalent to rewrite
+  # it INTO - it is pure Claude Code slash-command templating syntax,
+  # not prose, so the correct transformation is deletion, not rewording.
+  text=$1
+  line=$2
+  printf '%s\n' "$text" | awk -v t="$line" '$0 != t'
+}
+
+collapse_blank_runs() {
+  # collapse_blank_runs <text>: the same normalisation get_rule_body()
+  # already applies to rule bodies above - collapse any run of blank
+  # lines to exactly one, and drop leading/trailing blank lines. Needed
+  # here because delete_exact_line above can leave two adjacent blank
+  # lines where the deleted line used to separate them.
+  text=$1
+  printf '%s\n' "$text" | awk '
+    BEGIN { started = 0; blank_run = 0 }
+    /^[ \t]*$/ { if (started) blank_run++; next }
+    {
+      if (started && blank_run > 0) print ""
+      print $0
+      started = 1
+      blank_run = 0
+    }
+  '
+}
+
+insert_paragraph_after() {
+  # insert_paragraph_after <text> <after_line> <paragraph>: inserts a
+  # blank line followed by <paragraph> (itself a single line - a
+  # one-line paragraph, no embedded newline) immediately after the
+  # FIRST line of <text> that equals <after_line> exactly. The blank
+  # line comes from a literal `print ""` in the awk PROGRAM text below,
+  # not from any -v value, deliberately: passing a value containing an
+  # embedded newline via awk's `-v name=value` is not portable (some
+  # awk implementations reject it outright with "newline in string"),
+  # so every -v value used anywhere in this section, including here,
+  # is kept to a single line on purpose.
+  text=$1
+  after_line=$2
+  paragraph=$3
+  printf '%s\n' "$text" | awk -v target="$after_line" -v para="$paragraph" '
+    {
+      print
+      if (!done && $0 == target) {
+        print ""
+        print para
+        done = 1
+      }
+    }
+  '
+}
+
+extract_h1_title() {
+  # extract_h1_title <text>: prints the first line matching "^# " - the
+  # document's own H1 heading - so add_title_suffix below can target it
+  # by its actual current content instead of a hardcoded per-command
+  # string that could silently drift from the source.
+  text=$1
+  printf '%s\n' "$text" | awk '/^# / { print; exit }'
+}
+
+add_title_suffix() {
+  # add_title_suffix <text> <suffix>: appends " <suffix>" (e.g.
+  # "(Codex)") to the text's own H1 title line, wherever that line's
+  # current content actually is.
+  text=$1
+  suffix=$2
+  title_line=$(extract_h1_title "$text")
+  literal_replace "$text" "$title_line" "$title_line $suffix"
+}
+
+check_no_claude_only_syntax() {
+  # check_no_claude_only_syntax <text> <label>: fails the build loudly
+  # if <text> - the FINAL, fully-transformed text of a Codex or Cursor
+  # artifact, read back from that artifact's own temp file right before
+  # it is mv'd into place (see "Write every artifact" near the bottom of
+  # this file for every call site: the six ported command artifacts AND
+  # targets/codex/AGENTS.md and targets/cursor/squirrel-mode.mdc) -
+  # still contains any syntax or reference that only makes sense on
+  # Claude Code. Never called against output-styles/squirrel-mode.md or
+  # skills/rules/SKILL.md - the two Claude Code artifacts, where
+  # "Claude" and "/squirrel:" are correct. See the DRIFT GUARD note at
+  # the top of this section.
+  #
+  # EXTENDED (B5, S7 review): the original version checked only two
+  # literals ($ARGUMENTS and /squirrel:) and was structurally unable to
+  # catch B4's leak - "Claude" meaning the model answering right now
+  # (wrong on Codex, possibly wrong on Cursor), not the separate
+  # product "Claude Code" sharing the profile file (which is correct
+  # and must keep passing). Every check below names, in its own failure
+  # message, exactly which pattern matched.
+  text=$1
+  label=$2
+
+  # shellcheck disable=SC2016 # single-quoted deliberately throughout
+  # this loop: every pattern is literal text a `grep -F` search is
+  # meant to find, never an expression meant to expand in this shell.
+  for pattern in '$ARGUMENTS' '${CLAUDE_' 'CLAUDE_PLUGIN_ROOT' 'CLAUDE_PLUGIN_DATA' 'SessionStart' 'UserPromptSubmit' 'PreToolUse' 'disable-model-invocation'; do
+    if printf '%s' "$text" | grep -qF "$pattern"; then
+      fail "$label still contains a literal '$pattern' after transformation - either a substitution in scripts/build.sh no longer matches the current text of its source skill, or a mechanism only Claude Code has leaked through untransformed. Update the substitution, or remove the leaked reference, to match the new source text."
+    fi
+  done
+
+  if printf '%s' "$text" | grep -qFi '/squirrel:'; then
+    fail "$label still contains a case-insensitive '/squirrel:' reference after transformation - a substitution in scripts/build.sh no longer matches the current text of its source skill. Update the substitution to match the new source text."
+  fi
+
+  # "Claude" naming the separate product "Claude Code" (or its
+  # hyphenated spelling "Claude-Code") - which happens to share the same
+  # profile file - is correct and must keep passing; "Claude" meaning
+  # the model answering right now is the model-identity leak B4/F2
+  # found and must fail the build.
+  #
+  # F2 (S7 review cycle 2, headline finding): the previous version was a
+  # bare `sed 's/Claude Code/PLACEHOLDER/'` with NO word boundary at
+  # either end. Two failures, both reproduced: (1) "Claude Codex" is not
+  # "Claude Code" at all - the sed only matches the 11-character
+  # substring "Claude Code", which IS present as a PREFIX of "Claude
+  # Codex", so the placeholder swap fired anyway and consumed it,
+  # leaving nothing for the bare-"Claude" grep below to catch - the
+  # exact model-identity-leak class this check exists to catch shipped
+  # straight through, verbatim, into a generated artifact; (2)
+  # "Claude-Code" (hyphenated) does not match the sed's literal SPACE at
+  # all, so it was never stripped, and the bare-"Claude" grep then
+  # wrongly flagged it as a leak even though it unambiguously names the
+  # product.
+  #
+  # Replaced with a single awk scan implementing the exact rule: an
+  # occurrence of "Claude" is permitted ONLY when (a) "Claude" itself
+  # starts at a WORD BOUNDARY - the character immediately before it, if
+  # any, is not [A-Za-z0-9_] (this is what keeps "Claudette" and other
+  # words merely STARTING WITH "Claude" from ever being examined as an
+  # occurrence of the word "Claude" at all - see the word-char check
+  # immediately after the boundary check below, which treats "Claude"
+  # immediately followed by a word character as "not a standalone
+  # occurrence", not as "a violation"), and (b) what follows it is
+  # exactly one SEPARATOR character (a space or a newline - see the
+  # STREAM SCAN note below) followed by "Code", or exactly "-Code", AND
+  # the character after "Code" is itself not a word character (so
+  # "Claude Code", "Claude Code's", "Claude Code.", and "Claude-Code"
+  # all pass, but "Claude Codex" - "Code" immediately followed by the
+  # word character "x" - fails, exactly like a bare "Claude", "Claude.",
+  # or "Claude will").
+  #
+  # STREAM SCAN (G4, S7 review cycle 3): awk's default per-record
+  # (per-line) loop would treat a "Claude"/"Code" pair split across a
+  # line break as two independent, unrelated lines - "Claude" alone at
+  # the end of one line, matching neither " Code" nor "-Code" because
+  # there is no character left on THAT line to check, would wrongly
+  # report a leak even though the rendered Markdown reads "Claude Code"
+  # with an ordinary soft line wrap in between. <text> is therefore
+  # accumulated whole, embedded newlines and all, into one awk string
+  # (`full`) before the character-by-character scan below ever runs -
+  # the scan itself is unchanged except that its separator check now
+  # accepts a literal newline exactly where it already accepted a
+  # literal space, so a wrapped "Claude\nCode" is recognised exactly
+  # like an unwrapped "Claude Code". Dormant today (the four source
+  # skills use one long line per paragraph, so no generated artifact
+  # currently exercises this), but a future rewrap of the source prose
+  # would otherwise fail the build for a reason that made no sense to
+  # whoever hit it.
+  #
+  # The first offending match is reported as a bounded, single-line
+  # SNIPPET (up to 40 characters on either side, any embedded newline
+  # flattened to a space for display) rather than "the offending line" -
+  # once <text> can contain a match spanning two lines, "the line" is no
+  # longer a well-defined thing to print; a short window around the
+  # match is quoted verbatim in the fail() message instead, so the
+  # author can still find it immediately.
+  first_bad_claude_snippet=$(printf '%s' "$text" | awk '
+    { full = (NR == 1) ? $0 : full "\n" $0 }
+    END {
+      line = full
+      n = length(line)
+      for (i = 1; i <= n; i++) {
+        if (substr(line, i, 6) != "Claude") { continue }
+        if (i > 1) {
+          prevch = substr(line, i - 1, 1)
+          if (prevch ~ /[A-Za-z0-9_]/) { continue }
+        }
+        afterclaude = substr(line, i + 6, 1)
+        if (afterclaude ~ /[A-Za-z0-9_]/) { continue }
+        rest = substr(line, i + 6)
+        sep = substr(rest, 1, 1)
+        matched = 0
+        if ((sep == " " || sep == "\n") && substr(rest, 2, 4) == "Code") {
+          aftercode = substr(rest, 6, 1)
+          if (aftercode ~ /[A-Za-z0-9_]/) { matched = 1 }
+        } else if (substr(rest, 1, 5) == "-Code") {
+          aftercode = substr(rest, 6, 1)
+          if (aftercode ~ /[A-Za-z0-9_]/) { matched = 1 }
+        } else {
+          matched = 1
+        }
+        if (matched) {
+          start = i - 40
+          if (start < 1) { start = 1 }
+          snippet = substr(line, start, 90)
+          gsub(/\n/, " ", snippet)
+          print snippet
+          exit
+        }
+      }
+    }
+  ')
+  if [ -n "$first_bad_claude_snippet" ]; then
+    fail "$label still contains the bare word 'Claude' (meaning the model answering right now, not the separate product 'Claude Code'/'Claude-Code') after transformation - a substitution in scripts/build.sh no longer matches the current text of its source skill, or a Claude-Code-only claim leaked through untransformed. Offending text: $first_bad_claude_snippet"
+  fi
+}
+
+# ported_skill_description <name>: the Codex frontmatter "description"
+# for <name>, mechanically derived from skills/<name>/SKILL.md's own
+# description by literal substitution (see the section header above).
+ported_skill_description() {
+  name=$1
+  desc=$(source_skill_description "$name")
+  case "$name" in
+    digest)
+      desc=$(literal_replace "$desc" "an explicit /squirrel:digest invocation, " "")
+      ;;
+    plan)
+      desc=$(literal_replace "$desc" "an explicit /squirrel:plan invocation, or " "")
+      ;;
+    init)
+      desc=$(literal_replace "$desc" "Only for an explicit /squirrel:init invocation." "Only run this when the user explicitly asks to run squirrel-mode calibration - for example, asked to run squirrel init or calibrate squirrel-mode. Never start this interview unprompted, and never run it merely because no profile exists yet.")
+      ;;
+    tune)
+      # B9 (S7 review): init's description already carries a concrete
+      # foreclosure ("never run it merely because no profile exists
+      # yet") - a specific, plausible-sounding wrong trigger it rules
+      # out by name. tune's did not have an equivalent; Codex has no
+      # disable-model-invocation, so this prose IS the entire guard,
+      # and a vaguer "never change the profile unprompted" alone is
+      # weaker than naming the concrete wrong trigger explicitly.
+      desc=$(literal_replace "$desc" "Only for an explicit /squirrel:tune invocation." "Only run this when the user explicitly asks to change or tune a squirrel-mode profile field. Never change the profile unprompted, and never run it merely because the user mentioned a preference in passing without asking for the change.")
+      ;;
+  esac
+  # G5/G6 (S7 review cycle 3): check_no_claude_only_syntax does NOT run
+  # here. This description is only ONE ingredient of the artifact
+  # write_codex_skill eventually composes (frontmatter + banner + this
+  # description + the body ported_skill_body below produces) - scanning
+  # it in isolation, before that composition happens, is exactly the gap
+  # G5 found (the scan never reached the base-rules-derived artifacts at
+  # all) and exactly what made G6's "scans the FINAL, fully-transformed
+  # text" comment false (add_title_suffix and Cursor's skill->command
+  # swap both still run AFTER this function returns). See the "Write
+  # every artifact" section near the bottom of this file for the single
+  # place the check now runs: on every fully composed artifact's own
+  # temp-file content, immediately before that content is mv'd into its
+  # final path.
+  printf '%s' "$desc"
+}
+
+# ported_skill_body <name>: the host-neutral body (H1 title line not
+# yet suffixed - callers add "(Codex)"/"(Cursor)" via add_title_suffix)
+# for <name>, mechanically derived from skills/<name>/SKILL.md's own
+# body by literal substitution (see the section header above). init
+# and tune additionally gain one boilerplate paragraph, inserted
+# immediately after their own opening sentence, stating explicitly that
+# they write/edit the exact ~/.claude/squirrel/profile.md path Claude
+# Code and Cursor also read (task requirement: "say so"). This applies
+# unconditionally, with no per-host branch, because init/tune are never
+# composed into a Cursor artifact in the first place (Cursor gets only
+# digest and plan - see write_cursor_command below).
+ported_skill_body() {
+  name=$1
+  body=$(source_skill_body "$name")
+  case "$name" in
+    digest)
+      body=$(delete_exact_line "$body" "Arguments: \$ARGUMENTS")
+      body=$(literal_replace "$body" "/squirrel:digest restructures messy inbound content into the fixed brief below." "This skill restructures messy inbound content into the fixed brief below.")
+      # Model-identity leak (S7 review B4): the source sentence names
+      # "Claude's own output" - correct on Claude Code, where the
+      # answering model really is Claude, but false on Codex and
+      # possibly false on Cursor, neither of which is guaranteed to be
+      # running Claude. Rewritten host-neutrally; skills/digest/SKILL.md
+      # itself is left unchanged, since "Claude" is the correct word
+      # there.
+      body=$(literal_replace "$body" "the same treatment squirrel-mode's base rules apply to Claude's own output, applied here to content the user received." "the same treatment squirrel-mode's base rules apply to the assistant's own output, applied here to content the user received.")
+      body=$(literal_replace "$body" "Text was pasted after the command, in \$ARGUMENTS. Use it directly." "Text was pasted directly into this request. Use it directly.")
+      body=$(literal_replace "$body" "\$ARGUMENTS names a file path that exists in the current project." "The request names a file path that exists in the current project.")
+      body=$(literal_replace "$body" "\$ARGUMENTS is a Jira ticket reference" "The request is a Jira ticket reference")
+      body=$(literal_replace "$body" "\$ARGUMENTS is empty and nothing else was pasted." "Nothing was pasted or otherwise provided at all.")
+      body=$(literal_replace "$body" "When \$ARGUMENTS includes \`--for-reply\`," "When the request includes \`--for-reply\`,")
+      ;;
+    plan)
+      body=$(delete_exact_line "$body" "Arguments: \$ARGUMENTS")
+      body=$(literal_replace "$body" "/squirrel:plan turns a raw, disordered idea into a scoped, startable plan." "This skill turns a raw, disordered idea into a scoped, startable plan.")
+      body=$(literal_replace "$body" "If \$ARGUMENTS is empty and nothing else was provided, ask exactly one question:" "If nothing was provided with the request and nothing else was pasted, ask exactly one question:")
+      body=$(literal_replace "$body" "Otherwise, treat \$ARGUMENTS, plus anything pasted with it, as the idea dump," "Otherwise, treat whatever was provided, plus anything pasted with it, as the idea dump,")
+      ;;
+    init)
+      body=$(literal_replace "$body" "/squirrel:init builds the user's personal squirrel-mode profile through a seven-question interview." "This skill builds the user's personal squirrel-mode profile through a seven-question interview.")
+      # B6 (S7 review): the original inserted paragraph claimed running
+      # this skill "calibrates squirrel-mode on every target installed
+      # on this machine, Cursor included", with no caveat - but Cursor
+      # cannot read the profile at all (its own .mdc says so: "Cursor
+      # has no profile mechanism ... cannot be personalized
+      # automatically"). Rewritten to state the truth without hedging:
+      # Claude Code and this skill both read the profile automatically;
+      # Cursor does not read it, period, and has to be hand-tuned
+      # separately.
+      body=$(insert_paragraph_after "$body" "This skill builds the user's personal squirrel-mode profile through a seven-question interview. Follow this procedure exactly, in every session it runs in." "This writes to \`~/.claude/squirrel/profile.md\`. Claude Code and this skill both read that file automatically. Cursor cannot read it at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.")
+      # B7 (S7 review): rules/base-rules.md is a repo-relative path that
+      # does not exist on a Codex install - substituted for the
+      # host-appropriate equivalent, the defaults table Codex actually
+      # ships in ~/.codex/AGENTS.md. Matched and replaced as one full
+      # phrase (not a bare "rules/base-rules.md" token swap), so the
+      # surrounding grammar stays correct.
+      body=$(literal_replace "$body" "the same range \`rules/base-rules.md\` and \`/squirrel:tune\` both enforce for this field" "the same range the defaults table in \`~/.codex/AGENTS.md\` and the squirrel-mode \`tune\` skill both enforce for this field")
+      body=$(literal_replace "$body" "\`/squirrel:tune\`" "the squirrel-mode \`tune\` skill")
+      body=$(literal_replace "$body" "The demonstration is part of \`/squirrel:init\` itself, not a separate step the user has to ask for." "The demonstration is part of this skill itself, not a separate step the user has to ask for.")
+      ;;
+    tune)
+      body=$(literal_replace "$body" "/squirrel:tune edits one field of the existing profile at \`~/.claude/squirrel/profile.md\`." "This skill edits one field of the existing profile at \`~/.claude/squirrel/profile.md\`.")
+      # B6, same rationale as the init branch above: state the truth
+      # without hedging instead of an unqualified "Cursor included".
+      body=$(insert_paragraph_after "$body" "This skill edits one field of the existing profile at \`~/.claude/squirrel/profile.md\`. It never re-runs the seven-question interview." "Claude Code and this skill both read \`~/.claude/squirrel/profile.md\` automatically, so a change made here takes effect there right away. Cursor cannot read this file at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.")
+      body=$(literal_replace "$body" "\`/squirrel:init\`" "the squirrel-mode \`init\` skill")
+      body=$(literal_replace "$body" "Any list \`/squirrel:tune\` shows," "Any list this skill shows,")
+      # B7, same rationale as the init branch above.
+      body=$(literal_replace "$body" "and treat it as the \`rules/base-rules.md\` default for that field until the user sets it explicitly through this command." "and treat it as the default for that field shown in the defaults table in \`~/.codex/AGENTS.md\` until the user sets it explicitly through this command.")
+      ;;
+  esac
+  # Applied uniformly to all four, AFTER the case statement, so every
+  # ported body gets the same normalisation regardless of which
+  # branch ran: delete_exact_line (digest/plan) can leave two adjacent
+  # blank lines where the deleted "Arguments: $ARGUMENTS" line used to
+  # separate them, and a body that never went through delete_exact_line
+  # at all (init/tune) still opens with the ONE leading blank line every
+  # skills/<name>/SKILL.md body has (immediately after the frontmatter's
+  # closing "---") - collapsing it here, rather than per-branch, is what
+  # keeps write_codex_skill/write_cursor_command's own single blank
+  # line (printed right after the GENERATED banner) from stacking into
+  # two before the H1 title for init/tune specifically.
+  body=$(collapse_blank_runs "$body")
+  # G5/G6: see ported_skill_description's identical comment just above -
+  # the check does not run on this body in isolation either; it runs
+  # once, later, on the fully composed artifact text (see "Write every
+  # artifact" near the bottom of this file).
+  printf '%s' "$body"
+}
+
+write_codex_skill() {
+  # write_codex_skill <name>: composes targets/codex/skills/<name>/SKILL.md
+  # in full - Codex frontmatter (name + description only; Codex's own
+  # spec has no equivalent of Claude Code's disable-model-invocation,
+  # which is why init/tune's descriptions above say explicitly, in
+  # prose, never to run unprompted), the GENERATED banner naming
+  # skills/<name>/SKILL.md as source, then the ported, title-suffixed body.
+  name=$1
+  desc=$(ported_skill_description "$name")
+  printf '%s\n' "---"
+  printf 'name: %s\n' "$name"
+  printf 'description: "%s"\n' "$desc"
+  printf '%s\n' "---"
+  printf '\n'
+  print_generated_banner_for "skills/$name/SKILL.md"
+  printf '\n'
+  body=$(ported_skill_body "$name")
+  body=$(add_title_suffix "$body" "(Codex)")
+  printf '%s\n' "$body"
+}
+
+write_cursor_command() {
+  # write_cursor_command <name>: composes targets/cursor/commands/<name>.md
+  # in full - NO frontmatter at all (verified: Cursor's own command
+  # files are plain Markdown; the command name comes from the filename,
+  # not from a field inside it), the GENERATED banner naming
+  # skills/<name>/SKILL.md as source, then the ported, title-suffixed
+  # body. Cursor-ONLY vocabulary fix (B8, S7 review), applied AFTER the
+  # shared ported_skill_body transformation: Cursor's own mechanism is
+  # a *command*, not a skill, so the word "skill" - which
+  # ported_skill_body's shared substitutions introduce into the body
+  # (e.g. "This skill restructures...") - reads wrong here. Codex keeps
+  # "skill", unchanged, in write_codex_skill above - that word is
+  # Codex's own vocabulary for the exact same mechanism, so no
+  # substitution runs there.
+  name=$1
+  print_generated_banner_for "skills/$name/SKILL.md"
+  printf '\n'
+  body=$(ported_skill_body "$name")
+  body=$(add_title_suffix "$body" "(Cursor)")
+  body=$(literal_replace "$body" "skill" "command")
+  printf '%s\n' "$body"
+}
+
 # --- Artifact composition -------------------------------------------------
 #
 # Each write_* function only ever prints literal text (via quoted
@@ -510,31 +1103,34 @@ BODY
 # All validation above already ran to completion before this point, so
 # every write below is backed by known-good input.
 mkdir -p "$repo_root/output-styles" "$repo_root/skills/rules" \
-  "$repo_root/targets/codex" "$repo_root/targets/cursor"
+  "$repo_root/targets/codex" "$repo_root/targets/cursor" \
+  "$repo_root/targets/codex/skills/digest" "$repo_root/targets/codex/skills/plan" \
+  "$repo_root/targets/codex/skills/init" "$repo_root/targets/codex/skills/tune" \
+  "$repo_root/targets/cursor/commands"
 
 # Atomicity, honestly stated: each artifact is first written to a
 # hidden temp file in the SAME DIRECTORY as its final target - never
 # /tmp, since the repo could be on a different filesystem/mount and mv
 # (rename(2)) is only atomic within one filesystem - and only mv'd into
-# place once every one of the four temp writes below has already
+# place once every one of the ten temp writes below has already
 # succeeded. That covers the WRITE phase completely: a failure partway
-# through the four writes (a full disk, a read-only target directory, a
+# through the ten writes (a full disk, a read-only target directory, a
 # signal - see the traps below) leaves every real artifact exactly as it
 # was, never a mix of freshly regenerated and stale files, because no mv
 # has run yet at that point.
 #
 # The MV PHASE is a narrower, different story, and this comment used to
-# overstate it. Four independent rename(2) calls, one per fixed
+# overstate it. Ten independent rename(2) calls, one per fixed
 # committed path, cannot be made atomic AS A GROUP under POSIX sh - there
 # is no multi-file rename primitive available here. Two things narrow
 # that window as far as this shell can narrow it: each mv is individually
 # atomic (so no single artifact is ever observed half-written, only "old"
 # or "new", never a mix within one file), and HUP/INT/TERM are ignored for
-# the short duration of the four mv's (see the trap right before them),
+# the short duration of the ten mv's (see the trap right before them),
 # so a signal arriving mid-sequence cannot land between two of them.
 #
 # What neither defense reaches is SIGKILL or power loss: either can still
-# stop the process between mv 1 and mv 4, leaving some artifacts
+# stop the process between mv 1 and mv 10, leaving some artifacts
 # regenerated and others stale. That residual is real, not hypothetical,
 # and is not eliminated here - it cannot be, in POSIX sh, against those
 # two failure modes specifically. It is not silent forever, though: the
@@ -553,8 +1149,34 @@ tmp_skill="$repo_root/skills/rules/.SKILL.md.tmp.$$"
 tmp_codex="$repo_root/targets/codex/.AGENTS.md.tmp.$$"
 tmp_cursor="$repo_root/targets/cursor/.squirrel-mode.mdc.tmp.$$"
 
+# The six ported command artifacts (see the "Ported command artifacts"
+# section above). Every one of the ten final_*/tmp_* paths below is now
+# written and moved UNCONDITIONALLY - validate_source_skill above
+# already guaranteed, before this point, that all four
+# skills/{digest,plan,init,tune}/SKILL.md sources exist and are
+# well-formed, so there is no absent-source case left to skip.
+final_codex_skill_digest="$repo_root/targets/codex/skills/digest/SKILL.md"
+final_codex_skill_plan="$repo_root/targets/codex/skills/plan/SKILL.md"
+final_codex_skill_init="$repo_root/targets/codex/skills/init/SKILL.md"
+final_codex_skill_tune="$repo_root/targets/codex/skills/tune/SKILL.md"
+final_cursor_command_digest="$repo_root/targets/cursor/commands/digest.md"
+final_cursor_command_plan="$repo_root/targets/cursor/commands/plan.md"
+
+tmp_codex_skill_digest="$repo_root/targets/codex/skills/digest/.SKILL.md.tmp.$$"
+tmp_codex_skill_plan="$repo_root/targets/codex/skills/plan/.SKILL.md.tmp.$$"
+tmp_codex_skill_init="$repo_root/targets/codex/skills/init/.SKILL.md.tmp.$$"
+tmp_codex_skill_tune="$repo_root/targets/codex/skills/tune/.SKILL.md.tmp.$$"
+tmp_cursor_command_digest="$repo_root/targets/cursor/commands/.digest.md.tmp.$$"
+tmp_cursor_command_plan="$repo_root/targets/cursor/commands/.plan.md.tmp.$$"
+
 cleanup_build_tmp() {
-  rm -f "$tmp_output_style" "$tmp_skill" "$tmp_codex" "$tmp_cursor"
+  # rm -f is a silent no-op on a path that was never created (e.g. if
+  # the script failed before reaching that particular write) - safe to
+  # list every one of the ten temp paths unconditionally.
+  rm -f "$tmp_output_style" "$tmp_skill" "$tmp_codex" "$tmp_cursor" \
+    "$tmp_codex_skill_digest" "$tmp_codex_skill_plan" \
+    "$tmp_codex_skill_init" "$tmp_codex_skill_tune" \
+    "$tmp_cursor_command_digest" "$tmp_cursor_command_plan"
 }
 
 # A signal handler that only cleans up and never calls `exit` does not
@@ -592,7 +1214,51 @@ write_skill >"$tmp_skill"
 write_codex_agents >"$tmp_codex"
 write_cursor_mdc >"$tmp_cursor"
 
-# All four writes above succeeded (set -e would otherwise have aborted
+# The six ported command artifacts - written UNCONDITIONALLY.
+# validate_source_skill already guaranteed every one of
+# skills/{digest,plan,init,tune}/SKILL.md exists and is well-formed
+# before this point (see the "Availability" comment above it) - there
+# is no absent-source case left to guard against here, and a fixture
+# that wants build.sh to succeed without these six writes must supply
+# real skills/ sources instead (tests/test_build.sh's
+# make_build_scratch() does exactly that).
+write_codex_skill digest >"$tmp_codex_skill_digest"
+write_codex_skill plan >"$tmp_codex_skill_plan"
+write_codex_skill init >"$tmp_codex_skill_init"
+write_codex_skill tune >"$tmp_codex_skill_tune"
+write_cursor_command digest >"$tmp_cursor_command_digest"
+write_cursor_command plan >"$tmp_cursor_command_plan"
+
+# G5/G6 (S7 review cycle 3): check_no_claude_only_syntax runs HERE,
+# against each artifact's own FULLY COMPOSED text - read back from the
+# temp file it was just written to, after every transformation
+# (frontmatter, the GENERATED banner, add_title_suffix, and - for
+# Cursor - the skill-to-command word swap) has already been applied,
+# never against an isolated ingredient (a bare description or body)
+# before that composition happens. Deliberately placed AFTER all ten
+# temp writes above but BEFORE the first `mv` below: a failure here
+# still leaves every real artifact untouched (the cleanup trap removes
+# the temp files; no `mv` has run yet), so the file header's "All
+# validation happens before any output file is written" stays true.
+# Covers the six ported command artifacts (G5's own fix) AND the two
+# base-rules-derived artifacts, targets/codex/AGENTS.md and
+# targets/cursor/squirrel-mode.mdc, which this check never reached
+# before at all - a future rules/base-rules.md edit mentioning
+# "Claude", a hook name, or "$ARGUMENTS" now fails the build instead of
+# shipping unchecked into either non-Claude-Code host. Deliberately
+# excludes $tmp_output_style and $tmp_skill - the two Claude Code
+# artifacts, where "Claude" and "/squirrel:" are correct and must keep
+# passing.
+check_no_claude_only_syntax "$(cat "$tmp_codex")" "targets/codex/AGENTS.md"
+check_no_claude_only_syntax "$(cat "$tmp_cursor")" "targets/cursor/squirrel-mode.mdc"
+check_no_claude_only_syntax "$(cat "$tmp_codex_skill_digest")" "targets/codex/skills/digest/SKILL.md"
+check_no_claude_only_syntax "$(cat "$tmp_codex_skill_plan")" "targets/codex/skills/plan/SKILL.md"
+check_no_claude_only_syntax "$(cat "$tmp_codex_skill_init")" "targets/codex/skills/init/SKILL.md"
+check_no_claude_only_syntax "$(cat "$tmp_codex_skill_tune")" "targets/codex/skills/tune/SKILL.md"
+check_no_claude_only_syntax "$(cat "$tmp_cursor_command_digest")" "targets/cursor/commands/digest.md"
+check_no_claude_only_syntax "$(cat "$tmp_cursor_command_plan")" "targets/cursor/commands/plan.md"
+
+# All writes above succeeded (set -e would otherwise have aborted
 # already, triggering the cleanup trap and leaving every final_* path
 # untouched). Each mv below is a rename(2) within one directory, hence
 # individually atomic; only now, with known-good content already fully
@@ -606,11 +1272,11 @@ write_cursor_mdc >"$tmp_cursor"
 # signal from during this window - by the time the real handlers are
 # back, there is nothing left pending to deliver. Ignoring rather than
 # leaving the real handlers active is deliberate, not an oversight:
-# on_hup/on_int/on_term calling `exit` between two of these four mv's is
+# on_hup/on_int/on_term calling `exit` between two of these ten mv's is
 # exactly the half-applied state the comment above is about, so this is
 # the one place those handlers must NOT run.
 #
-# Restoring happens on every path out of this block. If all four mv's
+# Restoring happens on every path out of this block. If all ten mv's
 # succeed, the three `trap` calls immediately below always run next,
 # unconditionally. If any mv fails instead, `set -e` ends the script
 # right there without ever reaching those `trap` calls - but the ignored
@@ -624,6 +1290,12 @@ mv "$tmp_output_style" "$final_output_style"
 mv "$tmp_skill" "$final_skill"
 mv "$tmp_codex" "$final_codex"
 mv "$tmp_cursor" "$final_cursor"
+mv "$tmp_codex_skill_digest" "$final_codex_skill_digest"
+mv "$tmp_codex_skill_plan" "$final_codex_skill_plan"
+mv "$tmp_codex_skill_init" "$final_codex_skill_init"
+mv "$tmp_codex_skill_tune" "$final_codex_skill_tune"
+mv "$tmp_cursor_command_digest" "$final_cursor_command_digest"
+mv "$tmp_cursor_command_plan" "$final_cursor_command_plan"
 trap on_hup HUP
 trap on_int INT
 trap on_term TERM

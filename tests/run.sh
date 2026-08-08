@@ -15,6 +15,12 @@
 # counted, even after an earlier one fails.
 set -eu
 
+# A CDPATH entry containing "." makes the `cd` on the next line ECHO its
+# resolved path to stdout in addition to changing directory, corrupting
+# the command substitution below with an extra line. Unset
+# unconditionally, before that `cd` runs.
+unset CDPATH
+
 script_dir=$(cd "$(dirname "$0")" && pwd)
 
 if ! command -v jq >/dev/null 2>&1; then

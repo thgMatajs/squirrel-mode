@@ -18,6 +18,12 @@
 # first failed assertion.
 set -eu
 
+# A CDPATH entry containing "." makes the `cd` on the next line ECHO its
+# resolved path to stdout in addition to changing directory, corrupting
+# the command substitution below with an extra line. Unset
+# unconditionally, before that `cd` runs.
+unset CDPATH
+
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 
@@ -86,5 +92,33 @@ if [ "$sh_file_count" -gt 0 ]; then
   fi
   assert_eq "0" "$shellcheck_exit" "shellcheck --shell=sh must exit 0 across all $sh_file_count tracked .sh files"
 fi
+
+# --- CDPATH hardening (A10, S7 review) --------------------------------
+#
+# Any tracked .sh file that resolves its own location via `cd` inside a
+# command substitution (the "script_dir=$(cd "$(dirname "$0")" && pwd)"
+# idiom used throughout this repo) is vulnerable to a CDPATH entry
+# containing "." - `cd` then ECHOES the resolved path to stdout, in
+# addition to changing directory, corrupting the command substitution
+# with an extra line before the script ever gets past resolving its own
+# paths (a reviewer-verified failure: with CDPATH=. set, the
+# pre-S7-fix installer died with a raw "No such file or directory"
+# before argument parsing even ran). Every such file must `unset
+# CDPATH` at its own top, before that idiom runs - never rely on the
+# invoking shell's environment being clean. This is a STATIC check (it
+# greps source text, not runtime behaviour); tests/test_targets.sh and
+# tests/test_build.sh separately prove the fix works at runtime, with
+# CDPATH actually set, against the two installers and scripts/build.sh.
+cdpath_violation=""
+for f in "$@"; do
+  path="$repo_root/$f"
+  [ -f "$path" ] || continue
+  if grep -qE '=\$\(cd ' "$path" 2>/dev/null; then
+    if ! grep -q 'unset CDPATH' "$path" 2>/dev/null; then
+      cdpath_violation="$cdpath_violation $f"
+    fi
+  fi
+done
+assert_eq "" "$cdpath_violation" "every tracked .sh file that resolves its own path via \"cd\" inside a command substitution must \"unset CDPATH\" at its own top (missing in: $cdpath_violation)"
 
 assert_report

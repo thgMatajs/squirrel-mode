@@ -65,6 +65,12 @@
 # See tests/lib/assert.sh for why `set -eu` here does not abort on the first failed assertion.
 set -eu
 
+# A CDPATH entry containing "." makes the `cd` on the next line ECHO its
+# resolved path to stdout in addition to changing directory, corrupting
+# the command substitution below with an extra line. Unset
+# unconditionally, before that `cd` runs.
+unset CDPATH
+
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 
@@ -775,7 +781,10 @@ if [ -d "$docs_dir" ]; then
 else
   docs_listing="<directory missing>"
 fi
-assert_eq "RESEARCH.md adr" "$docs_listing" "docs/ must contain exactly RESEARCH.md and adr/, nothing else"
+# OTHER-TOOLS.md is S7's deliverable and is named in PLAN.md's repository layout. The point of this
+# assertion is that nothing UNEXPECTED lands in docs/, not that the set never grows -- so the
+# expected set is stated here and a genuinely stray file still fails.
+assert_eq "OTHER-TOOLS.md RESEARCH.md adr" "$docs_listing" "docs/ must contain exactly OTHER-TOOLS.md, RESEARCH.md and adr/, nothing else"
 
 # ================================================================================================
 # 11. The citation policy section names all four checks (identity, support, whose finding it is,

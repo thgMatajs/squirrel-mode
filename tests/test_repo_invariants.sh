@@ -4,6 +4,12 @@
 # here does not abort on the first failed assertion.
 set -eu
 
+# A CDPATH entry containing "." makes the `cd` on the next line ECHO its
+# resolved path to stdout in addition to changing directory, corrupting
+# the command substitution below with an extra line. Unset
+# unconditionally, before that `cd` runs.
+unset CDPATH
+
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 

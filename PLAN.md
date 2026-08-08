@@ -521,9 +521,24 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 
 | Target | Always-on rules | Commands | Auto profile | Auto checkpoints |
 | :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | 7 namespaced skills | `SessionStart` hook | `PreToolUse` hook |
-| Codex | `~/.codex/AGENTS.md` global layer | `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | `.cursor/commands/*.md`, project-scoped | no | no |
+| Claude Code | output style, `force-for-plugin` | **7** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
+| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
+| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
+
+**Which commands port, and why the other three cannot.**
+
+| Command | Claude Code | Codex | Cursor | Reason |
+| :-- | :-- | :-- | :-- | :-- |
+| `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the host. |
+| `plan` | ✅ | ✅ | ✅ | Same. |
+| `init` | ✅ | ✅ | ❌ | Writes `~/.claude/squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
+| `tune` | ✅ | ✅ | ❌ | Same as `init`. |
+| `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
+| `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
+
+One consequence worth stating plainly in `docs/OTHER-TOOLS.md`: because all three targets read the
+**same** `~/.claude/squirrel/profile.md`, running `/squirrel:init` once in Claude Code or Codex
+calibrates every target on that machine — including Cursor, which cannot run the interview itself.
 
 Facts the older draft got wrong: Codex skills live in **`~/.agents/skills/`**, not `~/.codex/skills/`,
 and Codex **custom prompts are deprecated** in favour of skills. Codex loads `AGENTS.md` in layers

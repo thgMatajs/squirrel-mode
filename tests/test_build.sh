@@ -22,6 +22,12 @@
 # non-zero exit code.
 set -eu
 
+# A CDPATH entry containing "." makes the `cd` on the next line ECHO its
+# resolved path to stdout in addition to changing directory, corrupting
+# the command substitution below with an extra line. Unset
+# unconditionally, before that `cd` runs.
+unset CDPATH
+
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 
@@ -157,18 +163,36 @@ done
 #    committed artifacts. This is the check CI relies on to keep
 #    "generated files are committed" safe.
 # ==========================================================================
-# make_build_scratch: creates a throwaway directory containing only
-# scripts/build.sh and rules/base-rules.md (build.sh resolves its own
-# repo root as the parent of its own script_dir, so a copy running from
-# scratch/scripts/build.sh reads scratch/rules/base-rules.md and writes
-# into scratch/output-styles, scratch/skills/rules, scratch/targets/*
-# -- never touching the real repo). Prints the scratch dir path.
+# make_build_scratch: creates a throwaway directory containing
+# scripts/build.sh, rules/base-rules.md, AND the four real
+# skills/{digest,plan,init,tune}/SKILL.md sources (build.sh resolves
+# its own repo root as the parent of its own script_dir, so a copy
+# running from scratch/scripts/build.sh reads scratch/rules/base-rules.md
+# and scratch/skills/*/SKILL.md, and writes into scratch/output-styles,
+# scratch/skills/rules, scratch/targets/* -- never touching the real
+# repo). Prints the scratch dir path.
+#
+# The four skills/*/SKILL.md copies are NOT optional (S7's B1 fix):
+# build.sh used to tolerate a missing skills/<name>/SKILL.md as a
+# silent per-artifact skip, specifically so this fixture could omit
+# skills/ entirely and still build the four rules-derived artifacts.
+# That tolerance is exactly what let a deleted skills/plan/SKILL.md
+# ship targets/cursor/commands/plan.md stale, with build.sh exiting 0
+# and the CI drift check structurally unable to see it (regenerating
+# from the same missing source reproduces the same stale artifact). The
+# tolerance is gone from build.sh now - a missing source is a loud,
+# whole-build failure - so this fixture supplies real sources instead
+# of relying on build.sh to cope with their absence.
 make_build_scratch() {
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-build-scratch.XXXXXX")
-  mkdir -p "$scratch/scripts" "$scratch/rules"
+  mkdir -p "$scratch/scripts" "$scratch/rules" "$scratch/skills"
   cp "$build_script" "$scratch/scripts/build.sh"
   chmod +x "$scratch/scripts/build.sh"
   cp "$base_rules_file" "$scratch/rules/base-rules.md"
+  for cmd_name in digest plan init tune; do
+    mkdir -p "$scratch/skills/$cmd_name"
+    cp "$repo_root/skills/$cmd_name/SKILL.md" "$scratch/skills/$cmd_name/SKILL.md"
+  done
   printf '%s\n' "$scratch"
 }
 
@@ -718,6 +742,19 @@ fi
 assert_eq "0" "$cwd_run2_exit" "scripts/build.sh must succeed when invoked from tests/ -- output: $cwd_run2_output"
 assert_file_exists "$cursor_file" "targets/cursor/squirrel-mode.mdc must still land at the repo path after a run from tests/"
 
+# 13b (A10, S7 review). CDPATH hardening: a CDPATH entry containing "."
+# must not break build.sh. Invoked via a RELATIVE path from repo_root
+# (not $build_script's own absolute path) - CDPATH only affects `cd`
+# when its operand does not already start with "/" or ".", so an
+# absolute invocation (as scenario 13 above uses) would never exercise
+# the bug this guards against.
+if cdpath_run_output=$(cd "$repo_root" && CDPATH=. sh scripts/build.sh 2>&1); then
+  cdpath_run_exit=0
+else
+  cdpath_run_exit=$?
+fi
+assert_eq "0" "$cdpath_run_exit" "scripts/build.sh must succeed with CDPATH=. set, invoked via a relative path (A10) -- output: $cdpath_run_output"
+
 # ==========================================================================
 # 14. Atomicity: a write failure on one target must not leave the tree
 #     half-regenerated. The input here is perfectly valid (unlike
@@ -754,6 +791,15 @@ cp "$atomic_output_style" "$atomic_snapshot_dir/output-style.md"
 cp "$atomic_skill" "$atomic_snapshot_dir/skill.md"
 cp "$atomic_codex" "$atomic_snapshot_dir/codex.md"
 cp "$atomic_cursor" "$atomic_snapshot_dir/cursor.mdc"
+# B2 (S7 review): snapshot the six ported artifacts too, so the
+# "unchanged after a failed build" assertion below covers all ten, not
+# just the original four.
+cp "$atomic_scratch/targets/codex/skills/digest/SKILL.md" "$atomic_snapshot_dir/codex-skill-digest.md"
+cp "$atomic_scratch/targets/codex/skills/plan/SKILL.md" "$atomic_snapshot_dir/codex-skill-plan.md"
+cp "$atomic_scratch/targets/codex/skills/init/SKILL.md" "$atomic_snapshot_dir/codex-skill-init.md"
+cp "$atomic_scratch/targets/codex/skills/tune/SKILL.md" "$atomic_snapshot_dir/codex-skill-tune.md"
+cp "$atomic_scratch/targets/cursor/commands/digest.md" "$atomic_snapshot_dir/cursor-command-digest.md"
+cp "$atomic_scratch/targets/cursor/commands/plan.md" "$atomic_snapshot_dir/cursor-command-plan.md"
 
 # Change rules/base-rules.md (rule 1's body gets an extra sentence) so a
 # successful rebuild WOULD change all four artifacts, then make
@@ -771,7 +817,7 @@ fi
 chmod 755 "$atomic_scratch/targets/codex"
 assert_eq "1" "$atomic_build2_exit" "build.sh must exit non-zero when it cannot write one target artifact (read-only targets/codex/ directory) -- got exit $atomic_build2_exit, output: $atomic_build2_output"
 
-for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cursor.mdc:$atomic_cursor"; do
+for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cursor.mdc:$atomic_cursor" "codex-skill-digest.md:$atomic_scratch/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$atomic_scratch/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$atomic_scratch/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$atomic_scratch/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$atomic_scratch/targets/cursor/commands/digest.md" "cursor-command-plan.md:$atomic_scratch/targets/cursor/commands/plan.md"; do
   snap_name=${pair%%:*}
   live_path=${pair#*:}
   if atomic_diff=$(diff -u "$atomic_snapshot_dir/$snap_name" "$live_path" 2>&1); then
@@ -779,7 +825,7 @@ for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cur
   else
     atomic_status="CHANGED: $atomic_diff"
   fi
-  assert_eq "unchanged" "$atomic_status" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration)"
+  assert_eq "unchanged" "$atomic_status" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all ten artifacts"
 done
 
 # The failing target itself must also be unchanged (still the baseline
@@ -915,11 +961,26 @@ cp "$sig_scratch_a/output-styles/squirrel-mode.md" "$sig_a_snapshot/output-style
 cp "$sig_scratch_a/skills/rules/SKILL.md" "$sig_a_snapshot/skill.md"
 cp "$sig_scratch_a/targets/codex/AGENTS.md" "$sig_a_snapshot/codex.md"
 cp "$sig_scratch_a/targets/cursor/squirrel-mode.mdc" "$sig_a_snapshot/cursor.mdc"
+# B2 (S7 review): the fixture now carries skills/, so build.sh also
+# regenerates the six ported command artifacts - snapshotted here too,
+# so the "unchanged after a SIGTERM during the write phase" assertion
+# below covers all TEN artifacts, not just the original four.
+cp "$sig_scratch_a/targets/codex/skills/digest/SKILL.md" "$sig_a_snapshot/codex-skill-digest.md"
+cp "$sig_scratch_a/targets/codex/skills/plan/SKILL.md" "$sig_a_snapshot/codex-skill-plan.md"
+cp "$sig_scratch_a/targets/codex/skills/init/SKILL.md" "$sig_a_snapshot/codex-skill-init.md"
+cp "$sig_scratch_a/targets/codex/skills/tune/SKILL.md" "$sig_a_snapshot/codex-skill-tune.md"
+cp "$sig_scratch_a/targets/cursor/commands/digest.md" "$sig_a_snapshot/cursor-command-digest.md"
+cp "$sig_scratch_a/targets/cursor/commands/plan.md" "$sig_a_snapshot/cursor-command-plan.md"
 
 # Change the source so a completed rebuild WOULD change all four
-# artifacts - this is what makes "unchanged" below actually mean "the
-# interruption worked", rather than "there was nothing to change
-# anyway" (same reasoning as scenario 14's atomicity fixture).
+# rules-derived artifacts - this is what makes "unchanged" below
+# actually mean "the interruption worked", rather than "there was
+# nothing to change anyway" (same reasoning as scenario 14's atomicity
+# fixture). The SIGTERM here lands well before ANY mv (see
+# line_of_first_write below - it is injected right after the very
+# FIRST write, long before the mv phase even begins), so all TEN
+# artifacts, including the six ported ones, must be unchanged - there
+# is no mv left to reach any of them.
 rule1_first_body_line_sig_a=$(line_of_first_body_line_for_rule 1 "$sig_scratch_a/rules/base-rules.md")
 insert_line_after "$sig_scratch_a/rules/base-rules.md" "$rule1_first_body_line_sig_a" "This sentence was added only to force a content change for the signal-handling test."
 
@@ -947,7 +1008,7 @@ assert_eq "143" "$sig_a_exit" "SIGTERM during the write phase must make build.sh
 sig_a_leftover_tmp=$(find "$sig_scratch_a" -name '.*.tmp.*' 2>/dev/null || true)
 assert_eq "" "$sig_a_leftover_tmp" "no .tmp temp files must remain after a SIGTERM during the write phase"
 
-for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "skill.md:$sig_scratch_a/skills/rules/SKILL.md" "codex.md:$sig_scratch_a/targets/codex/AGENTS.md" "cursor.mdc:$sig_scratch_a/targets/cursor/squirrel-mode.mdc"; do
+for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "skill.md:$sig_scratch_a/skills/rules/SKILL.md" "codex.md:$sig_scratch_a/targets/codex/AGENTS.md" "cursor.mdc:$sig_scratch_a/targets/cursor/squirrel-mode.mdc" "codex-skill-digest.md:$sig_scratch_a/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$sig_scratch_a/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$sig_scratch_a/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$sig_scratch_a/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$sig_scratch_a/targets/cursor/commands/digest.md" "cursor-command-plan.md:$sig_scratch_a/targets/cursor/commands/plan.md"; do
   snap_name=${pair%%:*}
   live_path=${pair#*:}
   if sig_a_diff=$(diff -u "$sig_a_snapshot/$snap_name" "$live_path" 2>&1); then
@@ -955,7 +1016,7 @@ for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "ski
   else
     sig_a_status="CHANGED: $sig_a_diff"
   fi
-  assert_eq "unchanged" "$sig_a_status" "$live_path must be UNCHANGED after a SIGTERM during the write phase (the mv phase was never reached)"
+  assert_eq "unchanged" "$sig_a_status" "$live_path must be UNCHANGED after a SIGTERM during the write phase (the mv phase was never reached) - B2, all ten artifacts, not just the original four"
 done
 rm -rf "$sig_scratch_a"
 
@@ -1005,6 +1066,33 @@ for rel in "output-styles/squirrel-mode.md" "skills/rules/SKILL.md" "targets/cod
   sig_b_content=$(read_file "$sig_scratch_b/$rel")
   assert_contains "$sig_b_content" "$sig_b_new_sentence" "$rel must carry the fresh content after a SIGTERM ignored mid-mv - this is exactly the corruption the reviewer reproduced (one artifact fresh, three stale) under the OLD trap that cleaned up but never called exit"
 done
+
+# B2 (S7 review): the six ported artifacts do not derive from
+# rules/base-rules.md, so they carry no equivalent "fresh sentence"
+# signal - instead, assert each one's mv ALSO ran to completion despite
+# the ignored SIGTERM, by comparing it byte-for-byte against a
+# completely separate, uninterrupted reference build from the exact
+# same sources. Before B1 removed build.sh's have_<name> guards, a bug
+# that silently skipped one of these six mv's specifically during the
+# ignored-signal window would have shown up as a stale (or missing)
+# artifact here; this closes that gap.
+sig_b_reference=$(make_build_scratch)
+if sig_b_reference_output=$("$sig_b_reference/scripts/build.sh" 2>&1); then
+  sig_b_reference_exit=0
+else
+  sig_b_reference_exit=$?
+fi
+assert_eq "0" "$sig_b_reference_exit" "signal test 16b reference build (uninterrupted, same default sources) must succeed -- output: $sig_b_reference_output"
+for rel in "targets/codex/skills/digest/SKILL.md" "targets/codex/skills/plan/SKILL.md" "targets/codex/skills/init/SKILL.md" "targets/codex/skills/tune/SKILL.md" "targets/cursor/commands/digest.md" "targets/cursor/commands/plan.md"; do
+  if sig_b_ported_diff=$(diff -u "$sig_b_reference/$rel" "$sig_scratch_b/$rel" 2>&1); then
+    sig_b_ported_status=identical
+  else
+    sig_b_ported_status="DIFFERS: $sig_b_ported_diff"
+  fi
+  assert_eq "identical" "$sig_b_ported_status" "$rel's mv must have run to completion despite the ignored SIGTERM mid-sequence (B2) - byte-identical to an uninterrupted reference build from the same sources"
+done
+rm -rf "$sig_b_reference"
+
 rm -rf "$sig_scratch_b"
 
 # ==========================================================================
@@ -1034,5 +1122,127 @@ for label_path in "output style:$output_style_file" "skill:$skill_file" "Codex A
   fi
   assert_eq "clean" "$non_ascii_status" "$label must contain no non-ASCII byte other than the permitted squirrel emoji"
 done
+
+# ==========================================================================
+# 17 (F2, S7 review cycle 2 headline finding). check_no_claude_only_syntax's
+#     "Claude" vs "Claude Code"/"Claude-Code" guard, exercised through the
+#     REAL build.sh code path (the function is a private shell helper with
+#     no standalone entry point, so this drives it via a scratch source
+#     skill rather than reimplementing its logic here). The full
+#     eight-string matrix the review specified, plus "Claudette" as a
+#     bonus non-firing case (a word merely STARTING WITH "Claude" followed
+#     by a word character must never fire at all):
+#       PASS (exit 0): "Claude Code", "Claude Code's", "Claude Code.",
+#                       "Claude-Code", "Claudette" (bonus)
+#       FAIL (exit 1): "Claude Codex", "Claude", "Claude.", "Claude will"
+#     The old bare `sed 's/Claude Code/PLACEHOLDER/'` (no word boundary)
+#     let "Claude Codex" ship straight through (the sed's own literal
+#     match is a PREFIX of "Claude Codex", so the placeholder swap
+#     consumed it before the bare-"Claude" grep ever ran) and wrongly
+#     failed "Claude-Code" (the sed never matches a hyphen). Both
+#     reproduced against the pre-fix code before this fix landed.
+# ==========================================================================
+run_f2_matrix_case() {
+  # run_f2_matrix_case <string> <expected_exit>: appends a plain content
+  # line embedding <string> to the very end of a scratch
+  # skills/digest/SKILL.md (past its closing frontmatter "---", so it
+  # becomes part of the body) - a line that survives every one of
+  # ported_skill_body's literal_replace/delete_exact_line substitutions
+  # completely untouched (none of them match this text), so it reaches
+  # check_no_claude_only_syntax's scan verbatim, on the REAL,
+  # committed source of that check. Runs the scratch build.sh and
+  # asserts its exit code against <expected_exit>.
+  string=$1
+  expected_exit=$2
+  scratch=$(make_build_scratch)
+  printf 'F2-MATRIX-TEST-LINE: %s\n' "$string" >>"$scratch/skills/digest/SKILL.md"
+  if f2_output=$("$scratch/scripts/build.sh" 2>&1); then
+    f2_exit=0
+  else
+    f2_exit=$?
+  fi
+  assert_eq "$expected_exit" "$f2_exit" "F2 matrix: '$string' embedded in a source skill's body must make build.sh exit $expected_exit -- got $f2_exit, output: $f2_output"
+  if [ "$expected_exit" = "1" ]; then
+    assert_contains "$f2_output" "$string" "F2 matrix: the failure for '$string' must quote the offending line verbatim (F2's own requirement), not just report a mismatch somewhere"
+  fi
+  rm -rf "$scratch"
+}
+
+run_f2_matrix_case "Claude Code" "0"
+run_f2_matrix_case "Claude Code's" "0"
+run_f2_matrix_case "Claude Code." "0"
+run_f2_matrix_case "Claude-Code" "0"
+run_f2_matrix_case "Claudette" "0"
+run_f2_matrix_case "Claude Codex" "1"
+run_f2_matrix_case "Claude" "1"
+run_f2_matrix_case "Claude." "1"
+run_f2_matrix_case "Claude will" "1"
+
+# ==========================================================================
+# 18 (G4, S7 review cycle 3, mutation discriminator). "Claude Code"
+#     wrapped across an ordinary line break must be recognised exactly
+#     like the unwrapped phrase - a line-based scan (the pre-G4 code)
+#     sees "Claude" alone at the end of one line, matching neither
+#     " Code" nor "-Code" because there is no character left on THAT
+#     line to check, and wrongly reports a bare-"Claude" leak even
+#     though the next line plainly continues "Code...". Two lines are
+#     appended to a scratch skills/digest/SKILL.md's body - the first
+#     ending in "Claude", the second starting with <second_word> - the
+#     same shape an ordinary soft-wrapped paragraph would produce.
+# ==========================================================================
+run_f2_wrap_matrix_case() {
+  # run_f2_wrap_matrix_case <second_word> <expected_exit>: appends
+  # "...ends with Claude\n<second_word> continues on the next line.\n"
+  # to a scratch skills/digest/SKILL.md, past its closing frontmatter
+  # "---" (so it becomes part of the body, surviving every one of
+  # ported_skill_body's substitutions untouched, same as
+  # run_f2_matrix_case above). Runs the scratch build.sh and asserts
+  # its exit code against <expected_exit>.
+  second_word=$1
+  expected_exit=$2
+  scratch=$(make_build_scratch)
+  printf 'F2-WRAP-TEST-LINE: ends with Claude\n%s continues on the next line.\n' "$second_word" >>"$scratch/skills/digest/SKILL.md"
+  if f2wrap_output=$("$scratch/scripts/build.sh" 2>&1); then
+    f2wrap_exit=0
+  else
+    f2wrap_exit=$?
+  fi
+  assert_eq "$expected_exit" "$f2wrap_exit" "G4: 'Claude' wrapped across a line break, followed by '$second_word' on the next line, must make build.sh exit $expected_exit -- got $f2wrap_exit, output: $f2wrap_output"
+  rm -rf "$scratch"
+}
+
+run_f2_wrap_matrix_case "Code" "0"
+run_f2_wrap_matrix_case "Codex" "1"
+
+# ==========================================================================
+# 19 (G5, S7 review cycle 3). check_no_claude_only_syntax must now also
+#    scan the two base-rules-derived target artifacts,
+#    targets/codex/AGENTS.md and targets/cursor/squirrel-mode.mdc - it
+#    never reached either one before this fix, so a future
+#    rules/base-rules.md edit mentioning "Claude" would have shipped
+#    unchecked into both non-Claude-Code hosts. A bare "Claude" appended
+#    to the very end of a scratch rules/base-rules.md (landing in rule
+#    16's body, targets: all, so it reaches every artifact including
+#    the two under test) must fail the scratch build, naming one of
+#    those two artifacts as the offender.
+# ==========================================================================
+g5_scratch=$(make_build_scratch)
+printf '\nThis sentence mentions Claude directly and must never reach a non-Claude-Code artifact unscanned.\n' >>"$g5_scratch/rules/base-rules.md"
+if g5_output=$("$g5_scratch/scripts/build.sh" 2>&1); then
+  g5_exit=0
+else
+  g5_exit=$?
+fi
+assert_eq "1" "$g5_exit" "G5: a bare 'Claude' mention added to rules/base-rules.md must fail a scratch build now that the check reaches the base-rules-derived Codex/Cursor artifacts -- output: $g5_output"
+case "$g5_output" in
+  *"targets/codex/AGENTS.md"* | *"targets/cursor/squirrel-mode.mdc"*)
+    g5_named_artifact=yes
+    ;;
+  *)
+    g5_named_artifact=no
+    ;;
+esac
+assert_eq "yes" "$g5_named_artifact" "G5: the failure must name targets/codex/AGENTS.md or targets/cursor/squirrel-mode.mdc as the offending artifact -- output: $g5_output"
+rm -rf "$g5_scratch"
 
 assert_report
