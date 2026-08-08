@@ -1,7 +1,11 @@
 #!/bin/sh
-# Coverage for S3: scripts/build.sh and the four generated artifacts it
-# produces (output-styles/squirrel-mode.md, skills/rules/SKILL.md,
-# targets/codex/AGENTS.md, targets/cursor/squirrel-mode.mdc).
+# Coverage for S3: scripts/build.sh and the four BASE-RULES-DERIVED generated
+# artifacts it produces (output-styles/squirrel-mode.md, skills/rules/SKILL.md,
+# targets/codex/AGENTS.md, targets/cursor/squirrel-mode.mdc) -- four of the ten
+# total artifacts build.sh generates as of S7. The other six (the ported Codex
+# skills and Cursor commands) are a separate source (skills/{digest,plan,init,
+# tune}/SKILL.md, not rules/base-rules.md) and are covered by
+# tests/test_targets.sh instead, not duplicated here.
 #
 # This is where S3 is actually verified: idempotence, drift-from-source,
 # per-target rule completeness/exclusion, frontmatter validity, the
@@ -98,6 +102,20 @@ RULE5_STEP_BY_STEP_SENTENCE="When \`code_style\` is step-by-step: state the numb
 RULE13_CLARITY_SENTENCE="Clarity beats compression whenever safety is at stake."
 RULE14_NOT_INVISIBILITY_SENTENCE="Tool calls are always visible in the transcript; this rule promises no prose about the write in the response, not invisibility."
 RULE16_WARM_OPENER_SENTENCE="A warm opener that stands alone before the answer is preamble, and rule 2 forbids it regardless of \`tone\`."
+
+# S9, X1: rule 10's amended full body, as three sentences (trigger,
+# carve-out, no-branch) -- the same pattern rule 5's/14's/16's pins above
+# use. Pinned in full because the S9 defect was a MISSING carve-out
+# sentence: a pin on the trigger sentence alone would still pass on the
+# pre-amendment text (the trigger clause is new too, but a pin that
+# checked only "ask before switching" would have passed both the old and
+# the new wording), so the carve-out sentence specifically -- the one
+# clause whose absence IS the bug probe 8 found -- gets its own constant
+# and its own assertion below, not folded into a substring of the other
+# two.
+RULE10_TRIGGER_SENTENCE="ask a single yes/no question before switching topics only when the assistant itself is the one introducing the different topic, or when the switch would abandon a task that is still open and unfinished."
+RULE10_CARVEOUT_SENTENCE="Do not ask when the user has already named the new topic themselves, even when that switch abandons open work: an explicit request to switch is the answer to that question, and asking it back is exactly the preamble rule 2 forbids."
+RULE10_NO_BRANCH_SENTENCE="When \`confirm_topic_switch\` is no, switch without asking, in every case."
 
 read_file() {
   # read_file <path> - prints file content, or empty string if missing.
@@ -241,6 +259,21 @@ assert_contains "$skill_content" "$RULE14_NOT_INVISIBILITY_SENTENCE" "skill must
 # Bonus: rule 5 is targets:all, so it must also survive in Codex/Cursor.
 assert_contains "$codex_content" "$RULE5_STEP_BY_STEP_SENTENCE" "Codex AGENTS.md must carry rule 5's full step-by-step branch (rule 5 is targets:all)"
 assert_contains "$cursor_content" "$RULE5_STEP_BY_STEP_SENTENCE" "Cursor .mdc must carry rule 5's full step-by-step branch (rule 5 is targets:all)"
+
+# S9, X1: rule 10's amended body, full text, in all four artifacts (rule
+# 10 is targets:all, same as rule 5 above). The carve-out sentence is the
+# one that matters most here -- it is what a live probe (probe 8) found
+# missing from the ORIGINAL rule, and it is the clause most likely to be
+# silently dropped by a future edit that "simplifies" rule 10 back toward
+# its pre-amendment shape. All three sentences are pinned, not just the
+# carve-out, per X1's "full body text" instruction.
+for target_label_content in "output style:$output_style_content" "skill:$skill_content" "Codex AGENTS.md:$codex_content" "Cursor .mdc:$cursor_content"; do
+  target_label=${target_label_content%%:*}
+  target_content=${target_label_content#*:}
+  assert_contains "$target_content" "$RULE10_TRIGGER_SENTENCE" "$target_label must carry rule 10's full trigger sentence (rule 10 is targets:all)"
+  assert_contains "$target_content" "$RULE10_CARVEOUT_SENTENCE" "$target_label must carry rule 10's carve-out sentence for a user-named topic switch (rule 10 is targets:all) -- this is the exact clause probe 8 found missing"
+  assert_contains "$target_content" "$RULE10_NO_BRANCH_SENTENCE" "$target_label must carry rule 10's confirm_topic_switch:no branch, unchanged (rule 10 is targets:all)"
+done
 
 # ==========================================================================
 # 5. Rule exclusion per target: rule 14 must be absent from Codex/Cursor,
@@ -423,6 +456,7 @@ assert_not_contains "$build_script_content" "$RULE5_STEP_BY_STEP_SENTENCE" "scri
 assert_not_contains "$build_script_content" "$RULE13_CLARITY_SENTENCE" "scripts/build.sh must not contain rule 13's body text verbatim"
 assert_not_contains "$build_script_content" "$RULE14_NOT_INVISIBILITY_SENTENCE" "scripts/build.sh must not contain rule 14's body text verbatim"
 assert_not_contains "$build_script_content" "$RULE16_WARM_OPENER_SENTENCE" "scripts/build.sh must not contain rule 16's body text verbatim"
+assert_not_contains "$build_script_content" "$RULE10_CARVEOUT_SENTENCE" "scripts/build.sh must not contain rule 10's carve-out sentence verbatim"
 
 # ==========================================================================
 # 11. Defaults table present in all four artifacts, with all 11 field

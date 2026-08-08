@@ -1,5 +1,6 @@
 #!/bin/sh
-# Coverage for S6: docs/RESEARCH.md, the evidence base.
+# Coverage for S6: docs/RESEARCH.md, the evidence base. Extended in S9 (scenario 27, near the end
+# of this file) to also check README.md's own population tags, which S6 never covered.
 #
 # This file checks structural/parsing invariants of the research document, not the truth of
 # any citation (that was verified by hand against primary sources while writing the file, per
@@ -17,7 +18,7 @@
 #   7. No TODO:/FIXME:/XXX: marker and no bare "[citation needed]"-style placeholder.
 #   8. A "What we could not verify" section exists.
 #   9. Every arXiv: reference matches the NNNN.NNNNN shape, nothing looser.
-#  10. docs/ contains nothing but RESEARCH.md and adr/.
+#  10. docs/ contains nothing but ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md and adr/.
 #  11. The citation policy section names all four checks (identity, support, whose finding it
 #      is, population) and states plainly that identity alone is not verification.
 #  12. No citation bullet cites Sweller (1988) — the paper this file established does not
@@ -137,8 +138,17 @@
 # words check can tell apart from asserting that vocabulary live. That is a structural limit, not a
 # tuning problem: see check_retired_success_amnesia_phrasing's own comment, further down, for what
 # replaces this class of check.
+#  27. [S9, PLAN.md Section 5: "Every citation in README and RESEARCH.md is ... tagged with the
+#      population it was measured in"] Every finding bullet in README.md's "## Why it's shaped
+#      this way" section carries one of the three allowed population tags. Checks 2 and 3 above
+#      only ever examined docs/RESEARCH.md's own `**Population:**` lines — until this scenario,
+#      README's four inline, backtick-tagged bullets were unchecked entirely, so a hostile reader's
+#      literal reading of the Section 5 criterion ("every citation in README...") had no automated
+#      backing for the README half. Checked against the real file (expect 0 missing, and a
+#      non-zero bullet count so this cannot pass vacuously if the section were ever emptied), then
+#      against a scratch copy with one bullet's tag deleted (expect 1).
 #
-# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, and 26 are
+# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, and 27 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -252,6 +262,39 @@ check_findings_missing_population() {
     END {
       if (in_finding == 1 && has_pop == 0) { missing++ }
       print missing
+    }
+  ' "$file"
+}
+
+# check_readme_finding_bullets_missing_population <file> — prints "<missing> <total>": inside the
+# "## Why it's shaped this way" section (delimited by the next "## " heading, or EOF), the count of
+# top-level bullet lines ("- " at the start of a line) that contain NONE of the three allowed
+# population tags anywhere across their own (possibly multi-line, indented-continuation) text,
+# and the total number of such bullets found. A non-"- "-prefixed line while a bullet is open is
+# treated as that bullet's own continuation (README wraps each finding across 2-3 physical lines),
+# matching how get_rule_body-style parsers elsewhere in this repo already treat wrapped prose.
+check_readme_finding_bullets_missing_population() {
+  file=$1
+  awk '
+    BEGIN { in_section = 0; in_bullet = 0; has_tag = 0; missing = 0; total = 0 }
+    /^## / {
+      if (in_section == 1 && in_bullet == 1 && has_tag == 0) { missing++ }
+      if ($0 == "## Why it'"'"'s shaped this way") { in_section = 1 } else { in_section = 0 }
+      in_bullet = 0
+      next
+    }
+    in_section == 1 && /^- / {
+      if (in_bullet == 1 && has_tag == 0) { missing++ }
+      in_bullet = 1
+      has_tag = 0
+      total++
+    }
+    in_section == 1 && in_bullet == 1 {
+      if ($0 ~ /`ADHD`/ || $0 ~ /`general working memory`/ || $0 ~ /`borrowed from adjacent accessibility work`/) { has_tag = 1 }
+    }
+    END {
+      if (in_section == 1 && in_bullet == 1 && has_tag == 0) { missing++ }
+      print missing, total
     }
   ' "$file"
 }
@@ -1258,7 +1301,7 @@ fixture_arxiv_bad=$(check_arxiv_violations "$arxiv_fixture")
 assert_eq "1" "$fixture_arxiv_bad" "FAILURE PROOF (scenario 9): a malformed arXiv ID (3-digit prefix) must be caught"
 
 # ================================================================================================
-# 10. docs/ contains no stray files beyond RESEARCH.md and adr/.
+# 10. docs/ contains no stray files beyond ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md and adr/.
 # ================================================================================================
 if [ -d "$docs_dir" ]; then
   docs_listing=""
@@ -1271,10 +1314,11 @@ if [ -d "$docs_dir" ]; then
 else
   docs_listing="<directory missing>"
 fi
-# OTHER-TOOLS.md is S7's deliverable and is named in PLAN.md's repository layout. The point of this
-# assertion is that nothing UNEXPECTED lands in docs/, not that the set never grows -- so the
-# expected set is stated here and a genuinely stray file still fails.
-assert_eq "OTHER-TOOLS.md RESEARCH.md adr" "$docs_listing" "docs/ must contain exactly OTHER-TOOLS.md, RESEARCH.md and adr/, nothing else"
+# OTHER-TOOLS.md is S7's deliverable and ACCEPTANCE.md is S9's, both named in PLAN.md's repository
+# layout / this build's own acceptance sweep. The point of this assertion is that nothing
+# UNEXPECTED lands in docs/, not that the set never grows -- so the expected set is stated here
+# and a genuinely stray file still fails.
+assert_eq "ACCEPTANCE.md OTHER-TOOLS.md RESEARCH.md adr" "$docs_listing" "docs/ must contain exactly ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md and adr/, nothing else"
 
 # ================================================================================================
 # 11. The citation policy section names all four checks (identity, support, whose finding it is,
@@ -1797,5 +1841,30 @@ stale_plan_count_fixture="$scratch_dir/bad_stale_plan_count.md"
 sed "s/${expected_cited_count} of the ${total_rule_count} base rules/9 of the ${total_rule_count} base rules/" "$plan_file" >"$stale_plan_count_fixture"
 stale_plan_count_flat=$(tr '\n' ' ' <"$stale_plan_count_fixture" | tr -s ' ')
 assert_not_contains "$stale_plan_count_flat" "$cited_count_needle" "FAILURE PROOF (scenario 26, PLAN.md): a PLAN.md cited-rule count changed to 9 must no longer match the needle derived from the declared expected set"
+
+# ================================================================================================
+# 27. Every finding bullet in README.md's "## Why it's shaped this way" section carries a
+#     population tag (PLAN.md Section 5: "every citation in README and RESEARCH.md is ... tagged
+#     with the population it was measured in" — see check_readme_finding_bullets_missing_population
+#     above for why this was previously unchecked for README specifically).
+# ================================================================================================
+readme_pop_result=$(check_readme_finding_bullets_missing_population "$readme_file")
+readme_pop_missing=$(printf '%s\n' "$readme_pop_result" | awk '{print $1}')
+readme_pop_total=$(printf '%s\n' "$readme_pop_result" | awk '{print $2}')
+assert_eq "0" "$readme_pop_missing" "every bullet in README.md's 'Why it's shaped this way' section must carry one of the three allowed population tags"
+
+if [ "${readme_pop_total:-0}" -ge 1 ] 2>/dev/null; then
+  readme_pop_nonvacuous=yes
+else
+  readme_pop_nonvacuous=no
+fi
+assert_eq "yes" "$readme_pop_nonvacuous" "sanity check: README.md's 'Why it's shaped this way' section must actually contain at least one bullet, or the check above passes vacuously"
+
+readme_pop_fixture="$scratch_dir/bad_readme_population.md"
+# shellcheck disable=SC2016 # single-quoted deliberately: literal sed pattern, not substitution.
+sed 's/ `general working memory`//' "$readme_file" >"$readme_pop_fixture"
+fixture_pop_result=$(check_readme_finding_bullets_missing_population "$readme_pop_fixture")
+fixture_pop_missing=$(printf '%s\n' "$fixture_pop_result" | awk '{print $1}')
+assert_eq "1" "$fixture_pop_missing" "FAILURE PROOF (scenario 27): stripping one bullet's population tag from README.md must be caught"
 
 assert_report

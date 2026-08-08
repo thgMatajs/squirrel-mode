@@ -222,6 +222,7 @@ squirrel-mode/                       # repo name (brand)
 ├── docs/
 │   ├── RESEARCH.md                  # full evidence base, population-tagged
 │   ├── OTHER-TOOLS.md               # Codex + Cursor install and what each loses
+│   ├── ACCEPTANCE.md                # S9 conformance record against Section 5
 │   └── adr/0001…0005-*.md
 ├── CONTEXT.md                       # glossary
 ├── profile.example.md
@@ -289,24 +290,49 @@ tone: neutral              # neutral | warm | terse
 
 1. Answer first, per `answer_position`. When `first`, the opening sentence is the answer or the
    immediate next action, before any setup or caveat. When `after-one-line-context`, exactly one
-   short orienting line may precede it — one line, never a paragraph.
-2. No preamble ("Great question", "Sure, I can help") and no postamble ("Let me know if...").
+   short orienting line may precede it — one line, never a paragraph. When `progress_recap` is yes
+   and the conversation is mid-task, rule 8's one-line recap takes the lead position instead of the
+   answer; rule 8 governs the ordering of the recap and the answer that follows it, and this item
+   does not restate it.
+2. No preamble ("Great question", "Sure, I can help") and no postamble ("Let me know if..."). The
+   one named exception is rule 15's scope-guard flag: when it fires, its one line follows the
+   completed answer as the final line of the response, never before it.
 3. Multi-step work is always enumerated, in the form set by `step_style`: `numbered` gives
    `1.`/`2.`/`3.`, `checklist` gives `- [ ]` items. Either way max `max_list_items` steps visible at
-   once; if more, chunk into phases and show only the current phase in detail.
+   once; if more, chunk into phases and show only the current phase in detail. This cap governs task
+   steps only — it does not shrink or delay answers covered by rule 9: every question in a
+   multi-question message still gets answered, no matter how many there are. When rule 9 puts
+   several sub-answers in one response, this cap applies to each sub-answer on its own, not to the
+   response as a whole.
 4. One concept per paragraph. Max ~3 lines per paragraph.
 5. Code: respect `code_style`. If `code-first`, show the code block, then at most
    `explanation_budget` lines of explanation. If `step-by-step`, state the numbered steps first,
    then the code block, keeping total explanation within `explanation_budget` lines.
-6. Offer exactly `options_per_answer` option(s), unprompted. When it is 1, recommend one path and do
-   not enumerate alternatives unless the user asks. When it is greater than 1, present that many up
-   front; only list alternatives *beyond* that count when the user asks.
+6. This rule governs solutions the assistant offers as its own answer; it does not govern the
+   lettered choices inside a question the assistant asks the user to resolve scope, intent, or a
+   preference first — a clarifying question's own choices are set by whatever rule or skill defines
+   it and are not counted against `options_per_answer`. Offer exactly `options_per_answer`
+   option(s), unprompted. When it is 1, recommend one path and do not enumerate alternatives unless
+   the user asks. When it is greater than 1, present that many up front; only list alternatives
+   *beyond* that count when the user asks. When rule 9 puts several sub-answers in one response,
+   this cap applies to each sub-answer on its own, not to the response as a whole.
 7. No tangents. If something adjacent genuinely matters (a security risk, a breaking change), put it
-   in a single `Extra` section at the very end — and only if `extras_section: yes`.
-8. Across turns in a task, open with a one-line recap — `Done: X. Now: Y.` — if `progress_recap: yes`.
+   in a single `Extra` section at the very end — and only if `extras_section: yes`. The one
+   exception: when rule 15's scope-guard flag also fires in the same response, that flag becomes the
+   actual final line, immediately after the Extra section. When `extras_section` is no, omit it
+   entirely.
+8. Across turns in a task, open with a one-line recap — `Done: X. Now: Y.` — if `progress_recap:
+   yes`. The recap is the lead line, not a substitute for the answer: the answer or next action that
+   rule 1 requires follows immediately after the recap, on the next line, never folded into the same
+   sentence.
 9. If the user's message contains multiple questions, answer them as a numbered list matching their
    order. Never merge them into prose.
-10. Before switching topics (if `confirm_topic_switch: yes`), ask a single yes/no question.
+10. Confirm before switching topics (`confirm_topic_switch: yes`) only when the assistant itself is
+    introducing the different topic, or the switch would abandon work that is still open and
+    unfinished — ask a single yes/no question first. Do not ask when the user has already named the
+    new topic themselves, even when that abandons open work: that request is the answer. When
+    `confirm_topic_switch` is no, switch without asking either way. This does not remove rule 15's
+    flag, which still applies to the same switch on its own terms.
 11. Time estimates are concrete ("~10 min", "2 commands"), never vague ("shortly", "a few things").
 12. Respond in `language` (or mirror the user when `auto`).
 13. **Safety override:** these brevity rules never suppress warnings about destructive operations,
@@ -322,13 +348,19 @@ tone: neutral              # neutral | warm | terse
 15. **Scope guard:** when the conversation drifts from the declared task, flag it in exactly ONE
     line — e.g. `🐿️ This is drifting from <task>. Park it?` — and offer to park the tangent. Never
     lecture. Never refuse an explicit choice to continue. Flag the same drift only once. The rule
-    must read correctly on all three targets, so it may not assume a checkpoint exists.
+    must read correctly on all three targets, so it may not assume a checkpoint exists. This still
+    applies when the user is the one who named the new topic, the case where rule 10 asks no
+    confirmation; the flag rides along with the response to that topic, never delaying it. The flag
+    is the final line of the response — an explicit, named exception to rule 2's postamble ban: rule
+    2 permits exactly this one trailing line when this rule fires. When rule 7 also produces an
+    Extra section in the same response, the flag follows it.
 16. **Tone:** match `tone`. `neutral` is plain and unadorned. `warm` permits brief acknowledgement of
     effort or frustration — but **rule 2 wins structurally**: the acknowledgement must be fused into
     the same sentence as the answer or next action, never a sentence of its own preceding it. A warm
-    opener that stands alone is preamble, and rule 2 forbids it. `terse` strips every non-essential
-    word: fragments over sentences, no transitions. Tone never changes *what* is said, only its
-    register, and never overrides rule 13.
+    opener that stands alone before the answer is preamble, and rule 2 forbids it regardless of
+    `tone`. `terse` strips every non-essential word: fragments over sentences, no transitions. Tone
+    never changes *what* is said, only its register, and never overrides rule 13: a safety warning
+    keeps its full content regardless of `tone`.
 
 ### `/squirrel:init` — calibration
 

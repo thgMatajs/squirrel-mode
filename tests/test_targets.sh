@@ -2,6 +2,9 @@
 # Coverage for S7: the ported command artifacts
 # (targets/codex/skills/*/SKILL.md, targets/cursor/commands/*.md),
 # both targets/{codex,cursor}/install.sh, and docs/OTHER-TOOLS.md.
+# Extended in S9 (scenarios 34 and 35, near the end of this file) to
+# also check that neither installer writes inside a project directory,
+# and to pin README.md's checkpoint auto-approval disclosure text.
 #
 # Every installer scenario below runs against a throwaway, freshly
 # created $HOME (mktemp -d) - never the real ~/.codex, ~/.cursor,
@@ -1456,5 +1459,90 @@ sed 's/| Target | Always-on rules | Commands | Auto profile injection | Auto che
 plan_mutant_table=$(extract_parity_table "$plan_mutant")
 plan_mutant_line_count=$(printf '%s\n' "$plan_mutant_table" | sed '/^$/d' | wc -l | awk '{print $1}')
 assert_eq "0" "$plan_mutant_line_count" "FAILURE PROOF (scenario 33, PLAN.md): reverting PLAN.md's table header to the old 'Auto profile' wording in a scratch copy must make the exact-header extractor find no table at all"
+
+# ==========================================================================
+# 34. [S9, PLAN.md Section 5: "Installs user-scoped; zero files written
+#     inside any project repository"] Running either installer from
+#     INSIDE a project directory -- the realistic case: a developer runs
+#     `targets/codex/install.sh --yes` from their own repo's checkout --
+#     must never write anything into that project directory. Every
+#     earlier scenario in this file proves the installers write
+#     correctly under a scratch $HOME; none of them prove the OTHER half
+#     of this criterion -- that a directory standing in for "the user's
+#     project repo", deliberately SEPARATE from $HOME (so a bug that
+#     resolved a path against cwd instead of $HOME would be caught here
+#     and nowhere else), stays byte-and-path-identical. Both installers
+#     take no cwd-dependent argument at all (verified by reading both
+#     scripts start to finish: every managed path is built from
+#     `$HOME`, never from `.` or a relative path), so this is expected
+#     to pass by construction -- but "the code looks right" is exactly
+#     the standard this project's own review process has rejected
+#     before without a mechanical check behind it. Covers --yes install
+#     AND --uninstall --yes, both installers, with cwd set INSIDE the
+#     project directory for the whole invocation.
+# ==========================================================================
+project34=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-project-repo.XXXXXX")
+cleanup_dirs="$cleanup_dirs $project34"
+mkdir -p "$project34/.git" "$project34/src"
+printf 'seed\n' >"$project34/README.md"
+printf 'seed\n' >"$project34/src/main.py"
+before34=$(full_tree_listing "$project34")
+
+home34c=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home34c"
+mkdir -p "$home34c/.codex"
+if run34c1_out=$(cd "$project34" && HOME="$home34c" "$codex_install" --yes 2>&1); then run34c1_exit=0; else run34c1_exit=$?; fi
+assert_eq "0" "$run34c1_exit" "codex install.sh --yes, run from inside the scratch project directory, must exit 0 -- output: $run34c1_out"
+if run34c2_out=$(cd "$project34" && HOME="$home34c" "$codex_install" --uninstall --yes 2>&1); then run34c2_exit=0; else run34c2_exit=$?; fi
+assert_eq "0" "$run34c2_exit" "codex install.sh --uninstall --yes, run from inside the scratch project directory, must exit 0 -- output: $run34c2_out"
+after34c=$(full_tree_listing "$project34")
+assert_eq "$before34" "$after34c" "codex install.sh --yes (install then uninstall), run from INSIDE a scratch project directory, must leave that project directory completely untouched"
+
+home34u=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home34u"
+mkdir -p "$home34u/.cursor"
+if run34u1_out=$(cd "$project34" && HOME="$home34u" "$cursor_install" --yes 2>&1); then run34u1_exit=0; else run34u1_exit=$?; fi
+assert_eq "0" "$run34u1_exit" "cursor install.sh --yes, run from inside the scratch project directory, must exit 0 -- output: $run34u1_out"
+if run34u2_out=$(cd "$project34" && HOME="$home34u" "$cursor_install" --uninstall --yes 2>&1); then run34u2_exit=0; else run34u2_exit=$?; fi
+assert_eq "0" "$run34u2_exit" "cursor install.sh --uninstall --yes, run from inside the scratch project directory, must exit 0 -- output: $run34u2_out"
+after34u=$(full_tree_listing "$project34")
+assert_eq "$before34" "$after34u" "cursor install.sh --yes (install then uninstall), run from INSIDE a scratch project directory, must leave that project directory completely untouched"
+
+# ==========================================================================
+# 35. [S9, S8-5 regression pin] README.md's checkpoint auto-approval
+#     disclosure must keep naming BOTH the ADR-0002 symlink trust
+#     boundary and the one-write-per-turn cap. S8 review cycle 1 (S8-5)
+#     found the disclosure omitted both facts entirely; the prose fix
+#     landed in README.md, but nothing pinned it there afterward -- a
+#     later edit to the Privacy section could silently drop either
+#     sentence again with no test noticing, the exact "fix landed, no
+#     test enforces it" gap invariant 6e in .build-checkpoint.md warns
+#     about. Checked against the real file (expect both present), then
+#     against a scratch copy with each sentence removed independently
+#     (expect that one specifically absent, the other still present).
+# ==========================================================================
+readme_content_35=$(read_file "$readme_doc")
+assert_contains "$readme_content_35" "a symlink at" "README.md's checkpoint auto-approval disclosure must still name the ADR-0002 symlink trust boundary (S8-5)"
+assert_contains "$readme_content_35" "checkpoints/\` itself, or anywhere below it, is never auto-approved" "README.md's checkpoint auto-approval disclosure must still state that a symlink at or below checkpoints/ is never auto-approved (S8-5)"
+assert_contains "$readme_content_35" "cap them at one checkpoint write per turn" "README.md's checkpoint auto-approval disclosure must still state the one-write-per-turn cap (S8-5)"
+
+symlink_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-symlink-pin-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $symlink_pin_mutant_dir"
+symlink_pin_mutant="$symlink_pin_mutant_dir/README.md"
+# shellcheck disable=SC2016 # single-quoted deliberately: literal sed pattern, not substitution.
+sed '/^The auto-approval only covers paths that genuinely resolve inside that directory/,/^normal permission prompt instead of being silently redirected through the symlink\.$/d' "$readme_doc" >"$symlink_pin_mutant"
+symlink_pin_mutant_content=$(read_file "$symlink_pin_mutant")
+if printf '%s' "$symlink_pin_mutant_content" | grep -qF "never auto-approved"; then symlink_pin_removed=no; else symlink_pin_removed=yes; fi
+assert_eq "yes" "$symlink_pin_removed" "FAILURE PROOF (scenario 35, symlink boundary): deleting that paragraph from a scratch copy of README.md must remove the pinned text"
+assert_contains "$symlink_pin_mutant_content" "cap them at one checkpoint write per turn" "FAILURE PROOF (scenario 35, symlink boundary): deleting the symlink-boundary paragraph alone must leave the SEPARATE one-write-per-turn sentence untouched (proving the two pins are independent, not one accidentally covering for the other)"
+
+perturn_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-perturn-pin-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $perturn_pin_mutant_dir"
+perturn_pin_mutant="$perturn_pin_mutant_dir/README.md"
+sed '/^The base rules that trigger these writes also cap them at one checkpoint write per turn\./d' "$readme_doc" >"$perturn_pin_mutant"
+perturn_pin_mutant_content=$(read_file "$perturn_pin_mutant")
+if printf '%s' "$perturn_pin_mutant_content" | grep -qF "cap them at one checkpoint write per turn"; then perturn_pin_removed=no; else perturn_pin_removed=yes; fi
+assert_eq "yes" "$perturn_pin_removed" "FAILURE PROOF (scenario 35, per-turn cap): deleting that sentence from a scratch copy of README.md must remove the pinned text"
+assert_contains "$perturn_pin_mutant_content" "never auto-approved" "FAILURE PROOF (scenario 35, per-turn cap): deleting the one-write-per-turn sentence alone must leave the SEPARATE symlink-boundary paragraph untouched (proving the two pins are independent)"
 
 assert_report

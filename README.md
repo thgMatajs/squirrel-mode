@@ -165,7 +165,7 @@ fresh `/squirrel:on`, or until the flag ages out after 7 days.
 No background process, no activity monitoring, no nudges or timers — deliberately out of scope,
 not a missing feature. For that heavier category:
 
-- [Tether](https://arxiv.org/abs/2509.01946) — an academic prototype combining activity
+- [Tether](https://arxiv.org/abs/2509.01946) `ADHD` — an academic prototype combining activity
   monitoring, retrieval-augmented generation, and gamification for developers with ADHD.
 - [ravila4/claude-adhd-skills](https://github.com/ravila4/claude-adhd-skills) — nudge- and
   timer-based skills for Claude Code.
