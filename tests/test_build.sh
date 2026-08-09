@@ -285,6 +285,38 @@ assert_not_contains "$codex_content" "### 14. Checkpoint maintenance" "Codex AGE
 assert_not_contains "$cursor_content" "### 14. Checkpoint maintenance" "Cursor .mdc must NOT contain rule 14's heading either"
 
 # ==========================================================================
+# 5b (AD3, S10 review cycle 3 final gate). AC2's fix stopped rules 2 and 7
+#    (both targets:all, so both ship verbatim into Codex/Cursor) from
+#    naming rule 14 BY NUMBER, but left the checkpoint-failure-report
+#    CONCEPT described in their prose - so a Codex/Cursor user still read
+#    a definitive ordering statement for an event those targets
+#    structurally cannot produce (README's parity table: "Auto
+#    checkpoints: no"; docs/OTHER-TOOLS.md: nothing writes to a
+#    checkpoints directory on either target). Fixed by making rules 2 and
+#    7's ordering GENERIC and moving the report's own concept into rule
+#    14 alone (targets:claude-code, absent from both artifacts). Checked
+#    here on the GENERATED artifacts directly, not merely on rule 14's
+#    own absence (already covered above) - this is what actually proves
+#    the CONCEPT is gone, not just the rule NUMBER. Scoped to the specific
+#    retired phrases, not a blanket "checkpoint" ban: rule 15 (also
+#    targets:all) legitimately says "This rule does not assume a
+#    checkpoint... exists on any target", and that correct, cross-target
+#    disclaimer must keep shipping into both artifacts unaffected.
+# ==========================================================================
+for target_label_content in "Codex AGENTS.md:$codex_content" "Cursor .mdc:$cursor_content"; do
+  target_label=${target_label_content%%:*}
+  target_content=${target_label_content#*:}
+  assert_not_contains "$target_content" "checkpoint update failed" "$target_label must not mention a 'checkpoint update failed' report (AD3) - that concept only exists on Claude Code (rule 14), and neither Codex nor Cursor has a checkpoint feature at all"
+  assert_not_contains "$target_content" "checkpoint-failure" "$target_label must not mention a checkpoint-failure report or its ordering (AD3) - same reason"
+  assert_not_contains "$target_content" "checkpoint-update-failure" "$target_label must not mention a checkpoint-update-failure report (AD3, the exact retired AB2-era phrasing) - same reason"
+  # The legitimate, cross-target-correct disclaimer (rule 15) must still
+  # be present and unaffected by the negative pins above - proving they
+  # are scoped to the retired phrases, not a blanket word ban that would
+  # also (wrongly) forbid this sentence.
+  assert_contains "$target_content" "does not assume a checkpoint" "$target_label must still carry rule 15's legitimate, unrelated 'does not assume a checkpoint... exists on any target' disclaimer - proving the negative pins above are scoped, not a blanket ban on the word 'checkpoint'"
+done
+
+# ==========================================================================
 # 6. Rule count per artifact: 16 for the two Claude Code artifacts, 15
 #    for Codex and Cursor.
 # ==========================================================================
@@ -1278,5 +1310,174 @@ case "$g5_output" in
 esac
 assert_eq "yes" "$g5_named_artifact" "G5: the failure must name targets/codex/AGENTS.md or targets/cursor/squirrel-mode.mdc as the offending artifact -- output: $g5_output"
 rm -rf "$g5_scratch"
+
+# ==========================================================================
+# 20 (AC2, S10 review cycle 2). A 'targets: all' rule that names a
+#    non-'all' rule BY NUMBER must fail the build - the structural guard
+#    that replaces one-off patching. Rules 2 and 7 (both 'targets: all')
+#    used to name rule 14 ('targets: claude-code') by number; that
+#    specific defect is fixed by rewording those two rules (they now
+#    describe the checkpoint-failure report instead of naming rule 14),
+#    but this scenario proves the CLASS is closed for any FUTURE rule
+#    too. Appended to the very end of a scratch rules/base-rules.md,
+#    landing in rule 16's body ('targets: all', the last rule, so there
+#    is no next heading to stop the append from landing inside it) - rule
+#    16 citing rule 14 ('targets: claude-code') by number must fail,
+#    naming both rule numbers and rule 14's actual targets value.
+# ==========================================================================
+ac2_scratch=$(make_build_scratch)
+printf '\nThis sentence deliberately cites rule 14 by number, which is claude-code only, to prove the cross-target-reference guard fires (AC2 test fixture).\n' >>"$ac2_scratch/rules/base-rules.md"
+if ac2_output=$("$ac2_scratch/scripts/build.sh" 2>&1); then
+  ac2_exit=0
+else
+  ac2_exit=$?
+fi
+assert_eq "1" "$ac2_exit" "AC2: a 'targets: all' rule (16) citing rule 14 ('targets: claude-code') by number must fail the build -- output: $ac2_output"
+assert_contains "$ac2_output" "rule 16" "AC2: the failure must name the citing rule (16) -- output: $ac2_output"
+assert_contains "$ac2_output" "rule 14" "AC2: the failure must name the cited rule (14) -- output: $ac2_output"
+assert_contains "$ac2_output" "claude-code" "AC2: the failure must name the cited rule's actual targets value (claude-code), not just say it isn't 'all' -- output: $ac2_output"
+rm -rf "$ac2_scratch"
+
+# Sanity companion: the REAL, unmodified rules/base-rules.md (rules 2 and
+# 7 no longer name rule 14 by number, per this cycle's own fix) must NOT
+# trip this guard - a fresh, unmutated scratch build must still succeed.
+ac2_sanity_scratch=$(make_build_scratch)
+if ac2_sanity_output=$("$ac2_sanity_scratch/scripts/build.sh" 2>&1); then
+  ac2_sanity_exit=0
+else
+  ac2_sanity_exit=$?
+fi
+assert_eq "0" "$ac2_sanity_exit" "AC2 sanity: the real, unmodified rules/base-rules.md must build cleanly under the new cross-target-reference guard -- output: $ac2_sanity_output"
+rm -rf "$ac2_sanity_scratch"
+
+# Companion: a 'targets: all' rule citing another 'targets: all' rule by
+# number (the normal, common case throughout rules/base-rules.md - e.g.
+# rule 15 citing rule 2, rule 7 citing rule 15) must NOT fail - proving
+# this guard is scoped to the all-cites-non-all case specifically, not
+# to numbered rule references in general.
+ac2_allall_scratch=$(make_build_scratch)
+printf '\nThis sentence cites rule 15 by number, which is also targets: all, and must never fail the build (AC2 sanity fixture).\n' >>"$ac2_allall_scratch/rules/base-rules.md"
+if ac2_allall_output=$("$ac2_allall_scratch/scripts/build.sh" 2>&1); then
+  ac2_allall_exit=0
+else
+  ac2_allall_exit=$?
+fi
+assert_eq "0" "$ac2_allall_exit" "AC2 sanity: a 'targets: all' rule citing ANOTHER 'targets: all' rule by number must not fail the build -- output: $ac2_allall_output"
+rm -rf "$ac2_allall_scratch"
+
+# ==========================================================================
+# 20b (AD2, S10 review cycle 3 final gate). The cross-target-reference
+#    guard above (check_no_all_rule_cites_non_all_rule) used to extract
+#    every literal digit token inside a matched "rule(s) ..." span and
+#    stop there - which finds the two ENDPOINTS of a range expression
+#    ("rules 1 through 12") but never the numbers strictly between them,
+#    because "1 through 12" contains exactly two digit tokens ("1" and
+#    "12") no matter how many rules the range spans. Proven before this
+#    fix: rule 13's real, shipped "This rule takes precedence over rules
+#    1 through 12 and rule 16" was checked only for 1, 12, and 16 -
+#    flipping any of rules 2-11 to a non-'all' target left a scratch
+#    build green. Fixed by additionally expanding "A through B" / "A-B" /
+#    "A to B" range pairs within a matched span to every intermediate
+#    integer. flip_rule_target below mutates ONE rule's own targets
+#    marker line in a scratch copy, by heading number, leaving every
+#    other line (including rule 13's citing text) untouched.
+# ==========================================================================
+flip_rule_target() {
+  # flip_rule_target <scratch-rules-file> <rule-num> <new-target-value> -
+  # rewrites the FIRST "<!-- targets: ... -->" line following the given
+  # rule's own "### <n>. " heading to <new-target-value>, leaving every
+  # other line - including any OTHER rule's citation text - byte-for-byte
+  # unchanged.
+  target_file=$1
+  rule_num=$2
+  new_value=$3
+  awk -v want="$rule_num" -v newval="$new_value" '
+    $0 ~ ("^### " want "\\. ") { flip = 1 }
+    flip && /^<!-- targets: / { print "<!-- targets: " newval " -->"; flip = 0; next }
+    { print }
+  ' "$target_file" >"$target_file.flip.tmp"
+  mv "$target_file.flip.tmp" "$target_file"
+}
+
+# 20b-1: flipping rule 5 - reachable ONLY via rule 13's "1 through 12"
+# range, never named directly by any rule - must now fail the build,
+# naming both rule 13 (the citing rule) and rule 5 (the cited one),
+# without the fail() message claiming rule 5 is spelled out as a literal
+# digit (it is not; AD2's fix message distinguishes this case).
+ad2_r5_scratch=$(make_build_scratch)
+flip_rule_target "$ad2_r5_scratch/rules/base-rules.md" 5 claude-code
+if ad2_r5_output=$("$ad2_r5_scratch/scripts/build.sh" 2>&1); then
+  ad2_r5_exit=0
+else
+  ad2_r5_exit=$?
+fi
+assert_eq "1" "$ad2_r5_exit" "AD2: flipping rule 5 (reachable only via rule 13's 'rules 1 through 12' range) to a non-'all' target must fail the build -- output: $ad2_r5_output"
+assert_contains "$ad2_r5_output" "rule 13" "AD2: the failure must name the citing rule (13) -- output: $ad2_r5_output"
+assert_contains "$ad2_r5_output" "rule 5" "AD2: the failure must name the cited rule (5) -- output: $ad2_r5_output"
+assert_contains "$ad2_r5_output" "range expression includes rule 5" "AD2: the failure message must say rule 5 was reached via the range expression, not claim it is spelled out as a literal digit (it is not) -- output: $ad2_r5_output"
+rm -rf "$ad2_r5_scratch"
+
+# 20b-2: a second rule in 2-11, also reachable only via the same range
+# (rule 11 - "Use concrete time estimates" - is never named directly by
+# any other rule either), independently proves this is not a fix
+# narrowly targeted at rule 5's own position in the range.
+ad2_r11_scratch=$(make_build_scratch)
+flip_rule_target "$ad2_r11_scratch/rules/base-rules.md" 11 claude-code
+if ad2_r11_output=$("$ad2_r11_scratch/scripts/build.sh" 2>&1); then
+  ad2_r11_exit=0
+else
+  ad2_r11_exit=$?
+fi
+assert_eq "1" "$ad2_r11_exit" "AD2: flipping rule 11 (also reachable only via rule 13's range) to a non-'all' target must fail the build -- output: $ad2_r11_output"
+assert_contains "$ad2_r11_output" "rule 13" "AD2: the failure must name the citing rule (13) -- output: $ad2_r11_output"
+assert_contains "$ad2_r11_output" "rule 11" "AD2: the failure must name the cited rule (11) -- output: $ad2_r11_output"
+rm -rf "$ad2_r11_scratch"
+
+# 20b-3: sanity - the real, unmodified rules/base-rules.md must still
+# build cleanly under the range-expanding guard (rules 2-11 are all
+# legitimately 'targets: all' today, so expanding rule 13's range must
+# find nothing wrong).
+ad2_sanity_scratch=$(make_build_scratch)
+if ad2_sanity_output=$("$ad2_sanity_scratch/scripts/build.sh" 2>&1); then
+  ad2_sanity_exit=0
+else
+  ad2_sanity_exit=$?
+fi
+assert_eq "0" "$ad2_sanity_exit" "AD2 sanity: the real, unmodified rules/base-rules.md must build cleanly under the range-expanding guard -- output: $ad2_sanity_output"
+rm -rf "$ad2_sanity_scratch"
+
+# 20b-4: the "N-M" hyphen form, synthetic (no rule body uses this form
+# today) - appended to rule 16's body (the last rule, so there is no
+# next heading to stop the append from landing inside it), citing rule
+# 14 ('targets: claude-code') via "rules 13-15" rather than by name. 13
+# and 15 are both 'targets: all' (both already legitimate, unaffected);
+# only the INTERMEDIATE rule 14 is not, so this can only be caught by the
+# range expansion, never by the pre-existing plain digit extraction.
+ad2_hyphen_scratch=$(make_build_scratch)
+printf '\nThis clause also applies to rules 13-15 for completeness (AD2 hyphen-range test fixture).\n' >>"$ad2_hyphen_scratch/rules/base-rules.md"
+if ad2_hyphen_output=$("$ad2_hyphen_scratch/scripts/build.sh" 2>&1); then
+  ad2_hyphen_exit=0
+else
+  ad2_hyphen_exit=$?
+fi
+assert_eq "1" "$ad2_hyphen_exit" "AD2: a synthetic 'rules 13-15' hyphen range whose intermediate rule (14) is not 'targets: all' must fail the build -- output: $ad2_hyphen_output"
+assert_contains "$ad2_hyphen_output" "rule 16" "AD2 (hyphen form): the failure must name the citing rule (16) -- output: $ad2_hyphen_output"
+assert_contains "$ad2_hyphen_output" "rule 14" "AD2 (hyphen form): the failure must name the cited rule (14) -- output: $ad2_hyphen_output"
+rm -rf "$ad2_hyphen_scratch"
+
+# 20b-5: the "N to M" form, synthetic (no rule body uses this form
+# today either) - identical shape to 20b-4, proving the range regex's
+# "to" alternative works independently of the hyphen one.
+ad2_to_scratch=$(make_build_scratch)
+printf '\nThis clause also applies to rules 13 to 15 for completeness (AD2 to-range test fixture).\n' >>"$ad2_to_scratch/rules/base-rules.md"
+if ad2_to_output=$("$ad2_to_scratch/scripts/build.sh" 2>&1); then
+  ad2_to_exit=0
+else
+  ad2_to_exit=$?
+fi
+assert_eq "1" "$ad2_to_exit" "AD2: a synthetic 'rules 13 to 15' range whose intermediate rule (14) is not 'targets: all' must fail the build -- output: $ad2_to_output"
+assert_contains "$ad2_to_output" "rule 16" "AD2 ('to' form): the failure must name the citing rule (16) -- output: $ad2_to_output"
+assert_contains "$ad2_to_output" "rule 14" "AD2 ('to' form): the failure must name the cited rule (14) -- output: $ad2_to_output"
+rm -rf "$ad2_to_scratch"
 
 assert_report

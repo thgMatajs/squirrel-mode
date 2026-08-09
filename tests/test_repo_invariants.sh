@@ -782,4 +782,465 @@ done
 IFS=$old_ifs
 assert_eq " 3" "$aa4_mismatched" "FAILURE PROOF (invariant 12, AA4): dropping the '**first**'/'**every**' emphasis from criterion 3's heading in a scratch copy must be caught, and only criterion 3 must be flagged"
 
+# --- 13. No docs/ACCEPTANCE.md criterion marked `observed` may also claim
+# its own probe was not run or never observed (S10, AB3) ---------------------
+#
+# AB3's finding: criteria 10, 11, and 14 each said, in their own section, that
+# a probe "remain[ed] untested by any live run", "was never observed live", or
+# "which was not run" - true when S9 shipped, false once a later S10 probe (B,
+# C, D, E, F, or G) actually ran it, and docs/ACCEPTANCE.md was not updated to
+# match .build-checkpoint.md's own probe log. Fixed for those three
+# (criteria 11 and 14 moved to `observed`; criterion 10 stayed `manual`,
+# correctly - see its own section for the one branch that genuinely remains
+# untested). This guards the CLASS: a future probe that closes a `manual`
+# criterion, but whose docs/ACCEPTANCE.md update misses one stale
+# not-run/never-observed sentence elsewhere in that same criterion's section,
+# is caught rather than shipped silently self-contradictory. Scoped to only
+# the criteria whose own "**Status:**" line says `observed` - a `manual`
+# criterion is explicitly allowed to say a specific sub-case was not run
+# (that is the honest, correct thing for it to say), so this must not scan
+# those.
+#
+# UPDATED (S10 review cycle 2, AC3, BLOCKER-class evasion). This scan used to
+# run `grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"` directly against a criterion's
+# multi-line section text, piped line by line - `grep` matches WITHIN one
+# line, never across a newline, so any evasion that puts a newline in the
+# middle of the banned wording defeated it outright: reproduced for a
+# line-break mid-phrase and for a two-sentence rewrite whose second sentence
+# still carries the retired wording split across a line - both left the real
+# suite at 34/0 (34 assertions for this invariant, zero failures - the scan
+# did not fire on either). Fixed by FLATTENING each criterion's section -
+# joining its lines and squeezing whitespace to single spaces - before the
+# regex ever runs, via flatten_acceptance_section() below. This closes both
+# evasions mechanically: once every line-break-shaped whitespace run becomes
+# one space, the banned phrase's words are contiguous again regardless of
+# where in the source text they happened to wrap, whether that wrap was a
+# bare mid-phrase break or the byproduct of splitting one sentence into two.
+#
+# WHAT THIS DOES NOT CATCH, STATED PLAINLY: a genuine PARAPHRASE - different
+# words carrying the identical retired claim, with no literal overlap with
+# any alternative in ACCEPTANCE_NOT_RUN_REGEX at all (e.g. "nobody has yet
+# watched this happen live" for "was never observed") - is not something a
+# literal-phrase regex can ever catch, flattened or not, and no amount of
+# narrowing this pattern changes that. This is a permanent limitation of the
+# mechanism, not a gap this cycle's fix closes; see the demonstration below,
+# which documents it as an accepted, tested boundary rather than an implicit
+# claim of completeness. Catching a paraphrase is a job for the four-check
+# review policy, not for grep.
+ACCEPTANCE_NOT_RUN_REGEX="was not run|never observed|not observed|remains? untested by any (live )?run|was never (run|observed|reached)|has not (yet )?(been )?(run|observed)|no probe (has )?(ever )?ran"
+
+get_acceptance_section() {
+  # get_acceptance_section <content> <n> - the lines of a docs/ACCEPTANCE.md-
+  # shaped criterion <n>'s own section: from its "## <n>. " heading
+  # (inclusive) to the next "## " heading (exclusive) or EOF. Takes CONTENT
+  # (not a path) so this doubles as the mutation-proof extractor below,
+  # never re-reading the tracked file for the fixture case.
+  content=$1
+  n=$2
+  printf '%s\n' "$content" | awk -v want="$n" '
+    $0 ~ ("^## " want "\\. ") { in_sec = 1; print; next }
+    in_sec && /^## / { in_sec = 0 }
+    in_sec { print }
+  '
+}
+
+flatten_acceptance_section() {
+  # flatten_acceptance_section <section-text> - flattens PER PARAGRAPH, not
+  # per whole section: each blank-line-separated paragraph becomes its own
+  # single output LINE, with runs of whitespace (including the newlines
+  # just introduced by joining that one paragraph's own lines) squeezed to
+  # a single space. Every call site below pipes this function's output
+  # into a line-oriented `grep -qiE` - which never matches across a
+  # newline - so bounding to one paragraph per output line makes the
+  # not-run/never-observed scan immune to a line-break landing in the
+  # middle of the banned wording WITHIN one paragraph (a bare mid-phrase
+  # wrap and a two-sentence rewrite that happens to wrap there are
+  # indistinguishable to this function, deliberately - see AC3 below),
+  # while never joining text from two DIFFERENT paragraphs together at
+  # all - see AD4 below for why that boundary matters.
+  #
+  # UPDATED (S10 review cycle 3 final gate, AD4 - UNDISCLOSED FALSE-
+  # POSITIVE CLASS). The original version of this function (S10 review
+  # cycle 2, AC3) joined the ENTIRE section - every paragraph, table row,
+  # and list item in a criterion, with no boundary anywhere - into ONE
+  # line before scanning. That closed the two real evasions (below) but
+  # opened an undisclosed hole: joining a criterion's lines can spell a
+  # banned phrase across a PARAGRAPH boundary that has nothing to do with
+  # either evasion. Concretely: a paragraph ending "...confidence in this
+  # feature has not" followed by a blank line and an UNRELATED paragraph
+  # beginning "run into any blockers so far..." flattens, whole-section,
+  # to "...has not run into any blockers..." - which matches
+  # ACCEPTANCE_NOT_RUN_REGEX's "has not (yet )?(been )?(run|observed)"
+  # alternative even though the actual claim is the opposite of untested
+  # (the feature has NOT run into any blockers). That is a coincidental
+  # false positive against a criterion that claims nothing, not a defeated
+  # evasion - and the failure mode is a BLOCKED BUILD, not a shipped
+  # defect, so this was disclosed rather than silently left as a risk (see
+  # the demonstration mutant below).
+  #
+  # THE FIX, and what it does and does not close. Flattening is now scoped
+  # to one paragraph at a time (`awk 'BEGIN{RS=""} ...'` - "paragraph
+  # mode", where a record is everything between blank lines - splits the
+  # section into paragraphs BEFORE any whitespace-squeezing happens), so
+  # text can never be joined across a blank line - the exact mechanism the
+  # false positive above depends on. Both real evasions still live
+  # entirely WITHIN one paragraph (the retired sentence is inserted as a
+  # single block with no blank line inside it, whether hard-wrapped
+  # mid-phrase or split into two sentences), so bounding to the paragraph
+  # they are already inside changes nothing about catching them - proven
+  # below by re-running both existing failure-proof mutants unchanged.
+  # What this does NOT close, disclosed rather than left implicit: a
+  # coincidental match can still occur WITHIN a single paragraph - an
+  # ordinary line-wrap landing between two unrelated sentences that share
+  # one paragraph, or a wrap in the middle of one sentence with no blank
+  # line involved at all. That narrower residual predates this whole
+  # mechanism: a banned phrase already sitting on ONE physical line,
+  # unwrapped, was always a coincidental-match risk this literal-phrase
+  # regex could produce, flattened or not, paragraph-bounded or not - it
+  # is not something flattening introduced and paragraph-bounding cannot
+  # remove it. Closing it fully would need bounding to a SENTENCE instead
+  # of a paragraph, which was considered and rejected: sentence boundaries
+  # are not mechanically detectable the way a blank line is (a
+  # period-based splitter would also fire on abbreviations, decimal
+  # version numbers, and markdown's own "1. " list syntax), and a narrower
+  # heuristic with its own undisclosed holes is the exact anti-pattern
+  # this project has hit and rejected repeatedly elsewhere (Layer 3's
+  # realpath comparison, the sed-based nested-JSON isolation this build
+  # eventually removed rather than narrowed again). A false positive here
+  # blocks a build rather than shipping a defect, so disclosure is the
+  # proportionate response to the residual, not a fourth narrowing.
+  printf '%s\n' "$1" | awk '
+    BEGIN { RS = "" }
+    {
+      gsub(/[\n\t]/, " ")
+      gsub(/  +/, " ")
+      print
+    }
+  '
+}
+
+acceptance_content=$(cat "$acceptance_file")
+observed_not_run_criteria=""
+n13=1
+while [ "$n13" -le 19 ]; do
+  section13=$(get_acceptance_section "$acceptance_content" "$n13")
+  status13_line=$(printf '%s\n' "$section13" | grep '^\*\*Status:\*\*' | head -n 1)
+  section13_flat=$(flatten_acceptance_section "$section13")
+  # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status value in the case pattern below, not command substitution.
+  case "$status13_line" in
+    *'`observed`'*)
+      if printf '%s\n' "$section13_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+        observed_not_run_criteria="$observed_not_run_criteria $n13"
+      fi
+      ;;
+  esac
+  n13=$((n13 + 1))
+done
+assert_eq "" "$observed_not_run_criteria" "no docs/ACCEPTANCE.md criterion marked \`observed\` may also contain a sentence claiming its own probe was not run or never observed (S10 AB3 class guard; AC3: matched on the FLATTENED section text, immune to a line-break or two-sentence split inside the banned wording)"
+
+# Sanity: at least one criterion must actually BE `observed` for the loop
+# above to mean anything (vacuous-pass guard - a typo in the status-line
+# pattern that matched nothing would make this invariant pass trivially).
+observed_count13=0
+n13=1
+while [ "$n13" -le 19 ]; do
+  section13=$(get_acceptance_section "$acceptance_content" "$n13")
+  status13_line=$(printf '%s\n' "$section13" | grep '^\*\*Status:\*\*' | head -n 1)
+  # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status value in the case pattern below, not command substitution.
+  case "$status13_line" in
+    *'`observed`'*) observed_count13=$((observed_count13 + 1)) ;;
+  esac
+  n13=$((n13 + 1))
+done
+if [ "$observed_count13" -gt 0 ]; then
+  observed_nonempty13=yes
+else
+  observed_nonempty13=no
+fi
+assert_eq "yes" "$observed_nonempty13" "sanity (invariant 13): at least one docs/ACCEPTANCE.md criterion must be marked \`observed\` for the not-run/never-observed scan above to be exercising anything"
+
+# FAILURE PROOF (invariant 13): re-inject criterion 14's own ORIGINAL S9
+# "which was not run" sentence back INTO criterion 14's own section of an
+# in-memory mutant (criterion 14 is now `observed`) - must be caught.
+# Inserted immediately after criterion 14's real, current, unique status
+# line via awk (not appended at the end of the whole document, which would
+# land past every "## " heading including criterion 14's own next-heading
+# boundary and never be seen by get_acceptance_section at all). Uses the
+# exact retired sentence, not a paraphrase, since that is the literal
+# regression this invariant exists to prevent.
+RETIRED_C14_SENTENCE="proving that needs a probe that first declares a task (e.g. \"help me refactor this function\") and then drifts from it, which was not run."
+acceptance_mutant13=$(awk -v ins="$RETIRED_C14_SENTENCE" '
+  { print }
+  /^\*\*Status:\*\* `observed`, on probes E and F\./ && !done { print ins; done = 1 }
+' "$acceptance_file")
+
+# Sanity: the insertion anchor must actually have been found (a stale
+# anchor - e.g. after a future rewording of criterion 14's status line -
+# would make the mutant byte-identical to the real file and the failure
+# proof below would vacuously "pass" by finding nothing to catch).
+if printf '%s\n' "$acceptance_mutant13" | grep -qF "$RETIRED_C14_SENTENCE"; then
+  mutant13_anchor_found=yes
+else
+  mutant13_anchor_found=no
+fi
+assert_eq "yes" "$mutant13_anchor_found" "sanity (invariant 13): the FAILURE PROOF's insertion anchor (criterion 14's current status line) must actually be found in the real file, or the mutant below is not a real mutation"
+
+mutant13_section14=$(get_acceptance_section "$acceptance_mutant13" 14)
+mutant13_status14=$(printf '%s\n' "$mutant13_section14" | grep '^\*\*Status:\*\*' | head -n 1)
+mutant13_section14_flat=$(flatten_acceptance_section "$mutant13_section14")
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status value in the case pattern below, not command substitution.
+case "$mutant13_status14" in
+  *'`observed`'*)
+    if printf '%s\n' "$mutant13_section14_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+      mutant13_caught=yes
+    else
+      mutant13_caught=no
+    fi
+    ;;
+  *)
+    mutant13_caught=no
+    ;;
+esac
+assert_eq "yes" "$mutant13_caught" "FAILURE PROOF (invariant 13): re-inserting criterion 14's original S9 'which was not run' sentence back into its own (now \`observed\`) section, in an in-memory mutant, must be caught by the not-run/never-observed scan"
+
+# Sanity: the same mutant must NOT flag any OTHER criterion - the
+# insertion is scoped to criterion 14's own section only, so a naive
+# whole-document scan (rather than a per-section one) would over-flag
+# every criterion after it in file order, which this invariant's per-
+# section design must not do.
+mutant13_others=""
+n13m=1
+while [ "$n13m" -le 19 ]; do
+  if [ "$n13m" != "14" ]; then
+    section13m=$(get_acceptance_section "$acceptance_mutant13" "$n13m")
+    status13m=$(printf '%s\n' "$section13m" | grep '^\*\*Status:\*\*' | head -n 1)
+    section13m_flat=$(flatten_acceptance_section "$section13m")
+    # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status value in the case pattern below, not command substitution.
+    case "$status13m" in
+      *'`observed`'*)
+        if printf '%s\n' "$section13m_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+          mutant13_others="$mutant13_others $n13m"
+        fi
+        ;;
+    esac
+  fi
+  n13m=$((n13m + 1))
+done
+assert_eq "" "$mutant13_others" "sanity (invariant 13): inserting the fixture sentence into criterion 14's own section only must not cause any OTHER criterion to be flagged"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 13, AC3 #1) - LINE-BREAK SPLIT. The retired
+# sentence's own wording, UNCHANGED, with a single raw newline inserted in
+# the middle of the banned phrase "was not run." (between "not" and "run.")
+# - the exact evasion the tech lead reproduced, which left the old,
+# unflattened scan at 34/0. Same insertion anchor and mechanism as the
+# FAILURE PROOF above (criterion 14's real, current, unique status line),
+# so this mutant is independent of, not derived from, acceptance_mutant13.
+# ==========================================================================
+LINEBREAK_C14_SENTENCE='proving that needs a probe that first declares a task (e.g. "help me refactor this function") and then drifts from it, which was not
+run.'
+# INS goes through ENVIRON, not `awk -v` - the BWK "one true awk" shipped
+# as /usr/bin/awk on macOS rejects a multi-line value in `-v name=value`
+# outright ("newline in string"), and this value deliberately contains a
+# real embedded newline (the evasion under test). ENVIRON reads the
+# process environment directly, with no such restriction.
+acceptance_mutant_linebreak13=$(INS="$LINEBREAK_C14_SENTENCE" awk '
+  { print }
+  /^\*\*Status:\*\* `observed`, on probes E and F\./ && !done { print ENVIRON["INS"]; done = 1 }
+' "$acceptance_file")
+
+# The anchor check searches for the inserted text's FIRST LINE only
+# (a `case` pattern match, not a grep pipe: piping the WHOLE multi-
+# thousand-line mutant through `grep -q`, which exits the instant it
+# finds a match, can race a still-writing `printf` on the other end of
+# the pipe into a harmless but noisy SIGPIPE/"Broken pipe" - a pure shell
+# `case` test has no subprocess pipe to race at all). Quoting the
+# variable inside the pattern makes its content literal, not a glob, per
+# POSIX - the same technique this codebase's own `${var#"$prefix"}` uses
+# elsewhere for the identical reason.
+linebreak13_first_line=$(printf '%s\n' "$LINEBREAK_C14_SENTENCE" | head -n 1)
+case "$acceptance_mutant_linebreak13" in
+  *"$linebreak13_first_line"*) mutant_linebreak13_anchor_found=yes ;;
+  *) mutant_linebreak13_anchor_found=no ;;
+esac
+assert_eq "yes" "$mutant_linebreak13_anchor_found" "sanity (invariant 13, AC3 #1): the line-break FAILURE PROOF's insertion anchor must actually be found in the real file, or this mutant is not a real mutation"
+
+mutant_linebreak13_section14=$(get_acceptance_section "$acceptance_mutant_linebreak13" 14)
+
+# The OLD mechanism, reproduced inline for comparison: grep -qiE run
+# DIRECTLY against the unflattened, multi-line section text - exactly what
+# this invariant's scan did before this cycle's fix. Must MISS the
+# line-break-split evasion - this is the vulnerability itself, demonstrated,
+# not merely asserted in a comment.
+if printf '%s\n' "$mutant_linebreak13_section14" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_linebreak13_old_mechanism_caught=yes
+else
+  mutant_linebreak13_old_mechanism_caught=no
+fi
+assert_eq "no" "$mutant_linebreak13_old_mechanism_caught" "DEMONSTRATION (invariant 13, AC3 #1): the OLD mechanism - grep run directly against the unflattened section - must MISS a line-break inserted in the middle of 'was not run.', reproducing the exact evasion the tech lead verified left the real suite at 34/0"
+
+# The NEW (current, shipped) mechanism: flatten first, then scan. Must
+# CATCH it.
+mutant_linebreak13_flat=$(flatten_acceptance_section "$mutant_linebreak13_section14")
+if printf '%s\n' "$mutant_linebreak13_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_linebreak13_new_mechanism_caught=yes
+else
+  mutant_linebreak13_new_mechanism_caught=no
+fi
+assert_eq "yes" "$mutant_linebreak13_new_mechanism_caught" "FAILURE PROOF (invariant 13, AC3 #1): the NEW mechanism - flatten, then scan - must CATCH the identical line-break-split evasion the OLD mechanism just missed, above"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 13, AC3 #2) - TWO-SENTENCE SPLIT. A second,
+# distinct construction: an inert LEAD-IN sentence is added first ("This
+# probe sits apart from the others already covered above." - a real second
+# sentence, not a fragment), and the retired claim becomes the SECOND
+# sentence rather than the whole inserted text - itself then wrapped by a
+# line break in the middle of "has not yet\nbeen run" (a different
+# alternative of ACCEPTANCE_NOT_RUN_REGEX than #1 used, so this is not
+# merely #1 repeated under a new name). This is the shape a genuine
+# two-sentence rewrite of a retired disclosure would plausibly take: the
+# claim is no longer the sole content of the inserted text, and the line
+# wrap that defeats a per-line scan falls inside the SECOND sentence.
+# ==========================================================================
+TWOSENTENCE_C14_SENTENCE='This probe sits apart from the others already covered above. It has not yet
+been run.'
+# INS goes through ENVIRON for the identical reason the line-break mutant
+# above does - this value also contains a real embedded newline.
+acceptance_mutant_twosentence13=$(INS="$TWOSENTENCE_C14_SENTENCE" awk '
+  { print }
+  /^\*\*Status:\*\* `observed`, on probes E and F\./ && !done { print ENVIRON["INS"]; done = 1 }
+' "$acceptance_file")
+
+# Anchor on the inserted text's FIRST LINE only, via a `case` pattern
+# match, for the identical reason the line-break mutant's own anchor
+# check above does.
+twosentence13_first_line=$(printf '%s\n' "$TWOSENTENCE_C14_SENTENCE" | head -n 1)
+case "$acceptance_mutant_twosentence13" in
+  *"$twosentence13_first_line"*) mutant_twosentence13_anchor_found=yes ;;
+  *) mutant_twosentence13_anchor_found=no ;;
+esac
+assert_eq "yes" "$mutant_twosentence13_anchor_found" "sanity (invariant 13, AC3 #2): the two-sentence FAILURE PROOF's insertion anchor must actually be found in the real file, or this mutant is not a real mutation"
+
+mutant_twosentence13_section14=$(get_acceptance_section "$acceptance_mutant_twosentence13" 14)
+
+# OLD mechanism: must MISS it too - the second sentence's own claim is
+# still split by a raw newline, the same underlying weakness as #1, now
+# demonstrated for a genuinely two-sentence passage rather than a single
+# sentence hard-wrapped.
+if printf '%s\n' "$mutant_twosentence13_section14" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_twosentence13_old_mechanism_caught=yes
+else
+  mutant_twosentence13_old_mechanism_caught=no
+fi
+assert_eq "no" "$mutant_twosentence13_old_mechanism_caught" "DEMONSTRATION (invariant 13, AC3 #2): the OLD mechanism must MISS a two-sentence rewrite whose second sentence carries the retired claim split by a line break ('has not yet\\nbeen run'), the two-sentence evasion the tech lead verified also left the real suite at 34/0"
+
+mutant_twosentence13_flat=$(flatten_acceptance_section "$mutant_twosentence13_section14")
+if printf '%s\n' "$mutant_twosentence13_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_twosentence13_new_mechanism_caught=yes
+else
+  mutant_twosentence13_new_mechanism_caught=no
+fi
+assert_eq "yes" "$mutant_twosentence13_new_mechanism_caught" "FAILURE PROOF (invariant 13, AC3 #2): the NEW mechanism - flatten, then scan - must CATCH the two-sentence-split evasion the OLD mechanism just missed, above"
+
+# ==========================================================================
+# DEMONSTRATION (invariant 13, AD4) - CROSS-PARAGRAPH FALSE POSITIVE. Two
+# ORDINARY, UNRELATED paragraphs (a real blank line between them, not a
+# raw mid-phrase wrap like AC3 #1/#2 above), whose text happens to abut
+# into a banned-phrase shape when joined: paragraph A ends "...has not"
+# and paragraph B - after the blank line - begins "run into any blockers
+# so far...". Neither paragraph, alone, claims anything about testing or
+# observation; the coincidence only appears if the two are joined across
+# their own paragraph boundary. This is AD4's own finding: the OLD
+# (whole-SECTION flatten, AC3-era) mechanism joins them and wrongly
+# matches; the NEW (per-PARAGRAPH flatten) mechanism, fixed this cycle,
+# keeps them apart and correctly does not.
+# ==========================================================================
+FALSEPOS_C14_TEXT='The team says confidence in this feature has not
+
+run into any blockers so far, so it should ship on schedule.'
+# INS goes through ENVIRON, the same reason the line-break and
+# two-sentence mutants above do - this value contains real embedded
+# newlines, including a genuine BLANK line between the two paragraphs,
+# which `awk -v` cannot carry on every awk this project has to run under.
+acceptance_mutant_falsepos13=$(INS="$FALSEPOS_C14_TEXT" awk '
+  { print }
+  /^\*\*Status:\*\* `observed`, on probes E and F\./ && !done { print ENVIRON["INS"]; done = 1 }
+' "$acceptance_file")
+
+falsepos13_first_line=$(printf '%s\n' "$FALSEPOS_C14_TEXT" | head -n 1)
+case "$acceptance_mutant_falsepos13" in
+  *"$falsepos13_first_line"*) mutant_falsepos13_anchor_found=yes ;;
+  *) mutant_falsepos13_anchor_found=no ;;
+esac
+assert_eq "yes" "$mutant_falsepos13_anchor_found" "sanity (invariant 13, AD4): the cross-paragraph FAILURE-POSITIVE demonstration's insertion anchor must actually be found in the real file, or this mutant is not a real mutation"
+
+mutant_falsepos13_section14=$(get_acceptance_section "$acceptance_mutant_falsepos13" 14)
+
+# The OLD (AC3-era) mechanism: flatten the WHOLE section into one line,
+# with no paragraph boundary respected, then scan - reproduced inline for
+# comparison (not a call to the shipped function, which no longer behaves
+# this way). Must WRONGLY MATCH: this is the undisclosed false-positive
+# class AD4 found, demonstrated, not merely asserted in a comment.
+old_whole_section_flatten() {
+  printf '%s\n' "$1" | tr '\n\t' '  ' | tr -s ' '
+}
+mutant_falsepos13_old_flat=$(old_whole_section_flatten "$mutant_falsepos13_section14")
+if printf '%s\n' "$mutant_falsepos13_old_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_falsepos13_old_mechanism_caught=yes
+else
+  mutant_falsepos13_old_mechanism_caught=no
+fi
+assert_eq "yes" "$mutant_falsepos13_old_mechanism_caught" "DEMONSTRATION (invariant 13, AD4): the OLD (AC3-era, whole-section) flatten mechanism must WRONGLY MATCH two unrelated paragraphs whose text abuts into a banned-phrase shape across their own paragraph boundary - this is the undisclosed false positive AD4 found and this cycle fixed"
+
+# The NEW (current, shipped) mechanism: flatten_acceptance_section, now
+# scoped per paragraph. Must NOT match - the fix.
+mutant_falsepos13_new_flat=$(flatten_acceptance_section "$mutant_falsepos13_section14")
+if printf '%s\n' "$mutant_falsepos13_new_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_falsepos13_new_mechanism_caught=yes
+else
+  mutant_falsepos13_new_mechanism_caught=no
+fi
+assert_eq "no" "$mutant_falsepos13_new_mechanism_caught" "FIX PROOF (invariant 13, AD4): the NEW (per-paragraph) flatten mechanism must NOT match the same cross-paragraph false-positive construction the OLD mechanism just wrongly matched, above - the two halves now stay in separate paragraph records and are scanned independently"
+
+# Sanity: prove the fix above is not a vacuous "matches nothing at all"
+# accident by confirming the two halves actually landed on DIFFERENT
+# lines of the NEW mechanism's own output (one line per paragraph) -
+# rather than relying on a fragile embedded-newline grep pattern (POSIX
+# grep's handling of a literal newline inside a single -F pattern is not
+# something to depend on) to check the blank line survived extraction.
+if printf '%s\n' "$mutant_falsepos13_new_flat" | grep -F "has not" | grep -qF "run into"; then
+  mutant_falsepos13_merged_onto_one_line=yes
+else
+  mutant_falsepos13_merged_onto_one_line=no
+fi
+assert_eq "no" "$mutant_falsepos13_merged_onto_one_line" "sanity (invariant 13, AD4): 'has not' and 'run into' must land on DIFFERENT paragraph-flattened output lines, proving the blank line between them survived section extraction as a real paragraph boundary (not merely that the regex happens not to match for some unrelated reason)"
+
+# ==========================================================================
+# DEMONSTRATION, not a defect (invariant 13, AC3 #3) - PARAPHRASE. Stated
+# plainly, per the task's own instruction: a paraphrase carrying the
+# identical retired claim in different words is NOT caught, flattened or
+# not, because ACCEPTANCE_NOT_RUN_REGEX matches literal phrases, not
+# meaning. This mutant's inserted sentence shares no literal wording with
+# any alternative in the regex at all. Asserted in the direction that
+# documents the limitation (does not falsely claim coverage), so a future
+# change that accidentally started catching this - or, more likely, a
+# future reader assuming this scan is a substitute for the four-check
+# review policy - has something concrete to reconcile against, rather than
+# an unfalsifiable comment.
+# ==========================================================================
+PARAPHRASE_C14_SENTENCE="Nobody has watched this happen live yet, in any session."
+acceptance_mutant_paraphrase13=$(awk -v ins="$PARAPHRASE_C14_SENTENCE" '
+  { print }
+  /^\*\*Status:\*\* `observed`, on probes E and F\./ && !done { print ins; done = 1 }
+' "$acceptance_file")
+
+mutant_paraphrase13_section14=$(get_acceptance_section "$acceptance_mutant_paraphrase13" 14)
+mutant_paraphrase13_flat=$(flatten_acceptance_section "$mutant_paraphrase13_section14")
+if printf '%s\n' "$mutant_paraphrase13_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_paraphrase13_caught=yes
+else
+  mutant_paraphrase13_caught=no
+fi
+assert_eq "no" "$mutant_paraphrase13_caught" "DEMONSTRATION, not a defect (invariant 13, AC3 #3): a paraphrase of the retired claim ('Nobody has watched this happen live yet') is NOT caught by ACCEPTANCE_NOT_RUN_REGEX, flattened or not - grep matches literal phrases, not meaning, and this is a permanent, stated limitation of this mechanism, not a gap this cycle's fix was asked to close"
+
 assert_report

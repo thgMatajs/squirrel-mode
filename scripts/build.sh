@@ -41,8 +41,12 @@
 # rules/base-rules.md is missing, does not contain exactly 16 rule
 # headings numbered 1..16 with no gaps or duplicates, if any heading is
 # not followed by exactly one targets marker, or if any targets value is
-# not "all" or a comma-separated subset of claude-code/codex/cursor; or if
-# any of skills/{digest,plan,init,tune}/SKILL.md is missing or lacks a
+# not "all" or a comma-separated subset of claude-code/codex/cursor; if a
+# `targets: all` rule names a non-`all` rule by number in its own body
+# (S10 review cycle 2, AC2 - a targets:all rule ships verbatim into every
+# target's generated artifact, so a numbered reference to a rule absent
+# from one of them would be a dangling citation there); or if any of
+# skills/{digest,plan,init,tune}/SKILL.md is missing or lacks a
 # well-formed single-line double-quoted frontmatter "description" field.
 # All validation happens before any output file is written, so malformed
 # input can never produce a half-empty generated artifact.
@@ -490,6 +494,123 @@ print_rules_section() {
     fi
   done
 }
+
+# --- Cross-target-reference guard (S10 review cycle 2, AC2) --------------
+#
+# A `targets: all` rule ships, verbatim, into EVERY generated artifact -
+# including targets/codex/AGENTS.md and targets/cursor/squirrel-mode.mdc,
+# both filtered purely by each rule's own targets value in
+# print_rules_section above, with no rewriting of what a rule's prose
+# happens to say. A `targets: all` rule that names a non-`all` rule BY
+# NUMBER (today: rule 14, `targets: claude-code`) therefore ships a
+# definitive, numbered cross-reference into a document where the cited
+# rule is entirely absent - a Codex or Cursor user reads "...then rule
+# 14's ... report..." with no rule 14 anywhere in the file they are
+# reading. AB2 found this for rules 2 and 7 citing rule 14 specifically
+# and fixed those two instances (AD3, S10 cycle 3 final gate, narrowed
+# this further: rules 2 and 7 no longer describe the report's content at
+# all, generic or otherwise - see rule 14's own body, which is the only
+# place that concept is stated now); this check closes the CLASS, so a
+# future rule cannot reintroduce the same defect under a different
+# number.
+#
+# A reference SPAN is "rule(s) <N>" optionally continued by one or more
+# of ", " / "-" / " through " / " to " / " and " (each optionally
+# followed by another "rule ") plus another <N> - this is what lets
+# compound expressions like "rules 1 through 12 and rule 16" or "Rules 2
+# and 14" be recognised as ONE reference naming several rule numbers, not
+# merely the first number after "rule(s)". Case-insensitive, matching
+# both "Rule" (sentence-initial) and "rule" elsewhere in this file's
+# prose.
+#
+# FIXED MAJOR (cycle 3, AD2): the digit extraction below used to grab
+# every literal digit token inside a matched span and stop there - which
+# finds the two ENDPOINTS of a range expression ("rules 1 through 12")
+# but never the numbers STRICTLY BETWEEN them, because "1 through 12"
+# contains exactly two digit tokens in its own text ("1" and "12") no
+# matter how many rules the range actually spans. Proven: rule 13's
+# shipped "This rule takes precedence over rules 1 through 12 and rule
+# 16" was checked only for 1, 12, and 16 - flipping any of rules 2-11 to
+# a non-`all` target left the build green. Fixed by additionally scanning
+# each matched span for "A through B" / "A-B" / "A to B" range pairs and
+# expanding every INTERMEDIATE integer (A's and B's own endpoints are
+# already covered by the plain digit extraction, which is unchanged) -
+# "1 through 12" now also checks 2, 3, ..., 11. The two lists are kept
+# separate ($span_literal vs. the range-derived numbers) purely so the
+# failure message below can say accurately whether rule $cited was named
+# directly or only reached via a range - a rule reached only by
+# expansion is never literally spelled out as a digit in the citing
+# rule's own text, so a message claiming otherwise would itself become a
+# false claim on exactly the path this fix adds.
+check_no_all_rule_cites_non_all_rule() {
+  citing_num=$1
+  body=$2
+  spans=$(printf '%s\n' "$body" | grep -oiE 'rules?[ ]+[0-9]+([ ]*(,|-|through|to|and)[ ]*(rule[ ]+)?[0-9]+)*') || true
+  [ -n "$spans" ] || return 0
+
+  literal_nums=""
+  range_expanded_nums=""
+  while IFS= read -r span; do
+    [ -n "$span" ] || continue
+    span_literal=$(printf '%s\n' "$span" | grep -oE '[0-9]+' | tr '\n' ' ')
+    literal_nums="$literal_nums $span_literal"
+
+    # Range pairs WITHIN this same span only - scoping to an
+    # already-confirmed "rule(s) ..." span (rather than scanning the
+    # whole rule body for any "N-M"-shaped text) is what keeps this from
+    # false-positiving on an unrelated numeric range elsewhere in a
+    # rule's prose (there is none in a rule BODY today - the Defaults
+    # table's "3-7" for max_list_items lives outside every rule body and
+    # is never passed to this function - but scoping to the span is the
+    # correct invariant to hold regardless).
+    range_pairs=$(printf '%s\n' "$span" | grep -oiE '[0-9]+[ ]*(-|through|to)[ ]*[0-9]+') || true
+    if [ -n "$range_pairs" ]; then
+      while IFS= read -r pair; do
+        [ -n "$pair" ] || continue
+        range_start=$(printf '%s\n' "$pair" | grep -oE '[0-9]+' | sed -n '1p')
+        range_end=$(printf '%s\n' "$pair" | grep -oE '[0-9]+' | sed -n '2p')
+        if [ -n "$range_start" ] && [ -n "$range_end" ] && [ "$range_start" -lt "$range_end" ]; then
+          n=$((range_start + 1))
+          while [ "$n" -lt "$range_end" ]; do
+            range_expanded_nums="$range_expanded_nums $n"
+            n=$((n + 1))
+          done
+        fi
+      done <<RANGES
+$range_pairs
+RANGES
+    fi
+  done <<SPANS
+$spans
+SPANS
+
+  for cited in $literal_nums $range_expanded_nums; do
+    # A malformed body could in principle name a number outside 1..16
+    # (e.g. inside prose unrelated to a rule reference that this pattern
+    # still matched) - treat that as "not one of our rules" rather than
+    # let targets_for be asked about a number it was never validated
+    # against.
+    case "$cited" in
+      1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16) ;;
+      *) continue ;;
+    esac
+    cited_tgt=$(targets_for "$cited")
+    if [ "$cited_tgt" != "all" ]; then
+      case " $literal_nums " in
+        *" $cited "*) how="names rule $cited directly by number" ;;
+        *) how="its own numeric range expression includes rule $cited, without ever spelling out $cited as a literal digit" ;;
+      esac
+      fail "rule $citing_num is marked 'targets: all' but $how in its own body, and rule $cited is marked 'targets: $cited_tgt', not 'all'. A targets:all rule ships verbatim into every generated artifact, including targets/codex/AGENTS.md and targets/cursor/squirrel-mode.mdc - a reference to a rule absent from those artifacts, whether a direct citation or a range expression that spans it, leaves a dangling, definitive reference on every target that lacks rule $cited. Describe the referenced rule's content instead of naming or ranging over its number (as rule 14 now does for its own checkpoint-failure report, rather than rules 2 or 7 naming it), or change one rule's targets value so both sides agree."
+    fi
+  done
+}
+
+for cross_ref_num in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+  cross_ref_tgt=$(targets_for "$cross_ref_num")
+  if [ "$cross_ref_tgt" = "all" ]; then
+    check_no_all_rule_cites_non_all_rule "$cross_ref_num" "$(get_rule_body "$cross_ref_num")"
+  fi
+done
 
 # print_generated_banner: the GENERATED marker every artifact opens
 # with (after any YAML frontmatter - a comment above "---" breaks

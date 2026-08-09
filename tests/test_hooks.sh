@@ -263,7 +263,7 @@ session_start_matcher=$(jq -r '.hooks.SessionStart[0].matcher // "<missing>"' "$
 assert_eq "startup|resume|clear|compact" "$session_start_matcher" "hooks.json SessionStart matcher must be 'startup|resume|clear|compact'"
 
 pretooluse_matcher=$(jq -r '.hooks.PreToolUse[0].matcher // "<missing>"' "$hooks_json" 2>/dev/null) || pretooluse_matcher="<jq error>"
-assert_eq "Write|Edit" "$pretooluse_matcher" "hooks.json PreToolUse matcher must be 'Write|Edit'"
+assert_eq "Write|Edit|Read" "$pretooluse_matcher" "hooks.json PreToolUse matcher must be 'Write|Edit|Read' (S10-1: Read must reach allow-checkpoint.sh too, not just Write/Edit)"
 
 userpromptsubmit_present=$(jq -r '(.hooks.UserPromptSubmit // []) | length > 0' "$hooks_json" 2>/dev/null) || userpromptsubmit_present="<jq error>"
 assert_eq "true" "$userpromptsubmit_present" "hooks.json must define at least one UserPromptSubmit hook entry"
@@ -536,6 +536,41 @@ out14=$(capture_stdout "$allow_checkpoint_script" "$home14" "$stdin14")
 decision14=$(printf '%s' "$out14" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14="<jq error>"
 assert_eq "allow" "$decision14" "allow-checkpoint.sh must return 'allow' for a file_path inside the checkpoints directory"
 
+# --- S10-1 Read mirror of scenario 14: the same legitimate checkpoint
+# path, with tool_name "Read" instead of "Write". This is the exact
+# defect a live probe found - /squirrel:pickup and rule 14's own
+# update path both START with a Read of the checkpoint file, and before
+# this fix that Read fell through to the normal permission prompt even
+# though the hook already returned "allow" for a Write to the identical
+# path. Same scratch HOME/fixture as scenario 14, reused (inert
+# directory state, safe to share).
+#
+# WRAPPER FAIL-SAFE CONTRACT, RELABELLED (S10 review, AB4): the "exit 0"
+# assertion immediately below this comment, and every other "must exit 0
+# for tool_name Read ..." assertion added across this file for S10-1, was
+# being counted as Read-widening coverage. It is not, and cannot be: the
+# outer wrapper (`if decision=$(decide 2>/dev/null); then :; else
+# decision="defer"; fi`, then an unconditional `case`/`exit 0` at the
+# bottom of allow-checkpoint.sh) turns ANY internal failure of decide()
+# into a hardcoded "defer" and always exits 0, regardless of whether
+# decide()'s Read-vs-Write logic is right or wrong. Proven: scenario 58
+# below breaks decide() entirely for Read (reverts the case statement to
+# the pre-fix "Write | Edit) ;;") and every "exit 0" assertion in this
+# file stays green while the DECISION assertions (checking "allow" vs
+# "defer") correctly go red. These "exit 0" assertions still verify
+# something real and worth checking - invariant 5, that a hook never
+# exits non-zero even on a code path this specific - they are just not,
+# and were never, evidence that the Read decision itself is correct. The
+# "allow"/"defer" assertions immediately following each one are that
+# evidence.
+# ==========================================================================
+stdin14r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/myproj.md"}}' "$home14")
+exit14r=$(capture_exit "$allow_checkpoint_script" "$home14" "$stdin14r")
+assert_eq "0" "$exit14r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see the comment above and scenario 58's mutation proof): allow-checkpoint.sh must exit 0 for a legitimate checkpoint Read"
+out14r=$(capture_stdout "$allow_checkpoint_script" "$home14" "$stdin14r")
+decision14r=$(printf '%s' "$out14r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14r="<jq error>"
+assert_eq "allow" "$decision14r" "S10-1 BLOCKER fix: allow-checkpoint.sh must return 'allow' for tool_name Read on a file_path inside the checkpoints directory, identically to Write/Edit"
+
 # ==========================================================================
 # 15. allow-checkpoint.sh - file_path elsewhere in $HOME: "defer".
 # ==========================================================================
@@ -544,6 +579,12 @@ stdin15=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/Documents/n
 out15=$(capture_stdout "$allow_checkpoint_script" "$home15" "$stdin15")
 decision15=$(printf '%s' "$out15" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision15="<jq error>"
 assert_eq "defer" "$decision15" "allow-checkpoint.sh must return 'defer' for a file_path elsewhere in \$HOME"
+
+# --- S10-1 Read mirror of scenario 15.
+stdin15r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/Documents/notes.md"}}' "$home15")
+out15r=$(capture_stdout "$allow_checkpoint_script" "$home15" "$stdin15r")
+decision15r=$(printf '%s' "$out15r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision15r="<jq error>"
+assert_eq "defer" "$decision15r" "S10-1: allow-checkpoint.sh must return 'defer' for tool_name Read on a file_path elsewhere in \$HOME"
 
 # ==========================================================================
 # 16. allow-checkpoint.sh - traversal:
@@ -555,6 +596,12 @@ out16=$(capture_stdout "$allow_checkpoint_script" "$home16" "$stdin16")
 decision16=$(printf '%s' "$out16" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision16="<jq error>"
 assert_eq "defer" "$decision16" "allow-checkpoint.sh must return 'defer' for a traversal path escaping checkpoints/ via ../../../"
 
+# --- S10-1 Read mirror of scenario 16 (attack matrix: traversal).
+stdin16r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/../../../.ssh/id_rsa"}}' "$home16")
+out16r=$(capture_stdout "$allow_checkpoint_script" "$home16" "$stdin16r")
+decision16r=$(printf '%s' "$out16r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision16r="<jq error>"
+assert_eq "defer" "$decision16r" "S10-1: allow-checkpoint.sh must return 'defer' for tool_name Read on a traversal path escaping checkpoints/ via ../../../ - the boundary must not loosen for a read"
+
 # ==========================================================================
 # 17. allow-checkpoint.sh - prefix-escape:
 #     $HOME/.claude/squirrel/checkpoints-evil/x -> "defer".
@@ -564,6 +611,12 @@ stdin17=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.claude/squ
 out17=$(capture_stdout "$allow_checkpoint_script" "$home17" "$stdin17")
 decision17=$(printf '%s' "$out17" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision17="<jq error>"
 assert_eq "defer" "$decision17" "allow-checkpoint.sh must return 'defer' for a directory that merely starts with the string 'checkpoints' ('checkpoints-evil')"
+
+# --- S10-1 Read mirror of scenario 17 (attack matrix: prefix-escape).
+stdin17r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints-evil/x"}}' "$home17")
+out17r=$(capture_stdout "$allow_checkpoint_script" "$home17" "$stdin17r")
+decision17r=$(printf '%s' "$out17r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision17r="<jq error>"
+assert_eq "defer" "$decision17r" "S10-1: allow-checkpoint.sh must return 'defer' for tool_name Read on 'checkpoints-evil' (prefix-escape)"
 
 # ==========================================================================
 # 18. allow-checkpoint.sh - relative file_path, empty file_path, absent
@@ -587,6 +640,31 @@ for case18 in $scenario18_cases; do
   out18=$(capture_stdout "$allow_checkpoint_script" "$home18" "$case18_json")
   decision18=$(printf '%s' "$out18" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision18="<jq error>"
   assert_eq "defer" "$decision18" "allow-checkpoint.sh must return 'defer' for case '$case18_name'"
+  IFS='
+'
+done
+IFS=$old_ifs
+
+# --- S10-1 Read mirror of scenario 18: the identical relative/empty/
+# absent file_path and absent-tool_input cases, with tool_name "Read".
+# ==========================================================================
+scenario18r_cases="relative_file_path:{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"relative/path.md\"}}
+empty_file_path:{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"\"}}
+absent_file_path:{\"tool_name\":\"Read\",\"tool_input\":{}}
+absent_tool_input:{\"tool_name\":\"Read\"}"
+
+old_ifs=$IFS
+IFS='
+'
+for case18r in $scenario18r_cases; do
+  IFS=$old_ifs
+  case18r_name=${case18r%%:*}
+  case18r_json=${case18r#*:}
+  exit18r=$(capture_exit "$allow_checkpoint_script" "$home18" "$case18r_json")
+  assert_eq "0" "$exit18r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for Read case '$case18r_name'"
+  out18r=$(capture_stdout "$allow_checkpoint_script" "$home18" "$case18r_json")
+  decision18r=$(printf '%s' "$out18r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision18r="<jq error>"
+  assert_eq "defer" "$decision18r" "S10-1: allow-checkpoint.sh must return 'defer' for Read case '$case18r_name'"
   IFS='
 '
 done
@@ -623,19 +701,53 @@ out19c=$(capture_stdout "$allow_checkpoint_script" "$home19" "$stdin19c")
 decision19c=$(printf '%s' "$out19c" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision19c="<jq error>"
 assert_eq "allow" "$decision19c" "a genuine non-symlinked nested checkpoint path must still be allowed alongside the symlink fixtures in the same directory"
 
+# --- S10-1 Read mirror of scenario 19: the identical symlinked-
+# intermediate-directory, symlinked-leaf, and sanity-nested-real-file
+# cases, with tool_name "Read". Same home19 fixtures, reused.
 # ==========================================================================
-# 20. allow-checkpoint.sh - tool_name other than Write/Edit: "defer".
+stdin19ar=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/escape-dir/evil.md"}}' "$home19")
+out19ar=$(capture_stdout "$allow_checkpoint_script" "$home19" "$stdin19ar")
+decision19ar=$(printf '%s' "$out19ar" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision19ar="<jq error>"
+assert_eq "defer" "$decision19ar" "S10-1: allow-checkpoint.sh must return 'defer' for tool_name Read when an intermediate directory inside checkpoints/ is a symlink pointing outside it"
+
+stdin19br=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/escape-file"}}' "$home19")
+out19br=$(capture_stdout "$allow_checkpoint_script" "$home19" "$stdin19br")
+decision19br=$(printf '%s' "$out19br" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision19br="<jq error>"
+assert_eq "defer" "$decision19br" "S10-1: allow-checkpoint.sh must return 'defer' for tool_name Read when the file_path itself is a symlink pointing outside checkpoints/"
+
+stdin19cr=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/real-subdir/a.md"}}' "$home19")
+out19cr=$(capture_stdout "$allow_checkpoint_script" "$home19" "$stdin19cr")
+decision19cr=$(printf '%s' "$out19cr" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision19cr="<jq error>"
+assert_eq "allow" "$decision19cr" "S10-1: a genuine non-symlinked nested checkpoint path must still be allowed for tool_name Read too, alongside the symlink fixtures in the same directory"
+
+# ==========================================================================
+# 20. allow-checkpoint.sh - tool_name other than Write/Edit/Read: "defer".
 # ==========================================================================
 home20=$(new_home)
 stdin20=$(printf '{"tool_name":"Bash","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/x.md"}}' "$home20")
 out20=$(capture_stdout "$allow_checkpoint_script" "$home20" "$stdin20")
 decision20=$(printf '%s' "$out20" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision20="<jq error>"
-assert_eq "defer" "$decision20" "allow-checkpoint.sh must return 'defer' for tool_name 'Bash' even when file_path is a legitimate checkpoint path"
+assert_eq "defer" "$decision20" "allow-checkpoint.sh must return 'defer' for tool_name 'Bash' even when file_path is a legitimate checkpoint path - the matcher must not widen beyond Write/Edit/Read"
 
 # ==========================================================================
 # 21. allow-checkpoint.sh - output is valid JSON in every case above.
+#
+# WRAPPER FAIL-SAFE CONTRACT, RELABELLED (S10 review, AB4): this single
+# loop covers BOTH the pre-existing Write/Edit cases (14, 15, 16, 17, 19a,
+# 19b, 19c, 20) AND the S10-1 Read mirrors added alongside them (14r, 15r,
+# 16r, 17r, 19ar, 19br, 19cr) with one shared assertion template, so the
+# "r"-suffixed iterations were counted as Read-widening coverage alongside
+# the real decision assertions above. They are not: the script's final
+# `case` always emits exactly one well-formed JSON blob before `exit 0`
+# (see scenario 14r's comment, above, for the full mechanism and the
+# scenario-58 mutation proof), so every iteration of this loop - old
+# pairs and new "r" pairs alike - is structurally unable to fail
+# regardless of whether the underlying decision is right or wrong. This
+# verifies invariant 5's "always valid JSON" half, a real and separate
+# property worth checking; it is just not, and was never, Read-decision
+# coverage.
 # ==========================================================================
-for pair in "14:$out14" "15:$out15" "16:$out16" "17:$out17" "19a:$out19a" "19b:$out19b" "19c:$out19c" "20:$out20"; do
+for pair in "14:$out14" "14r:$out14r" "15:$out15" "15r:$out15r" "16:$out16" "16r:$out16r" "17:$out17" "17r:$out17r" "19a:$out19a" "19ar:$out19ar" "19b:$out19b" "19br:$out19br" "19c:$out19c" "19cr:$out19cr" "20:$out20"; do
   label=${pair%%:*}
   content=${pair#*:}
   if printf '%s' "$content" | jq empty >/dev/null 2>&1; then
@@ -643,7 +755,7 @@ for pair in "14:$out14" "15:$out15" "16:$out16" "17:$out17" "19a:$out19a" "19b:$
   else
     scenario21_valid=no
   fi
-  assert_eq "yes" "$scenario21_valid" "allow-checkpoint.sh scenario $label output must be valid, parseable JSON"
+  assert_eq "yes" "$scenario21_valid" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage: allow-checkpoint.sh scenario $label output must be valid, parseable JSON"
 done
 
 # ==========================================================================
@@ -661,6 +773,9 @@ assert_eq "0" "$exit22_off" "check-off-flag.sh must exit 0 with an empty HOME di
 
 exit22_allow=$(capture_exit "$allow_checkpoint_script" "$home22" '{"tool_name":"Write","tool_input":{"file_path":"/tmp/x.md"}}')
 assert_eq "0" "$exit22_allow" "allow-checkpoint.sh must exit 0 with an empty HOME directory"
+
+exit22_allow_read=$(capture_exit "$allow_checkpoint_script" "$home22" '{"tool_name":"Read","tool_input":{"file_path":"/tmp/x.md"}}')
+assert_eq "0" "$exit22_allow_read" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for tool_name Read with an empty HOME directory"
 
 # ==========================================================================
 # 23. load-profile.sh - json_escape (no-jq fallback) must escape EVERY
@@ -785,6 +900,27 @@ assert_eq "allow" "$decision25c" "sanity (MAJOR #3): a genuine non-symlinked nes
 exit25=$(capture_exit_with_path "$allow_checkpoint_script" "$home25" "$strip_path25" "$stdin25a")
 assert_eq "0" "$exit25" "allow-checkpoint.sh must exit 0 even with realpath/readlink stripped from PATH"
 
+# --- S10-1 Read mirror of scenario 25: the same symlink fixtures, same
+# realpath/readlink-stripped PATH, with tool_name "Read".
+# ==========================================================================
+stdin25ar=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/escape-dir/evil.md"}}' "$home25")
+out25ar=$(capture_stdout_with_path "$allow_checkpoint_script" "$home25" "$strip_path25" "$stdin25ar")
+decision25ar=$(printf '%s' "$out25ar" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision25ar="<jq error>"
+assert_eq "defer" "$decision25ar" "S10-1: with realpath AND readlink stripped from PATH, tool_name Read on a symlinked intermediate directory inside checkpoints/ must still defer"
+
+stdin25br=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/escape-file"}}' "$home25")
+out25br=$(capture_stdout_with_path "$allow_checkpoint_script" "$home25" "$strip_path25" "$stdin25br")
+decision25br=$(printf '%s' "$out25br" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision25br="<jq error>"
+assert_eq "defer" "$decision25br" "S10-1: with realpath AND readlink stripped from PATH, tool_name Read on a symlinked leaf file_path inside checkpoints/ must still defer"
+
+stdin25cr=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/real-subdir/a.md"}}' "$home25")
+out25cr=$(capture_stdout_with_path "$allow_checkpoint_script" "$home25" "$strip_path25" "$stdin25cr")
+decision25cr=$(printf '%s' "$out25cr" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision25cr="<jq error>"
+assert_eq "allow" "$decision25cr" "S10-1 sanity: a genuine non-symlinked nested checkpoint path must still be allowed for tool_name Read with realpath/readlink stripped"
+
+exit25r=$(capture_exit_with_path "$allow_checkpoint_script" "$home25" "$strip_path25" "$stdin25ar")
+assert_eq "0" "$exit25r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for tool_name Read even with realpath/readlink stripped from PATH"
+
 # ==========================================================================
 # 26. load-profile.sh - tech-lead ruling: an UNDER-cap profile (well
 #     under 100 lines / 4 KB) must be injected in full, with no
@@ -874,6 +1010,16 @@ assert_eq "defer" "$decision29" "BLOCKER fix: a symlink AT checkpoints_dir itsel
 exit29=$(capture_exit "$allow_checkpoint_script" "$home29" "$stdin29")
 assert_eq "0" "$exit29" "allow-checkpoint.sh must exit 0 even when checkpoints_dir itself is a symlink"
 
+# --- S10-1 Read mirror of scenario 29: checkpoints_dir itself is a
+# symlink, tool_name "Read", realpath/readlink present.
+stdin29r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/evil.md"}}' "$home29")
+out29r=$(capture_stdout "$allow_checkpoint_script" "$home29" "$stdin29r")
+decision29r=$(printf '%s' "$out29r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision29r="<jq error>"
+assert_eq "defer" "$decision29r" "S10-1: a symlink AT checkpoints_dir itself must defer for tool_name Read too, with realpath/readlink present"
+
+exit29r=$(capture_exit "$allow_checkpoint_script" "$home29" "$stdin29r")
+assert_eq "0" "$exit29r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for tool_name Read even when checkpoints_dir itself is a symlink"
+
 # ==========================================================================
 # 30. allow-checkpoint.sh - same repro as scenario 29, with realpath AND
 #     readlink stripped from PATH. THE permanent assertion: Layer 2
@@ -894,6 +1040,16 @@ assert_eq "defer" "$decision30" "BLOCKER fix: a symlink AT checkpoints_dir itsel
 
 exit30=$(capture_exit_with_path "$allow_checkpoint_script" "$home30" "$strip_path30" "$stdin30")
 assert_eq "0" "$exit30" "allow-checkpoint.sh must exit 0 for the symlinked-checkpoints_dir case even with realpath/readlink stripped"
+
+# --- S10-1 Read mirror of scenario 30: same repro, realpath AND
+# readlink stripped from PATH, tool_name "Read".
+stdin30r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/evil.md"}}' "$home30")
+out30r=$(capture_stdout_with_path "$allow_checkpoint_script" "$home30" "$strip_path30" "$stdin30r")
+decision30r=$(printf '%s' "$out30r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision30r="<jq error>"
+assert_eq "defer" "$decision30r" "S10-1: a symlink AT checkpoints_dir itself must still defer for tool_name Read with realpath AND readlink stripped from PATH"
+
+exit30r=$(capture_exit_with_path "$allow_checkpoint_script" "$home30" "$strip_path30" "$stdin30r")
+assert_eq "0" "$exit30r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for the symlinked-checkpoints_dir case with tool_name Read, even with realpath/readlink stripped"
 
 # ==========================================================================
 # 31. allow-checkpoint.sh - REGRESSION GUARD for the tech-lead's ruling:
@@ -916,6 +1072,18 @@ assert_eq "allow" "$decision31" "REGRESSION GUARD (tech-lead ruling): a legitima
 exit31=$(capture_exit "$allow_checkpoint_script" "$home31" "$stdin31")
 assert_eq "0" "$exit31" "allow-checkpoint.sh must exit 0 for a legitimately symlinked \$HOME/.claude"
 
+# --- S10-1 Read mirror of scenario 31: legitimately symlinked
+# $HOME/.claude, tool_name "Read", realpath/readlink present. This is
+# the dotfile-manager regression guard the S10-1 fix must also satisfy
+# for reads, per the task's own requirement.
+stdin31r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/myproj.md"}}' "$home31")
+out31r=$(capture_stdout "$allow_checkpoint_script" "$home31" "$stdin31r")
+decision31r=$(printf '%s' "$out31r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision31r="<jq error>"
+assert_eq "allow" "$decision31r" "S10-1 REGRESSION GUARD: a legitimately symlinked \$HOME/.claude (dotfile-manager pattern) must still ALLOW a genuine checkpoint Read beneath it, with realpath/readlink present"
+
+exit31r=$(capture_exit "$allow_checkpoint_script" "$home31" "$stdin31r")
+assert_eq "0" "$exit31r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for tool_name Read on a legitimately symlinked \$HOME/.claude"
+
 # ==========================================================================
 # 32. allow-checkpoint.sh - same regression guard as scenario 31, with
 #     realpath AND readlink stripped from PATH: the ruling must hold
@@ -935,6 +1103,16 @@ assert_eq "allow" "$decision32" "REGRESSION GUARD: a legitimately symlinked \$HO
 
 exit32=$(capture_exit_with_path "$allow_checkpoint_script" "$home32" "$strip_path32" "$stdin32")
 assert_eq "0" "$exit32" "allow-checkpoint.sh must exit 0 for a legitimately symlinked \$HOME/.claude with realpath/readlink stripped"
+
+# --- S10-1 Read mirror of scenario 32: same regression guard, realpath
+# AND readlink stripped from PATH, tool_name "Read".
+stdin32r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/myproj.md"}}' "$home32")
+out32r=$(capture_stdout_with_path "$allow_checkpoint_script" "$home32" "$strip_path32" "$stdin32r")
+decision32r=$(printf '%s' "$out32r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision32r="<jq error>"
+assert_eq "allow" "$decision32r" "S10-1 REGRESSION GUARD: a legitimately symlinked \$HOME/.claude must still ALLOW a genuine checkpoint Read with realpath AND readlink stripped from PATH too"
+
+exit32r=$(capture_exit_with_path "$allow_checkpoint_script" "$home32" "$strip_path32" "$stdin32r")
+assert_eq "0" "$exit32r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for tool_name Read on a legitimately symlinked \$HOME/.claude with realpath/readlink stripped"
 
 # ==========================================================================
 # 33. allow-checkpoint.sh - cycle-3 MAJOR fix: a file_path far past
@@ -977,6 +1155,29 @@ assert_eq "yes" "$fast33" "MAJOR fix: a 3000-segment (~6KB) file_path must be re
 
 exit33=$(capture_exit "$allow_checkpoint_script" "$home33" "$stdin33")
 assert_eq "0" "$exit33" "allow-checkpoint.sh must exit 0 for an over-cap file_path"
+
+# --- S10-1 Read mirror of scenario 33: the identical over-cap file_path,
+# tool_name "Read" - the length cap must fire before normalize_path or
+# component_walk_has_symlink for a Read too, not only for Write/Edit.
+stdin33r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s"}}' "$long_path33")
+
+t0_33r=$(date +%s)
+out33r=$(capture_stdout "$allow_checkpoint_script" "$home33" "$stdin33r")
+t1_33r=$(date +%s)
+delta33r=$((t1_33r - t0_33r))
+
+decision33r=$(printf '%s' "$out33r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision33r="<jq error>"
+assert_eq "defer" "$decision33r" "S10-1: an over-MAX_FILE_PATH_LEN file_path must defer for tool_name Read too"
+
+if [ "$delta33r" -le 2 ]; then
+  fast33r=yes
+else
+  fast33r=no
+fi
+assert_eq "yes" "$fast33r" "S10-1: a 3000-segment (~6KB) file_path with tool_name Read must be rejected in a couple of seconds or less by the length cap (took ${delta33r}s)"
+
+exit33r=$(capture_exit "$allow_checkpoint_script" "$home33" "$stdin33r")
+assert_eq "0" "$exit33r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see scenario 14r's comment): allow-checkpoint.sh must exit 0 for an over-cap file_path with tool_name Read"
 
 # ==========================================================================
 # 34. load-profile.sh - cycle-3 MINOR fix: the byte cap lands EXACTLY
@@ -1085,15 +1286,28 @@ out_pct35=$(capture_stdout "$allow_checkpoint_script" "$home35" "$stdin_pct35")
 decision_pct35=$(printf '%s' "$out_pct35" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision_pct35="<jq error>"
 assert_eq "allow" "$decision_pct35" "a percent-encoded '%2e%2e' segment must NOT be decoded into '..' anywhere in this pipeline, so it stays a literal, contained subdirectory name"
 
-# Raw control byte (0x01) inside an otherwise-legitimate filename.
+# Raw control byte (0x01) inside an otherwise-legitimate filename. A raw,
+# unescaped control byte inside a JSON string is not legal JSON at all
+# (RFC 8259 requires control characters to be escaped) - jq correctly
+# rejects the whole document as unparseable. UPDATED (S10 review cycle
+# 2, AC1): this used to still "allow", because extract_tool_input_field's
+# now-removed sed fallback did not care whether the surrounding document
+# was valid JSON and extracted the path anyway. Requiring a real parser
+# for file_path means a payload the parser cannot parse at all no longer
+# gets a best-effort answer from a regex that does not know better - it
+# defers, the same safe outcome jq-absent already produces, for the same
+# reason. `tool_name` still resolves to "Write" via extract_field's own
+# (unaffected, out of AC1's scope) sed fallback, so this exercises
+# decide() actually reaching the file_path check and deferring there
+# specifically, not short-circuiting earlier on an unrecognised tool_name.
 ctrl35=$(printf '\001')
 stdin_ctrl35=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/evil%sname.md"}}' "$home35" "$ctrl35")
 out_ctrl35=$(capture_stdout "$allow_checkpoint_script" "$home35" "$stdin_ctrl35")
 decision_ctrl35=$(printf '%s' "$out_ctrl35" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision_ctrl35="<jq error>"
-assert_eq "allow" "$decision_ctrl35" "a raw control byte (0x01) inside an otherwise-legitimate checkpoint filename must not crash normalize_path/component_walk_has_symlink and must still allow"
+assert_eq "defer" "$decision_ctrl35" "AC1: a raw control byte (0x01) makes the whole payload invalid JSON (RFC 8259) - jq correctly refuses to parse it, and without a real parser to consult, extract_tool_input_field must not guess via a regex; the safe, deliberate outcome is defer, not a best-effort allow"
 
 exit_ctrl35=$(capture_exit "$allow_checkpoint_script" "$home35" "$stdin_ctrl35")
-assert_eq "0" "$exit_ctrl35" "allow-checkpoint.sh must exit 0 for a file_path containing a raw control byte"
+assert_eq "0" "$exit_ctrl35" "allow-checkpoint.sh must exit 0 for a file_path containing a raw control byte (never a crash, even on unparseable input)"
 
 # JSON-escaped embedded newline (the realistic form: valid JSON with a
 # properly-escaped \n, not a raw unescaped newline byte, which is not
@@ -1136,6 +1350,31 @@ stdin36_trail=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.clau
 out36_trail=$(printf '%s' "$stdin36_trail" | HOME="$home36_trail/" "$allow_checkpoint_script" 2>/dev/null) || true
 decision36_trail=$(printf '%s' "$out36_trail" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36_trail="<jq error>"
 assert_eq "allow" "$decision36_trail" "\$HOME carrying a trailing slash must still allow a genuine, nested checkpoint write under it"
+
+# --- S10-1 Read mirror of scenario 36: the identical $HOME
+# unset/empty/root/trailing-slash matrix, with tool_name "Read".
+# ==========================================================================
+stdin36r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"/tmp/somewhere-unrelated-36/x.md"}}')
+
+out36r_unset=$(printf '%s' "$stdin36r" | env -u HOME "$allow_checkpoint_script" 2>/dev/null) || true
+decision36r_unset=$(printf '%s' "$out36r_unset" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36r_unset="<jq error>"
+assert_eq "defer" "$decision36r_unset" "S10-1: \$HOME entirely unset must defer for tool_name Read too, never allow"
+
+out36r_empty=$(printf '%s' "$stdin36r" | HOME="" "$allow_checkpoint_script" 2>/dev/null) || true
+decision36r_empty=$(printf '%s' "$out36r_empty" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36r_empty="<jq error>"
+assert_eq "defer" "$decision36r_empty" "S10-1: \$HOME set to an empty string must defer for tool_name Read too, never allow"
+
+stdin36r_root=$(printf '{"tool_name":"Read","tool_input":{"file_path":"/.claude/squirrel/checkpoints/proj36.md"}}')
+out36r_root=$(printf '%s' "$stdin36r_root" | HOME="/" "$allow_checkpoint_script" 2>/dev/null) || true
+decision36r_root=$(printf '%s' "$out36r_root" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36r_root="<jq error>"
+assert_eq "allow" "$decision36r_root" "S10-1: \$HOME=/ (root) must still allow a genuine, nested checkpoint Read under it"
+
+home36r_trail=$(new_home)
+mkdir -p "$home36r_trail/.claude/squirrel/checkpoints"
+stdin36r_trail=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/proj36.md"}}' "$home36r_trail")
+out36r_trail=$(printf '%s' "$stdin36r_trail" | HOME="$home36r_trail/" "$allow_checkpoint_script" 2>/dev/null) || true
+decision36r_trail=$(printf '%s' "$out36r_trail" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36r_trail="<jq error>"
+assert_eq "allow" "$decision36r_trail" "S10-1: \$HOME carrying a trailing slash must still allow a genuine, nested checkpoint Read under it"
 
 # ==========================================================================
 # 37. load-profile.sh - "Do not regress" list, closing a second gap
@@ -1354,7 +1593,7 @@ fp16_naive_decide='decide() {
   tool_name=$(extract_field "$input" "tool_name")
   file_path=$(extract_field "$input" "file_path")
   case "$tool_name" in
-    Write | Edit) ;;
+    Write | Edit | Read) ;;
     *) printf "defer"; return 0 ;;
   esac
   home_dir="${HOME:-}"
@@ -1373,6 +1612,14 @@ fp16_out=$(capture_stdout "$fp16_script" "$fp16_home" "$fp16_stdin")
 fp16_decision=$(printf '%s' "$fp16_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp16_decision="<jq error>"
 assert_eq "allow" "$fp16_decision" "FAILURE PROOF (scenario 16): a naive prefix-only mutant (no lexical '..' normalisation) must incorrectly ALLOW the traversal path - proving scenario 16's defer assertion is not vacuous"
 
+# S10-1 Read mirror: the naive mutant's case statement now includes
+# Read (so this isolates the SAME lexical-normalisation gap the mutant
+# reintroduces, not merely "Read never reached the case statement").
+fp16_stdin_r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/../../../.ssh/id_rsa"}}' "$fp16_home")
+fp16_out_r=$(capture_stdout "$fp16_script" "$fp16_home" "$fp16_stdin_r")
+fp16_decision_r=$(printf '%s' "$fp16_out_r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp16_decision_r="<jq error>"
+assert_eq "allow" "$fp16_decision_r" "S10-1 FAILURE PROOF (scenario 16 Read mirror): the same naive prefix-only mutant must incorrectly ALLOW the traversal path for tool_name Read too - proving the Read mirror's defer assertion is not vacuous"
+
 # --- Failure proof for scenario 17: prefix-escape must be blocked BY
 # the boundary-aware ("/" after the prefix) check, not by a bare
 # substring/prefix match.
@@ -1390,7 +1637,7 @@ fp17_naive_decide='decide() {
   tool_name=$(extract_field "$input" "tool_name")
   file_path=$(extract_field "$input" "file_path")
   case "$tool_name" in
-    Write | Edit) ;;
+    Write | Edit | Read) ;;
     *) printf "defer"; return 0 ;;
   esac
   home_dir="${HOME:-}"
@@ -1408,6 +1655,12 @@ fp17_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.claude/
 fp17_out=$(capture_stdout "$fp17_script" "$fp17_home" "$fp17_stdin")
 fp17_decision=$(printf '%s' "$fp17_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp17_decision="<jq error>"
 assert_eq "allow" "$fp17_decision" "FAILURE PROOF (scenario 17): a naive prefix mutant with no trailing-slash boundary check must incorrectly ALLOW 'checkpoints-evil' - proving scenario 17's defer assertion is not vacuous"
+
+# S10-1 Read mirror: same naive mutant, tool_name Read.
+fp17_stdin_r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints-evil/x"}}' "$fp17_home")
+fp17_out_r=$(capture_stdout "$fp17_script" "$fp17_home" "$fp17_stdin_r")
+fp17_decision_r=$(printf '%s' "$fp17_out_r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp17_decision_r="<jq error>"
+assert_eq "allow" "$fp17_decision_r" "S10-1 FAILURE PROOF (scenario 17 Read mirror): the same naive prefix mutant must incorrectly ALLOW 'checkpoints-evil' for tool_name Read too - proving the Read mirror's defer assertion is not vacuous"
 
 # --- Failure proof for scenario 25: the unconditional Layer 2
 # component walk is what actually defeats the symlink once
@@ -1434,6 +1687,16 @@ fp25_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.claude/
 fp25_out=$(capture_stdout_with_path "$fp25_script" "$fp25_home" "$fp25_strip_path" "$fp25_stdin")
 fp25_decision=$(printf '%s' "$fp25_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp25_decision="<jq error>"
 assert_eq "allow" "$fp25_decision" "FAILURE PROOF (scenario 25): a mutant with the unconditional Layer-2 component walk removed must incorrectly ALLOW the symlink escape once realpath/readlink are also stripped from PATH - proving scenario 25's defer assertion is not vacuous, and reproducing the exact pre-fix MAJOR #3 bug"
+
+# S10-1 Read mirror: fp25_script is a scratch copy of the REAL (fixed)
+# allow-checkpoint.sh with the Layer-2 block deleted, so its case
+# statement already includes Read - this isolates the Layer-2 removal
+# itself as the cause, for a Read too, not merely "Read reaches the
+# case statement".
+fp25_stdin_r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/escape-dir/evil.md"}}' "$fp25_home")
+fp25_out_r=$(capture_stdout_with_path "$fp25_script" "$fp25_home" "$fp25_strip_path" "$fp25_stdin_r")
+fp25_decision_r=$(printf '%s' "$fp25_out_r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp25_decision_r="<jq error>"
+assert_eq "allow" "$fp25_decision_r" "S10-1 FAILURE PROOF (scenario 25 Read mirror): a mutant with the unconditional Layer-2 component walk removed must incorrectly ALLOW the symlink escape for tool_name Read too, once realpath/readlink are also stripped from PATH"
 
 # --- Failure proof for scenario 27: the profile size cap is what
 # actually keeps an over-cap profile from being injected past the
@@ -1618,6 +1881,15 @@ fp2930_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.claud
 fp2930_out=$(capture_stdout_with_path "$fp2930_script" "$fp2930_home" "$fp2930_strip_path" "$fp2930_stdin")
 fp2930_decision=$(printf '%s' "$fp2930_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp2930_decision="<jq error>"
 assert_eq "allow" "$fp2930_decision" "FAILURE PROOF (scenarios 29/30): a component_walk_has_symlink mutant that never tests checkpoints_dir itself must incorrectly ALLOW a write when checkpoints_dir itself is the symlink - proving scenarios 29/30's defer assertions are not vacuous, and reproducing the exact pre-fix BLOCKER"
+
+# S10-1 Read mirror: fp2930_script is a scratch copy of the REAL
+# (fixed) allow-checkpoint.sh with only the `[ -L "$base" ]` check
+# removed, so its case statement already includes Read - isolating the
+# checkpoints_dir-itself-symlink regression for tool_name Read too.
+fp2930_stdin_r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/evil.md"}}' "$fp2930_home")
+fp2930_out_r=$(capture_stdout_with_path "$fp2930_script" "$fp2930_home" "$fp2930_strip_path" "$fp2930_stdin_r")
+fp2930_decision_r=$(printf '%s' "$fp2930_out_r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp2930_decision_r="<jq error>"
+assert_eq "allow" "$fp2930_decision_r" "S10-1 FAILURE PROOF (scenarios 29/30 Read mirror): the same component_walk_has_symlink mutant must incorrectly ALLOW a Read when checkpoints_dir itself is the symlink"
 
 # --- Failure proof for scenario 33 (the cycle-3 MAJOR DoS fix): the
 # length cap itself is what keeps an over-limit file_path fast, not
@@ -2285,5 +2557,280 @@ else
   fast57=no
 fi
 assert_eq "yes" "$fast57" "MINOR timing bound: check-off-flag.sh must process 100 stale PENDING/CLEAR sentinels in a stated bound (3s or less; took ${delta57}s) on the hot path of every prompt, so a future change that makes this materially worse is caught"
+
+# ==========================================================================
+# 58. allow-checkpoint.sh - S10-1 CLASS-LEVEL FAILURE PROOF: reverting
+#     decide()'s case statement from "Write | Edit | Read) ;;" back to
+#     the original "Write | Edit) ;;" must reproduce the S10-1 BLOCKER
+#     exactly - a legitimate checkpoint Read incorrectly falls through
+#     to "defer" - while a legitimate checkpoint Write is completely
+#     unaffected. This single mutant is what proves every "allow"-side
+#     Read assertion added above (scenarios 14r, 19cr, 25cr, 29r/30r's
+#     sibling allow case at 31r/32r, 36r's root/trailing-slash cases) is
+#     not vacuous: none of them could pass against the pre-fix matcher
+#     logic. It deliberately does NOT prove the Read DEFER-side mirrors
+#     (16r, 17r, 19ar/19br, etc.) - those pass trivially under a
+#     mutant that defers more, not less - which is exactly why the
+#     Read-specific failure proofs above (16, 17, 25, 29/30 mirrors) use
+#     the ORIGINAL naive/removed-layer mutants with Read ADDED to their
+#     own case statements instead.
+# ==========================================================================
+fp58_script=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016 # single-quoted deliberately: literal source
+# text of allow-checkpoint.sh to search for/replace, not an expression to
+# expand in this shell.
+fp58_line=$(line_of "$fp58_script" '    Write | Edit | Read) ;;')
+[ -n "$fp58_line" ] || fp58_line=0
+# shellcheck disable=SC2016
+replace_line "$fp58_script" "$fp58_line" '    Write | Edit) ;;'
+
+fp58_home=$(new_home)
+fp58_stdin_read=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/myproj.md"}}' "$fp58_home")
+fp58_out_read=$(capture_stdout "$fp58_script" "$fp58_home" "$fp58_stdin_read")
+fp58_decision_read=$(printf '%s' "$fp58_out_read" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp58_decision_read="<jq error>"
+assert_eq "defer" "$fp58_decision_read" "S10-1 CLASS-LEVEL FAILURE PROOF: reverting the case statement to 'Write | Edit) ;;' (the pre-fix matcher) must reproduce the exact BLOCKER - a legitimate checkpoint Read incorrectly deferring - proving every allow-side Read assertion added above is not vacuous"
+
+fp58_stdin_write=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/myproj.md"}}' "$fp58_home")
+fp58_out_write=$(capture_stdout "$fp58_script" "$fp58_home" "$fp58_stdin_write")
+fp58_decision_write=$(printf '%s' "$fp58_out_write" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp58_decision_write="<jq error>"
+assert_eq "allow" "$fp58_decision_write" "S10-1 CLASS-LEVEL FAILURE PROOF sanity: reverting the case statement to pre-fix must leave a legitimate checkpoint Write completely unaffected, isolating the mutant's effect to Read specifically"
+
+# ==========================================================================
+# 59. allow-checkpoint.sh - AB1 (S10 review cycle 1, MAJOR security): the
+#     extract_field top-level-vs-tool_input SHADOWING bypass. Before this
+#     fix, a payload carrying a benign top-level `file_path` alongside a
+#     malicious `tool_input.file_path` returned "allow" for Read, Write,
+#     and Edit alike - the hook validated the field the tool never reads
+#     (top-level) instead of the one it does (tool_input.file_path), in
+#     BOTH the jq path (its filter preferred top-level over tool_input)
+#     and the sed fallback (an unscoped, key-order-dependent scan of the
+#     whole payload - reproduced independently of the jq bug by
+#     reordering the same payload's keys). Fixed: file_path is read ONLY
+#     from tool_input, in both paths - see scripts/allow-checkpoint.sh's
+#     extract_tool_input_field.
+#
+#     SUPERSEDED IN PART (S10 review cycle 2, AC1): the "sed fallback" this
+#     comment and the 59b/59d/59e scenarios below describe no longer
+#     exists - it could not parse a NESTED object inside tool_input (see
+#     scenario 60's nested-decoy payload and scripts/allow-checkpoint.sh's
+#     own comment), so it was removed outright rather than narrowed again.
+#     59a/59b/59c's "jq present" and "jq absent" assertions are UNCHANGED
+#     and still both pass: with jq absent, tool_name and file_path both
+#     now resolve empty (no sed scan is ever attempted), which already
+#     defers via decide()'s existing empty-value handling - the SAME
+#     observable outcome as before, reached by a simpler, sed-free path.
+#     Only 59e (a mutation proof of the now-deleted sed scoping step) is
+#     retired; see scenario 60 for its replacement.
+# ==========================================================================
+home59=$(new_home)
+mkdir -p "$home59/.claude/squirrel/checkpoints"
+nojq_path59=$(make_tool_path "jq")
+
+# 59a. THE TASK'S EXACT SPOOF SHAPE: top-level file_path is a genuine,
+# legitimate checkpoint path; tool_input.file_path is a traversal
+# escaping the checkpoints directory. Must defer - for Read, Write, and
+# Edit, with jq present AND with jq stripped from PATH.
+for tool59a in Read Write Edit; do
+  stdin59a=$(printf '{"tool_name":"%s","file_path":"%s/.claude/squirrel/checkpoints/legit.md","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/../../../../etc/passwd"}}' "$tool59a" "$home59" "$home59")
+
+  out59a=$(capture_stdout "$allow_checkpoint_script" "$home59" "$stdin59a")
+  decision59a=$(printf '%s' "$out59a" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision59a="<jq error>"
+  assert_eq "defer" "$decision59a" "AB1 (jq present): tool_name $tool59a with a benign top-level file_path AND a malicious tool_input.file_path (traversal) must defer, not allow via the shadowed top-level field"
+
+  out59ar=$(capture_stdout_with_path "$allow_checkpoint_script" "$home59" "$nojq_path59" "$stdin59a")
+  decision59ar=$(printf '%s' "$out59ar" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision59ar="<jq error>"
+  assert_eq "defer" "$decision59ar" "AB1 (jq absent): tool_name $tool59a with a benign top-level file_path AND a malicious tool_input.file_path (traversal) must defer, not allow via the shadowed top-level field, with jq stripped from PATH"
+
+  exit59a=$(capture_exit "$allow_checkpoint_script" "$home59" "$stdin59a")
+  assert_eq "0" "$exit59a" "AB1: allow-checkpoint.sh must exit 0 for the spoof payload (tool_name $tool59a)"
+done
+
+# 59b. The DISCRIMINATING variant a fix that only closes the jq filter
+# still misses: tool_input is present but has NO file_path key at all;
+# the (legitimate, in-checkpoints) file_path lives only at top level.
+# The tool call Claude Code actually issues has no file_path in its own
+# parameters in this shape, so there is nothing legitimate to allow -
+# must defer, Read/Write/Edit, jq present and absent.
+for tool59b in Read Write Edit; do
+  stdin59b=$(printf '{"tool_name":"%s","file_path":"%s/.claude/squirrel/checkpoints/legit.md","tool_input":{"other":"x"}}' "$tool59b" "$home59")
+
+  out59b=$(capture_stdout "$allow_checkpoint_script" "$home59" "$stdin59b")
+  decision59b=$(printf '%s' "$out59b" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision59b="<jq error>"
+  assert_eq "defer" "$decision59b" "AB1 (jq present): tool_name $tool59b with tool_input present but lacking file_path, and a legitimate top-level file_path, must defer - tool_input's own parameters have no file_path to allow"
+
+  out59br=$(capture_stdout_with_path "$allow_checkpoint_script" "$home59" "$nojq_path59" "$stdin59b")
+  decision59br=$(printf '%s' "$out59br" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision59br="<jq error>"
+  assert_eq "defer" "$decision59br" "AB1 (jq absent): tool_name $tool59b with tool_input present but lacking file_path, and a legitimate top-level file_path, must defer, with jq stripped from PATH"
+done
+
+# 59c. Regression sanity: a genuine tool_input.file_path inside
+# checkpoints, with NO top-level file_path field at all, must still
+# allow - for Edit specifically (Read/Write's equivalent shape is
+# already covered by scenarios 14/14r and the symlink/traversal
+# matrix) - proving the fix did not become overbroad and start
+# deferring legitimate tool_input-only payloads.
+stdin59c=$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/legit.md"}}' "$home59")
+out59c=$(capture_stdout "$allow_checkpoint_script" "$home59" "$stdin59c")
+decision59c=$(printf '%s' "$out59c" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision59c="<jq error>"
+assert_eq "allow" "$decision59c" "AB1 sanity: tool_name Edit with a genuine tool_input.file_path inside checkpoints/ and no top-level field at all must still allow"
+exit59c=$(capture_exit "$allow_checkpoint_script" "$home59" "$stdin59c")
+assert_eq "0" "$exit59c" "AB1 sanity: allow-checkpoint.sh must exit 0 for the tool_input-only Edit payload"
+
+# 59d. FAILURE PROOF, jq path: reverting extract_tool_input_field's jq
+# filter to the OLD, vulnerable form - '(.[$k] // .tool_input[$k] //
+# empty)', preferring a top-level field over tool_input - must
+# reproduce scenario 59a's exact spoof-allow bug (Read case, jq
+# present). Isolated via a single, unique substring substitution (the
+# fixed filter's exact text, single-quoted, appears nowhere else in the
+# file outside this one line - the header's own prose comment uses
+# backtick-quoting, not single-quoting, for the same text, so it cannot
+# collide).
+fp59d_script=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016 # single-quoted deliberately: literal source
+# text to search for/replace (real $ characters), not shell expansion.
+fp59d_want="    if val=\$(printf '%s' \"\$json\" | jq -r --arg k \"\$key\" '(.tool_input[\$k] // empty)' 2>/dev/null); then"
+fp59d_replacement="    if val=\$(printf '%s' \"\$json\" | jq -r --arg k \"\$key\" '(.[\$k] // .tool_input[\$k] // empty)' 2>/dev/null); then"
+fp59d_line=$(line_of "$fp59d_script" "$fp59d_want")
+[ -n "$fp59d_line" ] || fp59d_line=0
+replace_line "$fp59d_script" "$fp59d_line" "$fp59d_replacement"
+
+fp59d_home=$(new_home)
+mkdir -p "$fp59d_home/.claude/squirrel/checkpoints"
+fp59d_stdin=$(printf '{"tool_name":"Read","file_path":"%s/.claude/squirrel/checkpoints/legit.md","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/../../../../etc/passwd"}}' "$fp59d_home" "$fp59d_home")
+fp59d_out=$(capture_stdout "$fp59d_script" "$fp59d_home" "$fp59d_stdin")
+fp59d_decision=$(printf '%s' "$fp59d_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp59d_decision="<jq error>"
+assert_eq "allow" "$fp59d_decision" "AB1 FAILURE PROOF (jq path): reverting extract_tool_input_field's jq filter to the old top-level-preferring form must reproduce the exact spoof-allow bug scenario 59a proves fixed, confirming 59a's jq-present assertions are not vacuous"
+
+fp59d_exit=$(capture_exit "$fp59d_script" "$fp59d_home" "$fp59d_stdin")
+assert_eq "0" "$fp59d_exit" "AB1 FAILURE PROOF sanity (jq path): the reverted-filter mutant must still exit 0 (the outer wrapper's fail-safe contract is unaffected by this mutation)"
+
+# 59e. RETIRED (S10 review cycle 2, AC1). This used to neutralize
+# extract_tool_input_field's sed SCOPING step (making tool_input_text
+# equal the whole raw json) to prove the sed fallback's shadowing bug
+# reproduced without jq. AC1 removed the sed fallback itself, not just
+# its scoping, so there is no longer a scoping step to neutralize - the
+# mutation this scenario performed no longer applies to the current
+# source. Superseded by scenario 60's failure proof below, which targets
+# the class this scenario existed to guard (a sed decision path in
+# extract_tool_input_field) rather than one specific line of one that no
+# longer exists.
+
+# ==========================================================================
+# 60. allow-checkpoint.sh - AC1 (S10 review cycle 2, BLOCKER security): a
+#     NESTED object inside tool_input defeats extract_tool_input_field's
+#     old sed isolation regex, which stopped at the first literal "}" -
+#     the nested decoy's own closing brace, not tool_input's. The tech
+#     lead's exact reproduction:
+#       {"tool_name":"Write","tool_input":{"file_path":"/etc/passwd",
+#        "decoy":{"file_path":"$HOME/.claude/squirrel/checkpoints/legit.md"}}}
+#     jq present -> defer (correct: jq parses the real nested structure
+#     and finds /etc/passwd, outside checkpoints/). jq stripped -> used to
+#     return "allow" (WRONG: the sed fallback's isolation regex captured
+#     up to the decoy's own "}", and the greedy key search inside that
+#     capture found the decoy's legit-looking checkpoints/ path instead
+#     of the real, dangerous tool_input.file_path). FIX (removal, not a
+#     narrower regex): the sed decision path is gone. Without jq,
+#     extract_tool_input_field now returns nothing unconditionally, so
+#     jq-absent defers on EVERY payload, this one included - see
+#     scripts/allow-checkpoint.sh's own comment for the full mechanism.
+#
+#     The fixture below sends that same JSON content on ONE physical
+#     line, not wrapped across two the way it is shown above for
+#     readability: `sed -n` reads its input line by line, so a payload
+#     with a REAL embedded newline splitting "tool_input":{ from its own
+#     "}" already defers under the OLD sed fallback too (for an
+#     unrelated reason - a line-break defeating a per-line scan, AC3's
+#     territory, not this one) and would not isolate the nested-object
+#     bug this scenario exists to prove. Keeping the payload on one line
+#     is what makes this a clean reproduction of the BRACE-COUNTING
+#     blindness specifically, uncomplicated by a second, different
+#     evasion.
+# ==========================================================================
+home60=$(new_home)
+mkdir -p "$home60/.claude/squirrel/checkpoints"
+nojq_path60=$(make_tool_path "jq")
+
+for tool60 in Read Write Edit; do
+  stdin60=$(printf '{"tool_name":"%s","tool_input":{"file_path":"/etc/passwd", "decoy":{"file_path":"%s/.claude/squirrel/checkpoints/legit.md"}}}' "$tool60" "$home60")
+
+  out60=$(capture_stdout "$allow_checkpoint_script" "$home60" "$stdin60")
+  decision60=$(printf '%s' "$out60" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision60="<jq error>"
+  assert_eq "defer" "$decision60" "AC1 (jq present): tool_name $tool60 with the nested-decoy payload (real tool_input.file_path=/etc/passwd, decoy tool_input.decoy.file_path=legit checkpoints/ path) must defer - jq parses the real nesting and finds /etc/passwd"
+  exit60=$(capture_exit "$allow_checkpoint_script" "$home60" "$stdin60")
+  assert_eq "0" "$exit60" "AC1: allow-checkpoint.sh must exit 0 for the nested-decoy payload (tool_name $tool60, jq present)"
+  out60_valid=$(printf '%s' "$out60" | jq empty >/dev/null 2>&1 && echo yes || echo no)
+  assert_eq "yes" "$out60_valid" "AC1: allow-checkpoint.sh output for the nested-decoy payload (tool_name $tool60, jq present) must be valid JSON"
+
+  out60n=$(capture_stdout_with_path "$allow_checkpoint_script" "$home60" "$nojq_path60" "$stdin60")
+  decision60n=$(printf '%s' "$out60n" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision60n="<jq error>"
+  assert_eq "defer" "$decision60n" "AC1 BLOCKER FIX (jq absent): tool_name $tool60 with the nested-decoy payload must defer, not allow via the decoy's legit-looking path - this is the exact BLOCKER the tech lead reproduced, jq stripped from PATH"
+  exit60n=$(capture_exit_with_path "$allow_checkpoint_script" "$home60" "$nojq_path60" "$stdin60")
+  assert_eq "0" "$exit60n" "AC1: allow-checkpoint.sh must exit 0 for the nested-decoy payload (tool_name $tool60, jq absent)"
+  out60n_valid=$(printf '%s' "$out60n" | jq empty >/dev/null 2>&1 && echo yes || echo no)
+  assert_eq "yes" "$out60n_valid" "AC1: allow-checkpoint.sh output for the nested-decoy payload (tool_name $tool60, jq absent) must be valid JSON"
+done
+
+# 60b. AC1 cost, made explicit: a payload that WOULD have been a
+# legitimate "allow" (no nesting, no decoy, tool_input.file_path
+# genuinely inside checkpoints/) now defers when jq is absent, for
+# Read, Write, and Edit alike - the graceful-degradation half of AC1's
+# fix. This is the "existing jq-absent test, flipped" the task asked
+# for: before this cycle no such test existed for allow-checkpoint.sh
+# (only the AB1 spoof/discriminating shapes were exercised jq-absent,
+# and those already deferred before and after this fix) - this is the
+# first assertion of this exact shape, and it asserts the NEW, correct
+# behaviour directly rather than a stale "allow" expectation.
+for tool60b in Read Write Edit; do
+  stdin60b=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s/.claude/squirrel/checkpoints/legit-60b.md"}}' "$tool60b" "$home60")
+
+  out60b_jq=$(capture_stdout "$allow_checkpoint_script" "$home60" "$stdin60b")
+  decision60b_jq=$(printf '%s' "$out60b_jq" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision60b_jq="<jq error>"
+  assert_eq "allow" "$decision60b_jq" "AC1 sanity: tool_name $tool60b on a genuinely legitimate, non-nested checkpoint path must still allow with jq present"
+
+  out60b_nojq=$(capture_stdout_with_path "$allow_checkpoint_script" "$home60" "$nojq_path60" "$stdin60b")
+  decision60b_nojq=$(printf '%s' "$out60b_nojq" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision60b_nojq="<jq error>"
+  assert_eq "defer" "$decision60b_nojq" "AC1 cost, stated as a permanent assertion: tool_name $tool60b on a payload that would otherwise be a legitimate allow must defer when jq is absent - checkpoint auto-approval requires a real parser, and this is the graceful fallback, not a crash or a wrong allow"
+  exit60b_nojq=$(capture_exit_with_path "$allow_checkpoint_script" "$home60" "$nojq_path60" "$stdin60b")
+  assert_eq "0" "$exit60b_nojq" "AC1: allow-checkpoint.sh must still exit 0 for an otherwise-legitimate payload with jq absent (graceful fallback, never a crash)"
+done
+
+# 60c. FAILURE PROOF: reintroduce a sed decision path into
+# extract_tool_input_field (the exact code AC1 removed) in a scratch copy
+# of the REAL, CURRENT (already-fixed) script, and confirm the
+# nested-decoy payload reproduces the BLOCKER - "allow" - with jq
+# stripped from PATH. This proves scenario 60's jq-absent "defer"
+# assertions are not vacuous: they can and do fail against code that
+# still asks a regex to isolate tool_input's own text.
+fp60c_script=$(make_script_scratch "$allow_checkpoint_script")
+fp60c_func_line=$(line_of "$fp60c_script" 'extract_tool_input_field() {')
+[ -n "$fp60c_func_line" ] || fp60c_func_line=0
+fp60c_return_line=$(line_of_after "$fp60c_script" "$fp60c_func_line" '  return 0')
+[ -n "$fp60c_return_line" ] || fp60c_return_line=0
+fp60c_old_sed_block=$(cat <<'BLOCK'
+  tool_input_text=$(printf '%s\n' "$json" | sed -n 's/^.*"tool_input"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p')
+  [ -n "$tool_input_text" ] || return 0
+  printf '%s\n' "$tool_input_text" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+BLOCK
+)
+replace_block "$fp60c_script" "$fp60c_return_line" "$fp60c_return_line" "$fp60c_old_sed_block"
+
+fp60c_home=$(new_home)
+mkdir -p "$fp60c_home/.claude/squirrel/checkpoints"
+fp60c_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd", "decoy":{"file_path":"%s/.claude/squirrel/checkpoints/legit.md"}}}' "$fp60c_home")
+
+fp60c_out=$(capture_stdout_with_path "$fp60c_script" "$fp60c_home" "$nojq_path60" "$fp60c_stdin")
+fp60c_decision=$(printf '%s' "$fp60c_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp60c_decision="<jq error>"
+assert_eq "allow" "$fp60c_decision" "AC1 FAILURE PROOF: reintroducing a sed decision path into extract_tool_input_field, jq stripped from PATH, must reproduce the exact nested-decoy BLOCKER (allow, via the decoy's legit-looking path) scenario 60 proves fixed - confirming its jq-absent 'defer' assertions are not vacuous"
+
+fp60c_exit=$(capture_exit_with_path "$fp60c_script" "$fp60c_home" "$nojq_path60" "$fp60c_stdin")
+assert_eq "0" "$fp60c_exit" "AC1 FAILURE PROOF sanity: the reintroduced-sed-fallback mutant must still exit 0 (the outer wrapper's fail-safe contract is unaffected by this mutation)"
+
+# Sanity: the SAME mutant, with jq PRESENT, must be unaffected - the jq
+# path returns before the appended sed code is ever reached, isolating
+# the mutation's effect to the jq-absent path specifically (same
+# isolation discipline as scenario 58's Write-unaffected check).
+fp60c_out_jq=$(capture_stdout "$fp60c_script" "$fp60c_home" "$fp60c_stdin")
+fp60c_decision_jq=$(printf '%s' "$fp60c_out_jq" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp60c_decision_jq="<jq error>"
+assert_eq "defer" "$fp60c_decision_jq" "AC1 FAILURE PROOF sanity: the reintroduced-sed-fallback mutant, run WITH jq present, must still defer correctly on the nested-decoy payload - the mutation's effect is isolated to the jq-absent path, matching the real bug's own reproduction"
 
 assert_report

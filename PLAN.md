@@ -208,7 +208,7 @@ squirrel-mode/                       # repo name (brand)
 ├── scripts/
 │   ├── load-profile.sh              # SessionStart  → inject profile + resume notice
 │   ├── check-off-flag.sh            # UserPromptSubmit → counter-inject when disabled
-│   ├── allow-checkpoint.sh          # PreToolUse    → auto-approve checkpoint writes
+│   ├── allow-checkpoint.sh          # PreToolUse    → auto-approve checkpoint reads/writes
 │   └── build.sh                     # rules/base-rules.md → every generated artifact
 ├── targets/
 │   ├── codex/
@@ -283,8 +283,15 @@ tone: neutral              # neutral | warm | terse
    defaults."* It cannot interpolate anything (ADR-0001), so the profile path appears literally.
 3. **UserPromptSubmit** runs `check-off-flag.sh`: if `~/.claude/squirrel/off/<session_id>` exists,
    inject the counter-instruction (ADR-0005). Otherwise exit silently.
-4. **PreToolUse** on `Write` with `if: Write($HOME/.claude/squirrel/checkpoints/**)` runs
-   `allow-checkpoint.sh`, which returns `permissionDecision: "allow"` (ADR-0002).
+4. **PreToolUse**, matcher `Write|Edit|Read`, runs `allow-checkpoint.sh` on every one. The hook's
+   `if` field cannot safely express the path gate itself (ADR-0002: unverified whether it expands
+   `~`/`$HOME` at plugin-build time), so the matcher is broad and the script reads
+   `tool_input.file_path` and returns `permissionDecision: "allow"` only for a path that genuinely
+   resolves inside `$HOME/.claude/squirrel/checkpoints/`, `"defer"` otherwise — for a `Read` exactly
+   as for a `Write`/`Edit`, per S10-1's amendment to ADR-0002. This read requires `jq`: a regex
+   cannot safely parse `tool_input` when it carries a nested object, so without `jq` on `PATH` the
+   script never guesses and always returns `"defer"` (S10 review cycle 2, AC1's amendment to
+   ADR-0002).
 
 ### The base rules (write these into `rules/base-rules.md`)
 
@@ -294,9 +301,11 @@ tone: neutral              # neutral | warm | terse
    and the conversation is mid-task, rule 8's one-line recap takes the lead position instead of the
    answer; rule 8 governs the ordering of the recap and the answer that follows it, and this item
    does not restate it.
-2. No preamble ("Great question", "Sure, I can help") and no postamble ("Let me know if..."). The
-   one named exception is rule 15's scope-guard flag: when it fires, its one line follows the
-   completed answer as the final line of the response, never before it.
+2. No preamble ("Great question", "Sure, I can help") and no postamble ("Let me know if..."). None
+   of that bans the trailing content another rule expressly licenses. Rule 7 states what may trail
+   the answer and in what order; this rule does not restate it. The clearest example is rule 15's
+   scope-guard flag: when it fires, its one line follows the completed answer as the final line of
+   the response, never before it.
 3. Multi-step work is always enumerated, in the form set by `step_style`: `numbered` gives
    `1.`/`2.`/`3.`, `checklist` gives `- [ ]` items. Either way max `max_list_items` steps visible at
    once; if more, chunk into phases and show only the current phase in detail. This cap governs task
@@ -317,10 +326,12 @@ tone: neutral              # neutral | warm | terse
    *beyond* that count when the user asks. When rule 9 puts several sub-answers in one response,
    this cap applies to each sub-answer on its own, not to the response as a whole.
 7. No tangents. If something adjacent genuinely matters (a security risk, a breaking change), put it
-   in a single `Extra` section at the very end — and only if `extras_section: yes`. The one
-   exception: when rule 15's scope-guard flag also fires in the same response, that flag becomes the
-   actual final line, immediately after the Extra section. When `extras_section` is no, omit it
-   entirely.
+   in a single `Extra` section, never inline — only if `extras_section: yes`. When `extras_section` is
+   no, omit it entirely. This rule states, once, the order that applies on every target: the `Extra`
+   section comes first, then whichever other trailing content another rule licenses for this
+   response; when rule 15's scope-guard flag also fires in the same response, that flag becomes the
+   actual final line, after the Extra section and after any such other trailing content. Rule 2
+   defers to this ordering rather than restating it.
 8. Across turns in a task, open with a one-line recap — `Done: X. Now: Y.` — if `progress_recap:
    yes`. The recap is the lead line, not a substitute for the answer: the answer or next action that
    rule 1 requires follows immediately after the recap, on the next line, never folded into the same
@@ -344,7 +355,13 @@ tone: neutral              # neutral | warm | terse
     not announce it, do not ask. At most **one write per turn**, and only when `Doing` or `Next`
     actually changed. Append finished items to the Done log, keeping the last 10.
     *Never describe this as happening without the user's knowledge. Tool calls are always visible in
-    the transcript; what we promise is no prose about it, not invisibility (ADR-0002).*
+    the transcript; what we promise is no prose about it, not invisibility (ADR-0002).* If the read
+    or the write fails, say so in one line: a failure is reported, never absorbed silently, and that
+    one-line report is not the commentary the paragraph above forbids. This report is the other
+    trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7
+    produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed
+    trailing content goes. That only matters here, on Claude Code: neither this report nor a
+    checkpoint exists on the other two targets.
 15. **Scope guard:** when the conversation drifts from the declared task, flag it in exactly ONE
     line — e.g. `🐿️ This is drifting from <task>. Park it?` — and offer to park the tangent. Never
     lecture. Never refuse an explicit choice to continue. Flag the same drift only once. The rule

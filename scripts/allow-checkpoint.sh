@@ -1,16 +1,52 @@
 #!/bin/sh
-# allow-checkpoint.sh - PreToolUse hook (matcher: Write|Edit).
+# allow-checkpoint.sh - PreToolUse hook (matcher: Write|Edit|Read).
 #
-# ADR-0002 + tech-lead Decision 2: the plugin auto-approves writes to
-# its OWN checkpoint directory only, so a checkpoint update never costs
-# a permission prompt. `hooks.json` cannot express this safely on its
-# own (the `if` field's permission-rule syntax cannot see the user's
-# real $HOME at plugin-build time, and it is unverified whether it even
-# expands `~`/$HOME) - so it matches broadly on Write|Edit and hands
-# the actual decision to THIS script, which reads `tool_input.file_path`
-# from stdin and returns `allow` or `defer`. It never returns `deny`:
-# denying is not this hook's job, and `defer` hands the decision back
-# to the normal permission flow exactly as if this hook did not exist.
+# ADR-0002 + tech-lead Decision 2: the plugin auto-approves reads AND
+# writes of its OWN checkpoint directory only, so a checkpoint
+# interaction never costs a permission prompt. `hooks.json` cannot
+# express this safely on its own (the `if` field's permission-rule
+# syntax cannot see the user's real $HOME at plugin-build time, and it
+# is unverified whether it even expands `~`/$HOME) - so it matches
+# broadly on Write|Edit|Read and hands the actual decision to THIS
+# script, which reads `tool_input.file_path` from stdin and returns
+# `allow` or `defer`. It never returns `deny`: denying is not this
+# hook's job, and `defer` hands the decision back to the normal
+# permission flow exactly as if this hook did not exist.
+#
+# FIXED BLOCKER (S10-1): the matcher and this script originally covered
+# only Write and Edit. Every checkpoint interaction actually STARTS with
+# a Read - `/squirrel:pickup` reads the checkpoint file before showing
+# anything, and rule 14's own update path has to read the current Done
+# log to keep only the last 10 entries before it can write the new one
+# - so the very first tool call of a checkpoint interaction was falling
+# through to the normal permission prompt, contradicting ADR-0002, rule
+# 14's "do not ask permission first", and README's disclosure that a
+# checkpoint update never stops mid-task to ask. A live probe caught
+# this; no static test could, because every existing scenario asked this
+# script about `Write`. `Read` is now handled identically to `Write` and
+# `Edit` below - same path validation, same symlink defence, same
+# length cap - because a read is strictly narrower in risk than a write
+# and the boundary must not be loosened to accommodate it.
+#
+# FIXED MAJOR (S10 review cycle 1, AB1 - field-shadowing bypass): the
+# path validated below used to come from a helper that preferred a
+# TOP-LEVEL `file_path` over `tool_input.file_path`. The tool's real
+# parameters live under `tool_input` (this is the PreToolUse contract
+# the paragraph above already describes); the top-level fallback was
+# never part of that contract, so a payload carrying a benign top-level
+# `file_path` alongside a malicious `tool_input.file_path` made this
+# script validate a field the operation never reads and `allow` the
+# operation on the field it does. Reproduced for Read, Write, and Edit
+# alike, in both the jq path and the sed fallback (the sed fallback had
+# the identical bug independently, order-dependent rather than
+# preference-dependent - see extract_tool_input_field's own comment,
+# below, for the mechanism). Fixed: `file_path` is now read via
+# extract_tool_input_field, which reads ONLY `tool_input.file_path`,
+# never a sibling top-level field of the same name, in either the jq or
+# the sed path. `tool_name` is unaffected and still read from the top
+# level (via extract_field) - that is where it legitimately lives in
+# the real PreToolUse payload, a sibling of `tool_input`, not nested
+# inside it.
 #
 # THIS SCRIPT IS A SECURITY BOUNDARY. `allow` must only ever come back
 # for a path that genuinely, after normalisation, resolves inside
@@ -145,9 +181,56 @@
 # exempt from `set -e`, so nothing inside it can make this script exit
 # non-zero. Whatever decide() does or does not manage to print, the
 # final `case` below always emits exactly one well-formed JSON decision
-# and this script always exits 0.
+# and this script always exits 0 - PROVIDED decide() returns AT ALL.
 #
-# jq: preferred, not required - see extract_field's sed fallback.
+# CORRECTED CLAIM (cycle-3 review, AD1): the paragraph above used to stop
+# at "always exits 0", stated with no qualification. That is false for
+# one input this script cannot bound: a `jq` that is PRESENT on PATH but
+# WEDGED - stopped, deadlocked, or otherwise never returns. Reproduced
+# directly (this fix): a `jq` shim that loops forever left this script
+# still running, with zero bytes of stdout, two seconds in - at which
+# point the process was killed externally to end the reproduction, not
+# because the script itself ever returned. The `if decision=$(decide
+# 2>/dev/null); then ...` wrapper catches decide() FAILING (a non-zero
+# exit); it cannot catch decide() never FINISHING, because the shell has
+# to wait for that command substitution's subshell - itself blocked
+# inside `jq` - to return before the `if` can even be evaluated. No
+# construct in POSIX `sh` interrupts a command substitution already in
+# flight, and adding one is not this project's call to make: `timeout(1)`
+# is GNU coreutils, not POSIX, and is absent from stock macOS - wrapping
+# the jq calls in extract_field/extract_tool_input_field with it would
+# add a dependency to a security hook to cover a pathological system
+# state (a wedged system binary), which is the wrong trade for what it
+# buys.
+#
+# The honest, correctable claim: this script's "always exits 0, always
+# exactly one well-formed JSON decision" contract holds for EVERY input
+# and for every command FAILURE it depends on - `jq` exiting non-zero,
+# `jq` exiting 0 with no output, and `jq` printing the literal string
+# `null` are all reproduced (this fix) to defer correctly in well under a
+# second (112-272ms, measured on the author's machine - stated as
+# machine-specific data, not a portable performance guarantee). It does
+# NOT hold for an invoked command that is never given the chance to fail
+# or succeed because it never returns at all. That one gap is bounded
+# only by the harness's own hook timeout (Claude Code kills a hook
+# process that overruns its configured or default timeout), never by
+# anything in this script.
+#
+# jq: REQUIRED for an "allow" decision (S10 review cycle 2, AC1). Without
+# it on PATH, extract_tool_input_field below returns nothing, file_path
+# resolves empty, and decide() defers - EVERY Write/Edit/Read on a
+# checkpoint path falls back to the normal permission prompt instead of
+# being auto-approved. This is a deliberate narrowing of the previous
+# behaviour, not an oversight: the sed/awk fallback that used to stand in
+# for jq could not parse nested JSON (a regex matches text shapes, it
+# does not track brace depth, and doing so would be writing a parser by
+# another name) - see extract_tool_input_field's own comment for the
+# exact reproduction the tech lead found. `tests/run.sh` already treats
+# `jq` as a hard prerequisite for running this project's own test suite,
+# so requiring it for this one decision is consistent with, not beyond,
+# the project's existing posture. This cost is stated in README.md and
+# docs/adr/0002-checkpoint-auto-allow.md, wherever the auto-approval
+# mechanism is described.
 set -eu
 
 # MAX_FILE_PATH_LEN: the DoS cap (see "FIXED MAJOR" above). 4096 bytes
@@ -159,17 +242,41 @@ set -eu
 MAX_FILE_PATH_LEN=4096
 
 extract_field() {
-  # extract_field <json> <key>: reads a top-level string field, OR (as a
-  # fallback within the same call) `.tool_input.<key>`, from <json>.
-  # That second path is what lets one call site pull `file_path` out of
-  # `tool_input.file_path` without a separate nested-access helper. jq's
-  # `//` also swallows an error from a null `.tool_input` (indexing null
-  # normally raises), so a completely absent `tool_input` degrades to
-  # "no value" rather than a jq failure.
+  # extract_field <json> <key>: reads a TOP-LEVEL string field ONLY,
+  # e.g. `tool_name` - which the real PreToolUse payload always carries
+  # at top level, a sibling of `tool_input`, never nested inside it.
+  # Matches the sibling scripts' own `extract_field` (load-profile.sh,
+  # check-off-flag.sh), which are top-level-only reads for the same
+  # reason. Never reads `tool_input` at all: a field whose real, only
+  # home is the top level must not be satisfiable by anything the
+  # operation's own parameters carry either (that would be the identical
+  # shadowing class extract_tool_input_field below exists to close, just
+  # mirrored - see there for the concrete attack).
+  #
+  # NOT touched by AC1 (S10 review cycle 2), deliberately. AC1's finding
+  # and fix are scoped to extract_tool_input_field's isolation of a
+  # NESTED object below `tool_input` - a regex cannot track brace depth,
+  # so it cannot tell "tool_input's own closing brace" from "a nested
+  # object's closing brace" (see that function's own comment for the
+  # exact reproduction). This function's sed fallback has no equivalent
+  # nested-object hazard: `tool_name` (its only real caller's key) is a
+  # flat top-level string with nothing nested inside it to be confused
+  # with, and decide() below never calls this function for `file_path` -
+  # only extract_tool_input_field is on that path. Removing this
+  # fallback anyway was tried and reverted: it made this function return
+  # empty for `file_path` too, which broke unrelated failure-proof
+  # fixtures (tests/test_hooks.sh scenarios 16/17) that deliberately
+  # construct a HISTORICAL, pre-AB1-shaped mutant calling this function
+  # for `file_path` to prove a DIFFERENT, older bug (naive prefix
+  # matching with no lexical normalisation) - those mutants rely on this
+  # function's own unscoped sed scan to simulate "reads file_path from
+  # anywhere in the payload," a property this function has always had
+  # and that AC1 was never asked to change. Scope kept precisely to the
+  # function actually implicated.
   json=$1
   key=$2
   if command -v jq >/dev/null 2>&1; then
-    if val=$(printf '%s' "$json" | jq -r --arg k "$key" '(.[$k] // .tool_input[$k] // empty)' 2>/dev/null); then
+    if val=$(printf '%s' "$json" | jq -r --arg k "$key" '(.[$k] // empty)' 2>/dev/null); then
       if [ "$val" != "null" ] && [ -n "$val" ]; then
         printf '%s' "$val"
         return 0
@@ -177,6 +284,87 @@ extract_field() {
     fi
   fi
   printf '%s\n' "$json" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+}
+
+extract_tool_input_field() {
+  # extract_tool_input_field <json> <key>: reads <key> from INSIDE
+  # `tool_input` ONLY, e.g. `file_path` - the tool's real parameters, per
+  # the PreToolUse contract (see the header). Never reads a top-level
+  # field of the same name. jq REQUIRED, no fallback of any kind - see
+  # the "SECURITY FIX (S10 review cycle 2, AC1)" paragraph below for why.
+  #
+  # SECURITY FIX (S10 review, AB1): the previous version of this
+  # function (formerly folded into extract_field itself) preferred a
+  # top-level field over `.tool_input.<key>`. A payload carrying a
+  # BENIGN top-level `file_path` alongside a MALICIOUS
+  # `tool_input.file_path` made the old jq filter
+  # `(.[$k] // .tool_input[$k] // empty)` return the benign value and
+  # `allow`, while the tool call Claude Code actually executes reads
+  # `tool_input.file_path` - the malicious one. Reproduced for Read,
+  # Write, and Edit alike; see tests/test_hooks.sh's AB1 scenarios. The
+  # jq filter below (`.tool_input[$k] // empty`) is that fix and is
+  # UNCHANGED by AC1 - it reads only `tool_input.<key>`, correctly,
+  # because jq is an actual JSON parser and tracks object nesting for
+  # real. AC1, below, is about what happens when jq is not there to do
+  # that.
+  #
+  # SECURITY FIX (S10 review cycle 2, AC1): AB1's own fix left a sed
+  # fallback in place for when jq is absent - isolating `tool_input`'s
+  # own text via `sed -n 's/^.*"tool_input"[[:space:]]*:[[:space:]]*{
+  # \([^}]*\)}.*/\1/p'` (capture everything up to the FIRST literal "}"
+  # after "tool_input":{) and then key-searching inside that capture.
+  # That isolation regex cannot parse nested JSON: given
+  #   {"tool_name":"Write","tool_input":{"file_path":"/etc/passwd",
+  #    "decoy":{"file_path":"$HOME/.claude/squirrel/checkpoints/legit.md"}}}
+  # the FIRST "}" in tool_input's text closes the NESTED decoy object,
+  # not tool_input's own - so the capture became
+  # `"file_path":"/etc/passwd","decoy":{"file_path":".../legit.md"`, and
+  # the greedy-last-match key search inside it returned the DECOY value
+  # (a legitimate-looking checkpoints/ path) instead of the REAL
+  # tool_input.file_path (/etc/passwd) the Write tool actually operates
+  # on. Reproduced: jq present -> defer (correct - jq parses the real
+  # nested structure and finds /etc/passwd, outside checkpoints/); jq
+  # stripped from PATH -> allow (WRONG, on the operation that targets
+  # /etc/passwd). No isolation regex written in sed/awk closes this: a
+  # regex matches text shapes, it cannot track brace depth without
+  # becoming a parser by another name, and each narrower pattern tried
+  # only shrinks the class of nested shapes that defeat it, never closes
+  # the class - the same "narrower guard, same bug" pattern this project
+  # has hit seven times now. This also closes, at the root rather than by
+  # separately patching each one, two narrower jq/sed disagreements the
+  # same review found: a literal "}" inside an unrelated STRING field's
+  # own VALUE, appearing before `file_path` in the raw text (which also
+  # terminates the old `[^}]*` capture early, on a payload with no
+  # nesting at all - e.g. tool_input carrying a `content` field whose
+  # text contains a "}"), and pretty-printed (multi-line, indented)
+  # `tool_input` JSON, which the old single-pass isolation regex handled
+  # inconsistently depending on exact whitespace shape. jq parses both
+  # correctly and unconditionally, being an actual parser; a regex
+  # standing in for one cannot be patched into being one.
+  #
+  # Fix: the sed decision path is REMOVED, not narrowed. Without jq, this
+  # function prints nothing and returns 0. decide() below already treats
+  # an empty file_path as nothing legitimate to allow - the `case
+  # "$file_path" in /*) ;; *) defer` check a few lines down rejects an
+  # empty string outright, since it does not start with "/" - so no
+  # special-casing is needed here for "jq absent" specifically: it falls
+  # out of the existing empty-value handling. The cost is real and
+  # deliberate, not hidden: on a machine without jq, EVERY checkpoint
+  # Write/Edit/Read defers to the normal permission prompt, including a
+  # perfectly legitimate one. See tests/test_hooks.sh's AC1 scenarios for
+  # the permanent nested-decoy assertion (both with jq present and
+  # absent) and its mutation proof.
+  json=$1
+  key=$2
+  if command -v jq >/dev/null 2>&1; then
+    if val=$(printf '%s' "$json" | jq -r --arg k "$key" '(.tool_input[$k] // empty)' 2>/dev/null); then
+      if [ "$val" != "null" ] && [ -n "$val" ]; then
+        printf '%s' "$val"
+        return 0
+      fi
+    fi
+  fi
+  return 0
 }
 
 # normalize_path <absolute-path>: purely lexical (no filesystem access)
@@ -270,10 +458,10 @@ component_walk_has_symlink() {
 decide() {
   input=$(cat)
   tool_name=$(extract_field "$input" "tool_name")
-  file_path=$(extract_field "$input" "file_path")
+  file_path=$(extract_tool_input_field "$input" "file_path")
 
   case "$tool_name" in
-    Write | Edit) ;;
+    Write | Edit | Read) ;;
     *)
       printf 'defer'
       return 0
@@ -349,7 +537,7 @@ fi
 
 case "$decision" in
   allow)
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: write targets its own checkpoint directory (ADR-0002)."}}\n'
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: operation targets its own checkpoint directory (ADR-0002)."}}\n'
     ;;
   *)
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"defer"}}\n'

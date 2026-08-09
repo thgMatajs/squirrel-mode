@@ -126,14 +126,21 @@ survive independently of the plugin's install state
 ([ADR-0003](./docs/adr/0003-profile-outside-plugin-data.md)).
 
 One exception to the normal permission flow: a `PreToolUse` hook auto-approves the plugin's own
-writes to `~/.claude/squirrel/checkpoints/`, so a checkpoint update never stops mid-task to ask.
-That write is a tool call like any other and shows up in the transcript the same way every other
+reads and writes inside `~/.claude/squirrel/checkpoints/` — both the read a checkpoint interaction
+starts with (`/squirrel:pickup`, and rule 14's own update path checking what is already logged) and
+the write that follows it — so neither one is meant to interrupt the task to ask for permission.
+Each is still a tool call like any other and shows up in the transcript the same way every other
 tool call does — what's skipped is the permission prompt and any commentary about it in the
-response, not the write itself.
+response, not the read or write itself.
 
 The auto-approval only covers paths that genuinely resolve inside that directory: a symlink at
 `checkpoints/` itself, or anywhere below it, is never auto-approved — that write falls back to the
 normal permission prompt instead of being silently redirected through the symlink.
+
+The auto-approval requires `jq` to be installed and on `PATH`. A regex cannot safely parse nested
+JSON, so on a machine without `jq` the hook never guesses — every checkpoint read and write falls
+back to the normal permission prompt instead. This is a deliberate, graceful fallback, not a crash;
+`jq` is already a hard prerequisite for this project's own test suite.
 
 The base rules that trigger these writes also cap them at one checkpoint write per turn. Nothing
 else is auto-approved; full rationale in [ADR-0002](./docs/adr/0002-checkpoint-auto-allow.md).

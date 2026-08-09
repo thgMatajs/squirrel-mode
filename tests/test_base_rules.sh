@@ -560,7 +560,7 @@ rule_2_body=$(get_rule_body_prose 2)
 SCOPE_GUARD_FLAG_PHRASE="rule 15's scope-guard flag"
 RULE_FLAG_FINAL_LINE_PHRASE="final line of the response"
 RULE15_NAMES_RULE2_PHRASE="rule 2's postamble ban"
-assert_contains "$rule_2_body" "$SCOPE_GUARD_FLAG_PHRASE" "rule 2's canonical body must name rule 15's scope-guard flag as its one exception to the postamble ban"
+assert_contains "$rule_2_body" "$SCOPE_GUARD_FLAG_PHRASE" "rule 2's canonical body must name rule 15's scope-guard flag as trailing content this rule does not ban as postamble [AD3, S10 cycle 3 final gate: rule 2 now defers GENERICALLY ('trailing content another rule expressly licenses') rather than enumerating what rule 7 licenses, so a claude-code-only concept like rule 14's checkpoint-failure report is never named or described here at all; see the AD3 assertions below]"
 assert_contains "$rule_2_body" "$RULE_FLAG_FINAL_LINE_PHRASE" "rule 2's canonical body must state the excepted flag is a final-line exception, matching rule 15"
 assert_contains "$rule_15_body" "$RULE_FLAG_FINAL_LINE_PHRASE" "rule 15's canonical body must state the flag is the final line of the response, not merely 'the same response'"
 assert_contains "$rule_15_body" "$RULE15_NAMES_RULE2_PHRASE" "rule 15's canonical body must name rule 2's postamble ban as the rule its flag is an exception to"
@@ -595,7 +595,7 @@ assert_contains "$plan_rule_15_flat" "$RULE15_NAMES_RULE2_PHRASE" "PLAN.md's rul
 rule_7_body=$(get_rule_body_prose 7)
 RULE15_RULE7_PHRASE="rule 7 also produces an Extra section in the same response, the flag follows it"
 RULE7_RULE15_PHRASE="when rule 15's scope-guard flag also fires in the same response, that flag becomes the actual final line"
-assert_contains "$rule_7_body" "$SCOPE_GUARD_FLAG_PHRASE" "rule 7's canonical body must name rule 15's scope-guard flag as the one exception to the Extra section being the response's own last line"
+assert_contains "$rule_7_body" "$SCOPE_GUARD_FLAG_PHRASE" "rule 7's canonical body must name rule 15's scope-guard flag as part of the trailing-content ordering it states [AD3, S10 cycle 3 final gate: rule 7 now states a GENERIC two-part order (Extra section, then whichever other trailing content another rule licenses, then the flag) rather than naming rule 14's checkpoint-failure report by content - that report's own place in the order is stated by rule 14 itself now; see the AD3 assertions below]"
 assert_contains "$rule_7_body" "$RULE7_RULE15_PHRASE" "rule 7's canonical body must state that rule 15's flag, when it also fires, becomes the actual final line after the Extra section"
 assert_contains "$rule_15_body" "$RULE15_RULE7_PHRASE" "rule 15's canonical body must state it follows any Extra section rule 7 also produces in the same response"
 
@@ -753,5 +753,294 @@ assert_contains "$rule_16_body" "$RULE16_SAFETY_TIE_PHRASE" "rule 16's canonical
 assert_contains "$plan_rule_16_flat" "$RULE16_BEFORE_ANSWER_PHRASE" "PLAN.md's rule-16 summary must state the same before-the-answer scoping as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
 assert_contains "$plan_rule_16_flat" "$RULE16_TONE_OVERRIDE_PHRASE" "PLAN.md's rule-16 summary must state the same regardless-of-tone override as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
 assert_contains "$plan_rule_16_flat" "$RULE16_SAFETY_TIE_PHRASE" "PLAN.md's rule-16 summary must state the same rule-13 safety-warning tie as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
+
+# --- 32. Rule 14 licenses a one-line failure report for its checkpoint
+# read/write, and PLAN.md agrees (S10-1) --------------------------------
+#
+# S10-1's live probe (.build-checkpoint.md) found the model narrating a checkpoint operation's
+# failure -- the right instinct, since a failure must never be absorbed silently, but unlicensed
+# by rule 14 as originally written: the rule only ever said not to announce a SUCCESSFUL write and
+# not to ask permission first, and never addressed what to do when the read or the write fails.
+# Fixed by adding one sentence to rule 14's body, stating a failure is reported in one line and
+# that this is not the "no commentary" ban's target (which governs an ordinary, successful update).
+# Mirrored into PLAN.md item 14 verbatim (the same identical-wording convention AA3 used for rule
+# 3/rule 6's per-sub-answer sentence), pinned in both directions the same way every other rule
+# amendment in this build has been.
+rule_14_body=$(get_rule_body_prose 14)
+RULE14_FAILURE_PHRASE="a failure is reported, never absorbed silently"
+assert_contains "$rule_14_body" "$RULE14_FAILURE_PHRASE" "rule 14's canonical body must license a one-line report when the checkpoint read or write fails (S10-1: this is the narration a live probe found the model doing, unlicensed, before this fix)"
+
+plan_rule_14_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
+  /^14\. / { in_item = 1 }
+  /^15\. / { in_item = 0 }
+  in_item { print }
+')
+assert_not_contains "$plan_rule_14_block" "Scope guard" "PLAN.md's rule-14 block, once bounded to the base-rules section, must not include item 15's own heading text -- guards against the same cross-item leakage class Y5 fixed for rule 10"
+plan_rule_14_flat=$(printf '%s\n' "$plan_rule_14_block" | tr '\n' ' ' | tr -s ' ')
+assert_contains "$plan_rule_14_flat" "$RULE14_FAILURE_PHRASE" "PLAN.md's rule-14 summary must state the same one-line failure report as rules/base-rules.md (S10-1, cross-file agreement, invariant 6e)"
+
+# FAILURE PROOF (S10-1, assertion 32): deleting the failure-report sentence from an IN-MEMORY
+# mutant of each file's own content independently must make that file's own assertion above fail,
+# and must leave the OTHER file's assertion (checked against the real, unmodified file) passing --
+# proving the two pins are independent, not one accidentally covering for the other. Built purely
+# from variables and awk/grep/sed on stdin (no scratch file or directory needed, so no
+# cleanup/trap is required at all).
+#
+# rules/base-rules.md holds the whole sentence on ONE line (line 133; every paragraph in this
+# canonical source is a single long line), so a whole-line delete is exact and needs no flattening.
+# PLAN.md hard-wraps the identical sentence across three lines (mid-line, per its own
+# continuation-indent convention for items 13-16) -- flattened first, the same technique used for
+# plan_rule_14_flat above, then the exact phrase is removed by literal substring match via sed.
+RULE14_FULL_SENTENCE="If the read or the write fails, say so in one line: a failure is reported, never absorbed silently, and that one-line report is not the commentary the paragraph above forbids."
+rule14_canonical_mutant_content=$(grep -vxF "$RULE14_FULL_SENTENCE" "$base_rules_file")
+rule14_canonical_mutant_body=$(printf '%s\n' "$rule14_canonical_mutant_content" | awk '
+  /^### 14\. / { in_rule = 1; next }
+  in_rule && /^### [0-9]+\. / { in_rule = 0 }
+  in_rule { print }
+' | grep -v '^<!-- targets:')
+if printf '%s' "$rule14_canonical_mutant_body" | grep -qF "$RULE14_FAILURE_PHRASE"; then
+  rule14_canonical_mutant_still_has_phrase=yes
+else
+  rule14_canonical_mutant_still_has_phrase=no
+fi
+assert_eq "no" "$rule14_canonical_mutant_still_has_phrase" "FAILURE PROOF (S10-1, assertion 32): deleting the failure-report sentence from an in-memory mutant of rules/base-rules.md must remove it from rule 14's body, proving the canonical-side pin is not vacuous"
+
+plan_mutant_flat=$(printf '%s' "$plan_rule_14_flat" | sed "s/ $RULE14_FULL_SENTENCE//")
+if printf '%s' "$plan_mutant_flat" | grep -qF "$RULE14_FAILURE_PHRASE"; then
+  plan_mutant_still_has_phrase=yes
+else
+  plan_mutant_still_has_phrase=no
+fi
+assert_eq "no" "$plan_mutant_still_has_phrase" "FAILURE PROOF (S10-1, assertion 32): deleting the failure-report sentence from an in-memory (flattened) mutant of PLAN.md's rule-14 summary must remove it, proving the PLAN.md-side pin is not vacuous"
+
+# Cross-check: the canonical mutant (failure sentence deleted from rules/base-rules.md only) must
+# leave PLAN.md's own, UNMODIFIED copy of the sentence untouched, and vice versa -- proving the two
+# assertions above are independent pins, neither accidentally covering for the other.
+assert_contains "$plan_rule_14_flat" "$RULE14_FAILURE_PHRASE" "FAILURE PROOF (S10-1, assertion 32) independence check: the real, unmodified PLAN.md must still carry the failure-report sentence even while a SEPARATE in-memory mutant of rules/base-rules.md just had it deleted"
+# Sanity: the flattened PLAN.md mutant must actually be SHORTER than the real one -- proving the
+# sed substitution above genuinely removed text rather than silently matching nothing (a pattern
+# typo would leave plan_mutant_flat byte-identical to plan_rule_14_flat and this check would fail).
+if [ "${#plan_mutant_flat}" -lt "${#plan_rule_14_flat}" ]; then
+  plan_mutant_flat_shorter=yes
+else
+  plan_mutant_flat_shorter=no
+fi
+assert_eq "yes" "$plan_mutant_flat_shorter" "sanity: the PLAN.md deletion mutant above must actually be shorter than the real flattened text, proving the sed removal matched real text and did not silently no-op"
+
+# --- 33. Rules 2 and 7 no longer claim rule 15's flag is the SINGULAR
+# exception to their own absolute; rule 7 states the trailing-content
+# order once, and rule 2 defers to it (S10 review cycle 1, AB2; further
+# narrowed by AD3, S10 cycle 3 final gate) --------------------------------
+#
+# AB2's own history, unchanged here: S10-1's fix (assertion 32, above)
+# added a one-line failure-report license to rule 14. Rule 2 still said
+# "The one named exception is rule 15's scope-guard flag" and rule 7 still
+# said "The one exception: when rule 15's scope-guard flag also fires" -
+# both literally singular claims that named ONLY rule 15's flag as
+# licensed trailing content. A checkpoint write failure (rule 14's report)
+# with extras_section: yes and no drift needs Answer -> Extra -> failure
+# report, which rule 2's "the one ... exception" text forbids by omission
+# (it names no other licensed trailing content) and which rule 7's
+# identically-shaped claim forbids the same way. Same defect class as
+# S9's AA1 (rule 2/15's "no other trailing content"/"and nothing else"),
+# recurring on a different pair of rules. AB2 fixed it the way AA1 was
+# fixed: deleted the over-broad singular claims, and had rule 7 state a
+# three-item order BY NAME - Extra section, then rule 14's checkpoint-
+# failure report, then rule 15's scope-guard flag - with rules 2 and 14
+# deferring to it.
+#
+# AD3 (this cycle): AB2's three-item order still named the checkpoint-
+# failure report's CONCEPT in rules 2 and 7, and both are `targets: all` -
+# so that concept shipped, described in prose, into
+# targets/codex/AGENTS.md and targets/cursor/squirrel-mode.mdc, where
+# checkpoints do not exist at all (README's parity table: "Auto
+# checkpoints: no"; docs/OTHER-TOOLS.md: nothing writes to a checkpoints
+# directory on either target). AC2's fix (below) had already stopped
+# rules 2/7 from naming rule 14 BY NUMBER; the CONCEPT surviving in prose
+# is the gap AD3 closes. Fixed by making rule 7's ordering GENERIC
+# ("whichever other trailing content another rule licenses for this
+# response") instead of naming the report, and by having rule 14 itself
+# state where its own report falls in that generic slot - the only place
+# left that can say so, since rule 14 is the only one of the three rules
+# that is `targets: claude-code`. Deliberately NOT a second closed,
+# two-item list ("Extra section, then the flag") with the report just
+# removed and nothing put in its place: that would recreate AB2's own
+# forbid-by-omission shape one level up. The slot is genuinely open-ended -
+# rule 7 does not enumerate what may fill it, only where it goes.
+rule_2_body=$(get_rule_body_prose 2)
+rule_7_body=$(get_rule_body_prose 7)
+rule_14_body=$(get_rule_body_prose 14)
+
+RULE2_SINGULAR_RETIRED="The one named exception is rule 15's scope-guard flag"
+RULE7_SINGULAR_RETIRED="The one exception: when rule 15's scope-guard flag also fires"
+assert_not_contains "$rule_2_body" "$RULE2_SINGULAR_RETIRED" "rule 2's canonical body must not claim rule 15's flag is its ONE (singular) exception (AB2) - other rule-licensed trailing content is possible, and rule 2 no longer enumerates exceptions itself"
+assert_not_contains "$rule_7_body" "$RULE7_SINGULAR_RETIRED" "rule 7's canonical body must not claim rule 15's flag is THE (singular) exception to the Extra section being final (AB2) - the ordering below names a generic slot for other trailing content, not a fixed second item"
+
+# AD3 negative pins: the AB2-era wording that named the checkpoint-
+# failure report's CONTENT directly in rules 2 or 7 must never return -
+# that is precisely the defect AD3 fixed. "checkpoint" appears nowhere in
+# either rule's canonical body any more (rule 15's own, unrelated "does
+# not assume a checkpoint... exists on any target" disclaimer is the only
+# correct use of that word among the `targets: all` rules, and it is
+# neither rule 2 nor rule 7).
+assert_not_contains "$rule_2_body" "checkpoint" "AD3: rule 2's canonical body ('targets: all') must not mention checkpoints at all - that concept only exists on Claude Code and belongs in rule 14 alone"
+assert_not_contains "$rule_7_body" "checkpoint" "AD3: rule 7's canonical body ('targets: all') must not mention checkpoints at all - that concept only exists on Claude Code and belongs in rule 14 alone"
+
+RULE7_AB2_ORDER_RETIRED="then the failure report, then the flag, and the flag is always last"
+assert_not_contains "$rule_7_body" "$RULE7_AB2_ORDER_RETIRED" "AD3: rule 7's canonical body must not carry AB2's three-item order naming the failure report specifically - the order is now generic, and the report's own place in it is stated by rule 14 instead"
+
+RULE14_AB2_DEFER_RETIRED="is set by rule 7, not by this rule"
+assert_not_contains "$rule_14_body" "$RULE14_AB2_DEFER_RETIRED" "AD3: rule 14's canonical body must not merely defer to rule 7 for its report's position any more - rule 7 no longer knows the report exists, so rule 14 now states its own place in the ordering directly"
+
+RULE7_GENERIC_ORDER_PHRASE="then whichever other trailing content another rule licenses for this response"
+assert_contains "$rule_7_body" "$RULE7_GENERIC_ORDER_PHRASE" "AD3: rule 7's canonical body must state a GENERIC slot for other rule-licensed trailing content (not the retired AB2 three-item order that named the checkpoint-failure report specifically)"
+
+RULE2_DEFERS_TO_RULE7_PHRASE="Rule 7 states what may trail the answer and in what order"
+assert_contains "$rule_2_body" "$RULE2_DEFERS_TO_RULE7_PHRASE" "rule 2's canonical body must defer to rule 7 for the trailing-content ordering, rather than restating its own absolute"
+
+RULE2_GENERIC_DEFER_PHRASE="the trailing content another rule expressly licenses"
+assert_contains "$rule_2_body" "$RULE2_GENERIC_DEFER_PHRASE" "AD3: rule 2's canonical body must defer GENERICALLY ('another rule expressly licenses') rather than enumerating what rule 7 licenses - an enumeration is exactly what forbade rule 14's report by omission under AB2"
+
+RULE14_SLOT_PHRASE="the other trailing content rule 7's ordering makes room for"
+assert_contains "$rule_14_body" "$RULE14_SLOT_PHRASE" "AD3: rule 14's canonical body must state that its failure report is the 'other trailing content' rule 7's generic ordering makes room for, and place it explicitly between any Extra section and rule 15's flag"
+
+# Cross-file: PLAN.md items 2, 7, and 14 restate the AD3 fix identically
+# (plan_rule_2_flat / plan_rule_7_flat / plan_rule_14_flat are already
+# derived, fresh, from the real file earlier in this script - assertions
+# 21, 22, and 32 respectively - reused here rather than recomputed, so
+# this cannot silently drift from those derivations).
+assert_contains "$plan_rule_2_flat" "$RULE2_DEFERS_TO_RULE7_PHRASE" "PLAN.md's rule-2 summary must defer to rule 7 the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_2_flat" "$RULE2_GENERIC_DEFER_PHRASE" "PLAN.md's rule-2 summary must defer GENERICALLY, matching rules/base-rules.md (AD3, cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_7_flat" "$RULE7_GENERIC_ORDER_PHRASE" "PLAN.md's rule-7 summary must state the same GENERIC ordering as rules/base-rules.md (AD3, cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_14_flat" "$RULE14_SLOT_PHRASE" "PLAN.md's rule-14 summary must state the same generic-slot placement as rules/base-rules.md (AD3, cross-file agreement, invariant 6e)"
+assert_not_contains "$plan_rule_2_flat" "$RULE2_SINGULAR_RETIRED" "PLAN.md's rule-2 summary must not carry the retired singular-exception wording either (AB2)"
+assert_not_contains "$plan_rule_7_flat" "$RULE7_SINGULAR_RETIRED" "PLAN.md's rule-7 summary must not carry the retired singular-exception wording either (AB2)"
+assert_not_contains "$plan_rule_2_flat" "checkpoint" "AD3: PLAN.md's rule-2 summary must not mention checkpoints either, matching rules/base-rules.md"
+assert_not_contains "$plan_rule_7_flat" "checkpoint" "AD3: PLAN.md's rule-7 summary must not mention checkpoints either, matching rules/base-rules.md"
+
+# FAILURE PROOF (positive pins): deleting each new sentence from an
+# IN-MEMORY mutant of the real, current rule body must remove the phrase
+# this assertion pins - proving the positive canonical pins above are not
+# vacuous. Each new sentence is its own whole physical line in
+# rules/base-rules.md (this project's one-paragraph-per-line convention),
+# so a whole-line delete via grep -vxF is exact, the same technique
+# assertion 32 already uses for rule 14's failure-report sentence.
+RULE2_NEW_PARA="None of that bans the trailing content another rule expressly licenses. Rule 7 states what may trail the answer and in what order; this rule does not restate it. The clearest example is rule 15's scope-guard flag: when rule 15 fires, its one line follows the completed answer as the final line of the response, and it is never the postamble this rule bans."
+RULE7_NEW_PARA="This rule states, once, the order that applies on every target: the \`Extra\` section comes first, then whichever other trailing content another rule licenses for this response; when rule 15's scope-guard flag also fires in the same response, that flag becomes the actual final line, after the Extra section and after any such other trailing content. Rule 2 defers to this ordering rather than restating it."
+RULE14_NEW_PARA="This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. That only matters here, on Claude Code: neither this report nor a checkpoint exists on the other two targets."
+
+extract_rule_body_from_content() {
+  # extract_rule_body_from_content <content> <n> - same delimiter logic as
+  # get_rule_body_prose, but over an in-memory mutant's content instead of
+  # re-reading base_rules_file, so a mutation never touches the tracked file.
+  content=$1
+  n=$2
+  printf '%s\n' "$content" | awk -v want="$n" '
+    $0 ~ ("^### " want "\\. ") { in_rule = 1; next }
+    in_rule && /^### [0-9]+\. / { in_rule = 0 }
+    in_rule { print }
+  ' | grep -v '^<!-- targets:'
+}
+
+rule2_mutant_content=$(grep -vxF "$RULE2_NEW_PARA" "$base_rules_file")
+rule2_mutant_body=$(extract_rule_body_from_content "$rule2_mutant_content" 2)
+if printf '%s' "$rule2_mutant_body" | grep -qF -- "$RULE2_DEFERS_TO_RULE7_PHRASE"; then
+  rule2_mutant_still_has=yes
+else
+  rule2_mutant_still_has=no
+fi
+assert_eq "no" "$rule2_mutant_still_has" "FAILURE PROOF: deleting rule 2's new deferral sentence from an in-memory mutant must remove the deferral phrase, proving the canonical-side pin is not vacuous"
+
+if printf '%s' "$rule2_mutant_body" | grep -qF -- "$RULE2_GENERIC_DEFER_PHRASE"; then
+  rule2_mutant_still_has_generic=yes
+else
+  rule2_mutant_still_has_generic=no
+fi
+assert_eq "no" "$rule2_mutant_still_has_generic" "FAILURE PROOF (AD3): deleting rule 2's new deferral sentence from an in-memory mutant must also remove the GENERIC-defer phrase, proving that canonical-side pin is not vacuous either"
+
+rule7_mutant_content=$(grep -vxF "$RULE7_NEW_PARA" "$base_rules_file")
+rule7_mutant_body=$(extract_rule_body_from_content "$rule7_mutant_content" 7)
+if printf '%s' "$rule7_mutant_body" | grep -qF -- "$RULE7_GENERIC_ORDER_PHRASE"; then
+  rule7_mutant_still_has=yes
+else
+  rule7_mutant_still_has=no
+fi
+assert_eq "no" "$rule7_mutant_still_has" "FAILURE PROOF (AD3): deleting rule 7's new ordering sentence from an in-memory mutant must remove the GENERIC ordering phrase, proving the canonical-side pin is not vacuous"
+
+rule14_mutant_content=$(grep -vxF "$RULE14_NEW_PARA" "$base_rules_file")
+rule14_mutant_body=$(extract_rule_body_from_content "$rule14_mutant_content" 14)
+if printf '%s' "$rule14_mutant_body" | grep -qF -- "$RULE14_SLOT_PHRASE"; then
+  rule14_mutant_still_has=yes
+else
+  rule14_mutant_still_has=no
+fi
+assert_eq "no" "$rule14_mutant_still_has" "FAILURE PROOF (AD3): deleting rule 14's new slot-placement sentence from an in-memory mutant must remove the slot phrase, proving the canonical-side pin is not vacuous"
+
+# FAILURE PROOF (AB2, negative pins): appending the exact retired singular
+# phrase to an in-memory mutant of the real, current rule 2 / rule 7 body
+# must make it FOUND by the same grep -qF check assert_not_contains uses
+# internally - proving the negative pins above would actually catch a
+# reintroduction, not merely never trigger.
+rule2_reintro_body="$rule_2_body
+$RULE2_SINGULAR_RETIRED"
+if printf '%s' "$rule2_reintro_body" | grep -qF -- "$RULE2_SINGULAR_RETIRED"; then
+  rule2_reintro_found=yes
+else
+  rule2_reintro_found=no
+fi
+assert_eq "yes" "$rule2_reintro_found" "FAILURE PROOF (AB2, negative pin): re-appending rule 2's retired singular-exception phrase to an in-memory mutant must be detected, proving the assert_not_contains guard above is not vacuous"
+
+rule7_reintro_body="$rule_7_body
+$RULE7_SINGULAR_RETIRED"
+if printf '%s' "$rule7_reintro_body" | grep -qF -- "$RULE7_SINGULAR_RETIRED"; then
+  rule7_reintro_found=yes
+else
+  rule7_reintro_found=no
+fi
+assert_eq "yes" "$rule7_reintro_found" "FAILURE PROOF (AB2, negative pin): re-appending rule 7's retired singular-exception phrase to an in-memory mutant must be detected, proving the assert_not_contains guard above is not vacuous"
+
+# FAILURE PROOF (AB2, PLAN.md cross-file side): removing each phrase from
+# a FLATTENED in-memory mutant of PLAN.md's own text (the same flatten-
+# then-sed technique assertion 32 already uses for PLAN.md's rule-14
+# summary, since PLAN.md hard-wraps these items across multiple lines)
+# must remove it there too, and the real, unmodified PLAN.md text must be
+# unaffected by a separate mutant - proving the three PLAN-side pins are
+# independent of the canonical-side ones, neither accidentally covering
+# for the other.
+plan_rule_2_mutant_flat=$(printf '%s' "$plan_rule_2_flat" | sed "s/ $RULE2_DEFERS_TO_RULE7_PHRASE;/;/")
+if printf '%s' "$plan_rule_2_mutant_flat" | grep -qF -- "$RULE2_DEFERS_TO_RULE7_PHRASE"; then
+  plan_rule_2_mutant_still_has=yes
+else
+  plan_rule_2_mutant_still_has=no
+fi
+assert_eq "no" "$plan_rule_2_mutant_still_has" "FAILURE PROOF: removing the deferral phrase from a flattened in-memory mutant of PLAN.md's rule-2 summary must remove it, proving the PLAN.md-side pin is not vacuous"
+assert_contains "$plan_rule_2_flat" "$RULE2_DEFERS_TO_RULE7_PHRASE" "FAILURE PROOF independence check: the real, unmodified PLAN.md must still carry rule 2's deferral phrase even while a SEPARATE in-memory mutant just had it removed"
+
+plan_rule_2_mutant_generic_flat=$(printf '%s' "$plan_rule_2_flat" | sed "s/$RULE2_GENERIC_DEFER_PHRASE//")
+if printf '%s' "$plan_rule_2_mutant_generic_flat" | grep -qF -- "$RULE2_GENERIC_DEFER_PHRASE"; then
+  plan_rule_2_mutant_generic_still_has=yes
+else
+  plan_rule_2_mutant_generic_still_has=no
+fi
+assert_eq "no" "$plan_rule_2_mutant_generic_still_has" "FAILURE PROOF (AD3): removing the GENERIC-defer phrase from a flattened in-memory mutant of PLAN.md's rule-2 summary must remove it, proving that PLAN.md-side pin is not vacuous"
+assert_contains "$plan_rule_2_flat" "$RULE2_GENERIC_DEFER_PHRASE" "FAILURE PROOF (AD3) independence check: the real, unmodified PLAN.md must still carry rule 2's generic-defer phrase even while a SEPARATE in-memory mutant just had it removed"
+
+plan_rule_7_mutant_flat=$(printf '%s' "$plan_rule_7_flat" | sed "s/$RULE7_GENERIC_ORDER_PHRASE//")
+if printf '%s' "$plan_rule_7_mutant_flat" | grep -qF -- "$RULE7_GENERIC_ORDER_PHRASE"; then
+  plan_rule_7_mutant_still_has=yes
+else
+  plan_rule_7_mutant_still_has=no
+fi
+assert_eq "no" "$plan_rule_7_mutant_still_has" "FAILURE PROOF (AD3): removing the GENERIC ordering phrase from a flattened in-memory mutant of PLAN.md's rule-7 summary must remove it, proving the PLAN.md-side pin is not vacuous"
+assert_contains "$plan_rule_7_flat" "$RULE7_GENERIC_ORDER_PHRASE" "FAILURE PROOF (AD3) independence check: the real, unmodified PLAN.md must still carry rule 7's generic ordering phrase even while a SEPARATE in-memory mutant just had it removed"
+
+plan_rule_14_mutant_flat=$(printf '%s' "$plan_rule_14_flat" | sed "s/$RULE14_SLOT_PHRASE//")
+if printf '%s' "$plan_rule_14_mutant_flat" | grep -qF -- "$RULE14_SLOT_PHRASE"; then
+  plan_rule_14_mutant_still_has=yes
+else
+  plan_rule_14_mutant_still_has=no
+fi
+assert_eq "no" "$plan_rule_14_mutant_still_has" "FAILURE PROOF (AD3): removing the slot-placement phrase from a flattened in-memory mutant of PLAN.md's rule-14 summary must remove it, proving the PLAN.md-side pin is not vacuous"
+assert_contains "$plan_rule_14_flat" "$RULE14_SLOT_PHRASE" "FAILURE PROOF (AD3) independence check: the real, unmodified PLAN.md must still carry rule 14's slot-placement phrase even while a SEPARATE in-memory mutant just had it removed"
 
 assert_report
