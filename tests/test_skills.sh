@@ -463,6 +463,68 @@ fi
 assert_eq "ascending" "$order_status" "pickup's fixed-output template must present its sections in byte order: Recent wins, then You were doing, then Next action, then Open decisions"
 
 # ==========================================================================
+# 11b. [P1] pickup reads a DIRECTORY and folds it, and folds the pre-P1
+#      flat file in on read without ever touching it.
+#
+#      A project's memory is now one file per session. Reading only the
+#      injected `Project checkpoint path:` would show the current
+#      session's own file - which on turn one is empty or absent - and
+#      silently hide every past session's work. So each load-bearing
+#      instruction is pinned by its own phrase, and each phrase is
+#      mutation-proved below by deleting exactly the paragraph that
+#      carries it and confirming the OTHER pins survive, so no one pin
+#      is standing in for another.
+# ==========================================================================
+assert_contains "$pickup_body" "Project checkpoint directory" "P1: pickup must reference the injected 'Project checkpoint directory' line - it cannot find the other sessions' files without it, and it is forbidden to derive the location itself"
+assert_contains "$pickup_body" "most recently modified first" "P1: pickup must state the read order explicitly - the fold below resolves conflicts by taking the newest, which is meaningless without a defined order"
+assert_contains "$pickup_body" "Take each from the newest file that actually records it" "P1: pickup must say that You were doing and Next action come from the newest file that HAS them, not simply from the newest file (which may be empty)"
+assert_contains "$pickup_body" "folds the Done log entries of every file together, newest file first" "P1: pickup must fold Recent wins ACROSS files, or a per-session layout would shrink the visible history to one session's worth"
+assert_contains "$pickup_body" "Legacy checkpoint file" "P1 migration: pickup must handle the injected 'Legacy checkpoint file' line, which is how a pre-P1 flat checkpoint reaches it at all"
+assert_contains "$pickup_body" "Never write to it, move it, or delete it" "P1 migration: pickup must be explicitly read-only about the pre-P1 flat file - the chosen migration folds it in on read and never moves it"
+
+# The fold must not have quietly dropped the fixed output order or the
+# malformed-input discipline that scenarios 10 and 11 pin; both are
+# re-asserted here against the folded wording specifically.
+assert_contains "$pickup_body" "If, after folding everything you read, a section still has no source content at all" "P1: the empty/malformed branch must now be evaluated AFTER the fold, not per file - otherwise the first empty file read would produce 'No Doing entry recorded.' while a later file held one"
+
+pickup_p1_phrases='Project checkpoint directory
+most recently modified first
+Take each from the newest file that actually records it
+folds the Done log entries of every file together, newest file first
+Never write to it, move it, or delete it'
+
+pickup_p1_old_ifs=$IFS
+IFS='
+'
+for pickup_p1_phrase in $pickup_p1_phrases; do
+  IFS=$pickup_p1_old_ifs
+  pickup_p1_mutant=$(skill_scratch "$pickup_file")
+  grep -vF "$pickup_p1_phrase" "$pickup_file" >"$pickup_p1_mutant.tmp" && mv "$pickup_p1_mutant.tmp" "$pickup_p1_mutant"
+  pickup_p1_mutant_body=$(read_file "$pickup_p1_mutant")
+  if printf '%s' "$pickup_p1_mutant_body" | grep -qF "$pickup_p1_phrase"; then
+    pickup_p1_still_there=yes
+  else
+    pickup_p1_still_there=no
+  fi
+  assert_eq "no" "$pickup_p1_still_there" "FAILURE PROOF (scenario 11b): deleting the paragraph carrying '$pickup_p1_phrase' from a scratch copy must remove that phrase - proving its assertion above is not matching some unrelated line"
+
+  # Independence: removing one instruction must leave the others
+  # standing. The specific failure this catches is a rewrite that
+  # collapses the whole fold into one paragraph, at which point every
+  # pin above would be satisfied - or destroyed - together, and none of
+  # them would be measuring anything on its own.
+  if [ "$pickup_p1_phrase" = "Project checkpoint directory" ]; then
+    pickup_p1_other="most recently modified first"
+  else
+    pickup_p1_other="Project checkpoint directory"
+  fi
+  assert_contains "$pickup_p1_mutant_body" "$pickup_p1_other" "FAILURE PROOF (scenario 11b, independence): deleting the '$pickup_p1_phrase' paragraph alone must leave the separate '$pickup_p1_other' instruction untouched"
+  IFS='
+'
+done
+IFS=$pickup_p1_old_ifs
+
+# ==========================================================================
 # 12. off and on both reference ~/.squirrel/off/ and both mention
 #     /plugin disable.
 # ==========================================================================

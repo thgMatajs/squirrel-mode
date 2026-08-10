@@ -1043,4 +1043,77 @@ fi
 assert_eq "no" "$plan_rule_14_mutant_still_has" "FAILURE PROOF (AD3): removing the slot-placement phrase from a flattened in-memory mutant of PLAN.md's rule-14 summary must remove it, proving the PLAN.md-side pin is not vacuous"
 assert_contains "$plan_rule_14_flat" "$RULE14_SLOT_PHRASE" "FAILURE PROOF (AD3) independence check: the real, unmodified PLAN.md must still carry rule 14's slot-placement phrase even while a SEPARATE in-memory mutant just had it removed"
 
+# --- 34. [P1, TECH-LEAD DECISION D2] Rule 14 names no path shape ------
+#
+# Rule 14 used to spell out `~/.squirrel/checkpoints/<project-slug>.md`.
+# It cannot any more, for two independent reasons. The path is now
+# per-session, so no shape written into the rule text is complete
+# without a value only the hook knows; and the model has never been able
+# to compute the slug, which is why the resolved path is injected in the
+# first place (tech-lead Decision 1). Every other consumer already reads
+# the injected `Project checkpoint path:` line; rule 14 now does too.
+#
+# The ten-entry cap is redefined as ten entries IN THE SESSION'S OWN
+# FILE. A cap across the whole project would require the model to read
+# files other sessions own, concurrently, to enforce it - the exact
+# shared-state problem P1 removes. The user-visible behaviour is
+# preserved at READ time instead, where /squirrel:pickup folds by mtime.
+#
+# Deliberately NOT pinned against PLAN.md, unlike assertion 32's
+# failure-report sentence: PLAN.md's own rule-14 summary still describes
+# the old flat path and is outside this step's ownership. That
+# divergence is reported, not silently pinned green here.
+RULE14_INJECTED_PATH_PHRASE="the \`Project checkpoint path:\` line injected at the start of the session"
+RULE14_PER_FILE_CAP_PHRASE="keeping only the last 10 entries in that file"
+RULE14_OTHER_SESSIONS_PHRASE="Every other file in that project's checkpoint directory belongs to a different session"
+# shellcheck disable=SC2088 # not a path this shell ever opens: a literal
+# needle searched for in rule 14's TEXT, where the leading "~" is part of
+# the retired wording being banned.
+RULE14_RETIRED_PATH_SHAPE="~/.squirrel/checkpoints/<project-slug>.md"
+
+assert_contains "$rule_14_body" "$RULE14_INJECTED_PATH_PHRASE" "D2: rule 14's canonical body must point at the injected 'Project checkpoint path:' line rather than naming a path shape - the model cannot compute the slug, and the path is now per-session"
+assert_contains "$rule_14_body" "$RULE14_PER_FILE_CAP_PHRASE" "D2: rule 14's ten-entry cap must be scoped to the session's OWN file - a project-wide cap would need the model to read files other sessions are concurrently writing"
+assert_contains "$rule_14_body" "$RULE14_OTHER_SESSIONS_PHRASE" "D2: rule 14 must tell the model to leave other sessions' files alone - without that, 'keep 10 entries' invites exactly the cross-file editing the per-session layout exists to prevent"
+assert_not_contains "$rule_14_body" "$RULE14_RETIRED_PATH_SHAPE" "D2: rule 14 must no longer name the retired flat path shape - it is wrong twice over now (the layout is nested, and the slug is not something the model can compute)"
+
+# FAILURE PROOF (D2): delete each new sentence from an in-memory mutant
+# of the real file and confirm that phrase, and only that phrase,
+# disappears from rule 14's body. Built with grep -vxF against whole
+# lines, the same technique assertion 32 uses, since every paragraph in
+# this canonical source is one long line.
+RULE14_D2_SENTENCE="When a meaningful unit of work completes, update this session's own checkpoint file with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries in that file. The file is named for you in context, on the \`Project checkpoint path:\` line injected at the start of the session: use that path exactly as given, and never compute, guess, or re-derive one. Every other file in that project's checkpoint directory belongs to a different session; leave them alone, and let \`/squirrel:pickup\` be the one that reads across them. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed."
+
+rule14_d2_mutant_content=$(grep -vxF "$RULE14_D2_SENTENCE" "$base_rules_file")
+rule14_d2_mutant_body=$(extract_rule_body_from_content "$rule14_d2_mutant_content" 14)
+
+for rule14_d2_phrase in "$RULE14_INJECTED_PATH_PHRASE" "$RULE14_PER_FILE_CAP_PHRASE" "$RULE14_OTHER_SESSIONS_PHRASE"; do
+  if printf '%s' "$rule14_d2_mutant_body" | grep -qF -- "$rule14_d2_phrase"; then
+    rule14_d2_still_has=yes
+  else
+    rule14_d2_still_has=no
+  fi
+  assert_eq "no" "$rule14_d2_still_has" "FAILURE PROOF (D2): deleting rule 14's opening paragraph from an in-memory mutant must remove '$rule14_d2_phrase' from its body, proving that pin is not matching some other line of the rule"
+done
+
+# Independence: the same mutant must leave rule 14's OTHER pinned
+# sentences (assertion 32's failure report, AD3's slot placement)
+# untouched - all three live in separate paragraphs, and a rewrite that
+# fused them into one would make every pin above rise and fall together
+# without any of them measuring anything on its own.
+assert_contains "$rule14_d2_mutant_body" "$RULE14_FAILURE_PHRASE" "FAILURE PROOF (D2, independence): deleting rule 14's opening paragraph must leave the SEPARATE failure-report sentence in place"
+assert_contains "$rule14_d2_mutant_body" "$RULE14_SLOT_PHRASE" "FAILURE PROOF (D2, independence): deleting rule 14's opening paragraph must leave the SEPARATE slot-placement sentence in place"
+
+# FAILURE PROOF (D2, negative pin): re-appending the retired path shape
+# to an in-memory mutant of the real rule-14 body must be detected by
+# the same grep -qF check assert_not_contains uses, proving that guard
+# would actually catch a reintroduction rather than never firing.
+rule14_d2_reintro_body="$rule_14_body
+update $RULE14_RETIRED_PATH_SHAPE with the new Doing and Next state"
+if printf '%s' "$rule14_d2_reintro_body" | grep -qF -- "$RULE14_RETIRED_PATH_SHAPE"; then
+  rule14_d2_reintro_found=yes
+else
+  rule14_d2_reintro_found=no
+fi
+assert_eq "yes" "$rule14_d2_reintro_found" "FAILURE PROOF (D2, negative pin): re-appending the retired flat path shape to an in-memory mutant must be detected, proving the assert_not_contains guard above is not vacuous"
+
 assert_report

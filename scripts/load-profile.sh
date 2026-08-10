@@ -21,15 +21,27 @@
 #     the skill has a definite, always-present "missing or empty" case to
 #     branch on - the same discipline `/squirrel:pickup` already applies
 #     to the checkpoint-path line below).
-#   - the RESOLVED, absolute checkpoint path for this project's `cwd`
-#     (tech-lead Decision 1: the model cannot compute the project-slug
-#     algorithm itself, so the path must be handed to it, always, even
-#     before any checkpoint file exists).
+#   - the RESOLVED, absolute checkpoint DIRECTORY for this project's
+#     `cwd`, as "Project checkpoint directory: <dir>", AND the RESOLVED,
+#     absolute checkpoint file this ONE session owns, as
+#     "Project checkpoint path: <file>" (tech-lead Decision 1: the model
+#     cannot compute the project-slug algorithm itself, so the paths are
+#     handed to it, always, even before any checkpoint file exists).
+#     Both lines are emitted, and they are not redundant: rule 14 writes
+#     to the single file this session owns, and /squirrel:pickup reads
+#     the whole directory and folds every session's file into one
+#     answer. Neither consumer can derive the other's value without
+#     re-implementing the slug algorithm, which is exactly what
+#     Decision 1 forbids.
+#   - "Legacy checkpoint file: <path>" if, and only if, a pre-P1 flat
+#     checkpoint file still exists for this project - see
+#     "P1 PER-SESSION CHECKPOINT LAYOUT" below.
 #   - "Resume available - run /squirrel:pickup" if a checkpoint already
 #     exists for this project - never the checkpoint's own body text
 #     (PLAN.md is explicit that the contents are not dumped into chat).
 # It also prunes stale ~/.squirrel/off/<session_id> flag files
-# (see check-off-flag.sh) so they do not accumulate forever.
+# (see check-off-flag.sh) and stale per-session checkpoint files (see
+# prune_stale_session_checkpoints) so neither accumulates forever.
 #
 # S11 MIGRATION NOTICE: squirrel-mode's data directory migrated from
 # ~/.claude/squirrel/ to ~/.squirrel/ (docs/adr/0003's Amendment (S11) -
@@ -52,6 +64,38 @@
 # /squirrel:init actually creates one - and stops the moment the old
 # directory is gone, with no separate "already told them" state to
 # track or get out of sync.
+#
+# P1 PER-SESSION CHECKPOINT LAYOUT: checkpoints moved from one flat file
+# per project, ~/.squirrel/checkpoints/<slug>.md, to one file per
+# session inside a per-project directory,
+# ~/.squirrel/checkpoints/<slug>/<session-id>.md. The defect this
+# removes is concrete and was reproduced against the real hook: two
+# sessions open in the same `cwd` were handed the SAME path, and two
+# interleaved whole-file read-modify-write cycles on it lose an entry
+# from the Done log - the second writer's copy was read before the first
+# writer's append landed. Giving every session a file no other session
+# writes removes the shared mutable cell entirely; nothing has to lock,
+# retry, or merge at write time. The cost is paid at READ time instead,
+# where it is safe: /squirrel:pickup folds the directory by mtime.
+#
+# The `<slug>/` directory is NEVER created by this hook. It is created
+# implicitly by the first Write the model performs into it (the Write
+# tool creates missing parents). This hook only ever reads, so a
+# permissions problem or a read-only $HOME cannot turn into a failed
+# session start.
+#
+# LEGACY FLAT FILE: an install that predates P1 has real work sitting in
+# ~/.squirrel/checkpoints/<slug>.md. This hook emits its path as
+# "Legacy checkpoint file:" whenever it still exists, and
+# /squirrel:pickup folds it in on read, oldest, with a one-line warning.
+# It is never moved, rewritten, or deleted - not by this hook and not by
+# the skill. Folding on read (rather than only detecting and telling, as
+# the S11 data-directory migration above deliberately does) is
+# defensible here precisely because these are the plugin's OWN files in
+# the plugin's OWN directory, written by rule 14 in a format this plugin
+# defines - not the user's documents, and not a directory the user is
+# expected to have curated. Reading one of them costs nothing and cannot
+# be wrong; moving one could be.
 #
 # Contract: this hook runs on every session start. It must NEVER exit
 # non-zero and must always print valid JSON on stdout, no matter how
@@ -85,6 +129,14 @@
 # own comment for why that matters even when jq IS present elsewhere
 # in this file.
 set -eu
+
+# nl: a variable holding exactly one literal newline byte, built the
+# same way scripts/check-off-flag.sh builds one (an actual line break
+# inside single quotes, not an escape sequence some POSIX `sh` builtins
+# would need to interpret). Used as IFS by
+# prune_stale_session_checkpoints below.
+nl='
+'
 
 # --- JSON field extraction ------------------------------------------
 #
@@ -145,6 +197,96 @@ compute_hash() {
   fi
 }
 
+# --- Per-session checkpoint file name --------------------------------
+#
+# sanitize_session_id <raw>: DUPLICATED, DELIBERATELY, from
+# scripts/check-off-flag.sh's function of the same name - same accepted
+# character class ([A-Za-z0-9_-] only, which by construction excludes
+# "/" and "." and therefore ".." and every path-separator traversal),
+# same non-empty requirement, same 128-byte upper bound. It is copied
+# rather than shared because this project forbids `source`/`.` between
+# shipped scripts: each hook must be a single self-contained file that
+# runs correctly no matter what else is or is not installed alongside
+# it, and a sourced library turns one missing or half-written file into
+# a broken session start for every hook at once. The two copies are
+# small, closed, and have no state; if one changes, the other must be
+# changed to match - that is the price of the isolation, and it is
+# stated here rather than left to be discovered.
+sanitize_session_id() {
+  raw=$1
+  case "$raw" in
+    '') return 1 ;;
+  esac
+  case "$raw" in
+    *[!A-Za-z0-9_-]*) return 1 ;;
+  esac
+  # ${#raw} is POSIX parameter-length expansion, not a bashism.
+  if [ "${#raw}" -gt 128 ]; then
+    return 1
+  fi
+  printf '%s' "$raw"
+  return 0
+}
+
+# random_suffix: prints a short token drawn from the best source of
+# randomness available, following the same `command -v` probing idiom
+# compute_hash above uses for its hash. The chain, most to least
+# preferred:
+#   1. 8 bytes of /dev/urandom decoded by `od` - present on every OS
+#      this plugin ships to, and the only link in the chain whose output
+#      does not depend on the clock.
+#   2. POSIX awk: `srand()` with no argument seeds from the time of day,
+#      mixed with this process's own pid. Neither alone is enough - two
+#      sessions starting inside the same second share the awk seed, and
+#      pids are reused - but the pair collides only when two sessions
+#      start in the same second AND land on the same pid.
+#   3. The bare pid. Guaranteed to exist, guaranteed to be weak; it is
+#      here so this function has no failure case at all, not because it
+#      is good.
+# The result is filtered through the same character class
+# sanitize_session_id accepts, so whatever the chain produces can only
+# ever be a safe single path component.
+random_suffix() {
+  suffix=""
+  if [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+    suffix=$(od -An -v -N 8 -tx1 </dev/urandom 2>/dev/null | tr -d ' \n') || suffix=""
+  fi
+  if [ -z "$suffix" ]; then
+    suffix=$(awk -v pid="$$" 'BEGIN { srand(); printf "%x%x", pid, int(rand() * 2147483647) }' 2>/dev/null) || suffix=""
+  fi
+  if [ -z "$suffix" ]; then
+    suffix=$$
+  fi
+  printf '%s' "$suffix" | tr -c 'A-Za-z0-9_-' '-'
+}
+
+# session_checkpoint_name <raw_session_id>: the BASENAME of the file
+# this one session owns inside its project's checkpoint directory.
+#
+# When `session_id` is present and survives sanitisation, the name is
+# "<session-id>.md" - stable for the whole session, so the same session
+# resuming, clearing, or compacting keeps writing the same file.
+#
+# When `session_id` is missing or fails sanitisation, the name is
+# "anon-<random>.md". A FIXED name such as "anon.md" would reinstate,
+# for exactly the sessions whose identity is unknown, the shared mutable
+# cell this whole change exists to remove. The random name is exclusive
+# in practice because the only place it is ever written down is the
+# context injected into this one session; no other session can be handed
+# it, so no other session can write it. The cost is one extra file per
+# anonymous session, which the pruner below bounds.
+session_checkpoint_name() {
+  raw=$1
+  if name=$(sanitize_session_id "$raw"); then
+    printf '%s.md' "$name"
+    return 0
+  fi
+  suffix=$(random_suffix) || suffix=""
+  [ -n "$suffix" ] || suffix=$$
+  printf 'anon-%s.md' "$suffix"
+  return 0
+}
+
 project_slug() {
   cwd_in=$1
   base=$(basename "$cwd_in" 2>/dev/null) || base=""
@@ -171,6 +313,101 @@ prune_stale_off_flags() {
   [ -d "$off_dir" ] || return 0
   find "$off_dir" -type f -mtime +7 -exec rm -f -- {} + >/dev/null 2>&1 || true
   return 0
+}
+
+# --- Stale per-session checkpoint pruning ------------------------------
+#
+# One file per session accumulates without bound (see "P1 PER-SESSION
+# CHECKPOINT LAYOUT" in the header). Pruning them is NOT the same
+# problem as pruning off-flags above, and the thresholds are
+# deliberately not the same: an off-flag is a scrap of session state
+# that is worthless the moment its session ends, whereas a checkpoint's
+# entire purpose is to still be there after a long interruption. Age
+# ALONE is therefore a time bomb aimed at exactly the wrong data - a
+# project picked up again after four months is the case this feature
+# exists for, and a pure "older than N days" rule deletes precisely
+# that project's memory.
+#
+# The rule, within ONE slug's directory: delete a file only if it is
+# BOTH older than 30 days AND not among the 10 most recently modified
+# files for that slug. The second clause is what makes the first safe:
+# no matter how long a project lies untouched, its ten newest
+# checkpoints always survive, so "resume after a long gap" never comes
+# back empty.
+#
+# "Among the 10 most recently modified" is decided with `find -newer`,
+# the only portable way to compare two files' mtimes in POSIX sh (there
+# is no portable `stat`) - the same idiom check-off-flag.sh uses to pick
+# the newer of two sentinels. A file is deleted when at least 10 OTHER
+# files in the directory are strictly newer than it. An exact mtime tie
+# counts as "not newer", so a tie keeps the file.
+#
+# Deleting inside the same pass only ever makes the count SMALLER for
+# candidates examined later, i.e. only ever makes this function more
+# conservative than a two-pass version; a file spared for that reason is
+# simply reconsidered next session.
+#
+# CHECKPOINT_PRUNE_MAX_CANDIDATES bounds the work per invocation. The
+# scan is O(candidates x files), and this runs on session start, so a
+# directory that accumulated hundreds of files during a period when this
+# pruner did not exist must not turn into a multi-second stall on turn
+# one. Pruning is best-effort and converges over sessions; being slow is
+# a worse failure here than being late.
+#
+# Follows prune_stale_off_flags' posture exactly: a no-op when the
+# directory is absent, every fallible step guarded, and no path through
+# it can fail the hook.
+CHECKPOINT_PRUNE_MIN_AGE_DAYS=30
+CHECKPOINT_PRUNE_KEEP_NEWEST=10
+CHECKPOINT_PRUNE_MAX_CANDIDATES=100
+
+prune_stale_session_checkpoints() {
+  slug_dir=$1
+  [ -d "$slug_dir" ] || return 0
+
+  candidates=$(find "$slug_dir" -type f -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidates=""
+  [ -n "$candidates" ] || return 0
+
+  examined=0
+  prune_saved_ifs=$IFS
+  IFS=$nl
+  # Pathname expansion off for the duration of the loop: `$candidates`
+  # is split on newlines deliberately, but a file name containing a "*"
+  # or a "?" must never be re-expanded into some OTHER file's name on
+  # the way to `rm`.
+  set -f
+  for candidate in $candidates; do
+    examined=$((examined + 1))
+    if [ "$examined" -gt "$CHECKPOINT_PRUNE_MAX_CANDIDATES" ]; then
+      break
+    fi
+    [ -f "$candidate" ] || continue
+    newer_count=$(find "$slug_dir" -type f -newer "$candidate" 2>/dev/null | wc -l | awk '{print $1}') || newer_count=0
+    case "$newer_count" in
+      '' | *[!0-9]*) newer_count=0 ;;
+    esac
+    if [ "$newer_count" -ge "$CHECKPOINT_PRUNE_KEEP_NEWEST" ]; then
+      rm -f -- "$candidate" >/dev/null 2>&1 || true
+    fi
+  done
+  set +f
+  IFS=$prune_saved_ifs
+  return 0
+}
+
+# checkpoint_dir_has_any <dir>: true when <dir> holds at least one
+# regular file. This is what drives the "Resume available" line now that
+# a project's memory lives in a directory rather than in one file. A
+# dangling symlink is not a regular file and correctly does not count.
+checkpoint_dir_has_any() {
+  dir=$1
+  [ -d "$dir" ] || return 1
+  for entry in "$dir"/*; do
+    if [ -f "$entry" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # --- S11 migration notice --------------------------------------------
@@ -417,6 +654,7 @@ cap_profile_body() {
 build_context() {
   input=$(cat)
   cwd=$(extract_field "$input" "cwd")
+  raw_session_id=$(extract_field "$input" "session_id")
 
   home_dir="${HOME:-}"
   squirrel_dir="$home_dir/.squirrel"
@@ -427,7 +665,17 @@ build_context() {
   prune_stale_off_flags "$off_dir"
 
   slug=$(project_slug "$cwd")
-  checkpoint_file="$checkpoints_dir/$slug.md"
+  session_dir="$checkpoints_dir/$slug"
+  # The pre-P1 flat path. Named here exactly once, only ever read, and
+  # handed to /squirrel:pickup so it can fold it in - see "LEGACY FLAT
+  # FILE" in the header.
+  legacy_checkpoint_file="$checkpoints_dir/$slug.md"
+
+  session_file_name=$(session_checkpoint_name "$raw_session_id") || session_file_name=""
+  [ -n "$session_file_name" ] || session_file_name="anon-$$.md"
+  checkpoint_file="$session_dir/$session_file_name"
+
+  prune_stale_session_checkpoints "$session_dir"
 
   if [ -n "$home_dir" ] && [ -f "$profile_file" ]; then
     profile_body=$(cat "$profile_file" 2>/dev/null) || profile_body=""
@@ -449,9 +697,15 @@ $migration_notice"
   context="$context
 
 Session working directory: $cwd
+Project checkpoint directory: $session_dir
 Project checkpoint path: $checkpoint_file"
 
-  if [ -n "$home_dir" ] && [ -f "$checkpoint_file" ]; then
+  if [ -n "$home_dir" ] && [ -f "$legacy_checkpoint_file" ]; then
+    context="$context
+Legacy checkpoint file: $legacy_checkpoint_file"
+  fi
+
+  if [ -n "$home_dir" ] && { checkpoint_dir_has_any "$session_dir" || [ -f "$legacy_checkpoint_file" ]; }; then
     context="$context
 Resume available - run /squirrel:pickup"
   fi

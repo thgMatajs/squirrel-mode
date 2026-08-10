@@ -128,6 +128,22 @@ extract_checkpoint_path_line() {
   printf '%s\n' "$1" | sed -n 's/^Project checkpoint path: //p' | head -n 1
 }
 
+extract_checkpoint_dir_line() {
+  # extract_checkpoint_dir_line <additionalContext text> - the resolved
+  # per-project checkpoint DIRECTORY load-profile.sh reported (P1). Read
+  # from the script's own output for the identical reason
+  # extract_checkpoint_path_line above is: recomputing the slug here
+  # would only ever check the algorithm against itself.
+  printf '%s\n' "$1" | sed -n 's/^Project checkpoint directory: //p' | head -n 1
+}
+
+extract_legacy_checkpoint_line() {
+  # extract_legacy_checkpoint_line <additionalContext text> - the
+  # pre-P1 flat checkpoint file load-profile.sh reported, if any. Empty
+  # when the hook emitted no such line, which is the ordinary case.
+  printf '%s\n' "$1" | sed -n 's/^Legacy checkpoint file: //p' | head -n 1
+}
+
 # --- Mutation-testing helpers (mirrors tests/test_build.sh's
 # make_build_scratch / delete_line / replace_line style) -------------
 #
@@ -367,10 +383,14 @@ cat >"$home4/.squirrel/profile.md" <<'EOF'
 # squirrel-mode profile
 language: en
 EOF
-stdin4=$(printf '{"cwd":"%s/project-b"}' "$home4")
+stdin4=$(printf '{"session_id":"sess-scenario-4","cwd":"%s/project-b"}' "$home4")
 
 # Learn the checkpoint path FROM THE SCRIPT ITSELF (Decision 1's own
-# contract) rather than recomputing the slug here.
+# contract) rather than recomputing the slug here. `session_id` is
+# supplied because P1 made the path per-session: without one the hook
+# correctly hands out a fresh anonymous path every invocation, so the
+# file written below would not be the file the second invocation looks
+# for.
 pre_out4=$(capture_stdout "$load_profile_script" "$home4" "$stdin4")
 pre_ctx4=$(extract_ctx "$pre_out4")
 checkpoint_path4=$(extract_checkpoint_path_line "$pre_ctx4")
@@ -402,8 +422,8 @@ assert_not_contains "$ctx4" "$checkpoint4_body_marker" "additionalContext must N
 #    values sharing a basename must produce different checkpoint paths.
 # ==========================================================================
 home5=$(new_home)
-stdin5a=$(printf '{"cwd":"%s/alice/myapp"}' "$home5")
-stdin5b=$(printf '{"cwd":"%s/bob/other/myapp"}' "$home5")
+stdin5a=$(printf '{"session_id":"sess-scenario-5","cwd":"%s/alice/myapp"}' "$home5")
+stdin5b=$(printf '{"session_id":"sess-scenario-5","cwd":"%s/bob/other/myapp"}' "$home5")
 
 ctx5a=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home5" "$stdin5a")")
 ctx5b=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home5" "$stdin5b")")
@@ -417,15 +437,282 @@ else
 fi
 assert_eq "yes" "$slugs5_differ" "two different cwd values sharing basename 'myapp' must produce different checkpoint paths (got a='$path5a' b='$path5b')"
 
+# Both invocations above deliberately carry the SAME session_id, so the
+# only thing that can make the two paths differ is the slug itself. With
+# distinct session ids this scenario would pass even if the slug
+# algorithm collapsed both directories onto one slug - the per-session
+# file name alone would separate them - which is precisely the vacuous
+# version of this check P1 could have introduced by accident.
+
 # ==========================================================================
-# 6. load-profile.sh - slug determinism: the same cwd twice produces the
-#    identical checkpoint path.
+# 6. load-profile.sh - slug determinism: the same cwd AND the same
+#    session_id twice produce the identical checkpoint path.
+#
+#    P1 note: determinism is now a property of the (cwd, session_id)
+#    PAIR, not of cwd alone. The same session reconnecting - resume,
+#    clear, compact all re-fire this hook with the same session_id - must
+#    keep writing the same file, or its own Done log would fragment
+#    across a new file per event. Scenario 6b below is the other half:
+#    two DIFFERENT sessions in the same cwd must NOT collide.
 # ==========================================================================
 home6=$(new_home)
-stdin6=$(printf '{"cwd":"%s/same/project"}' "$home6")
+stdin6=$(printf '{"session_id":"sess-scenario-6","cwd":"%s/same/project"}' "$home6")
 path6_first=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6" "$stdin6")")")
 path6_second=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6" "$stdin6")")")
-assert_eq "$path6_first" "$path6_second" "the same cwd must produce the identical checkpoint path on repeated invocations"
+assert_eq "$path6_first" "$path6_second" "the same cwd and session_id must produce the identical checkpoint path on repeated invocations"
+
+# ==========================================================================
+# 6b. [P1, THE defect this step removes] Two sessions in ONE cwd must be
+#     handed DIFFERENT checkpoint paths, inside the SAME per-project
+#     directory.
+#
+#     Before P1 both sessions were handed the identical flat file, and
+#     two interleaved whole-file read-modify-write cycles on it lost an
+#     entry from the Done log - reproduced against the real hook. The
+#     fix is structural: there is no shared mutable cell left to race
+#     over. Asserted against the real, shipped hook, invoked twice, not
+#     against a recomputed slug.
+# ==========================================================================
+home6b=$(new_home)
+stdin6b_one=$(printf '{"session_id":"aaaaaaaa-1111-2222-3333-444444444444","cwd":"%s/one-project"}' "$home6b")
+stdin6b_two=$(printf '{"session_id":"bbbbbbbb-5555-6666-7777-888888888888","cwd":"%s/one-project"}' "$home6b")
+
+ctx6b_one=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6b" "$stdin6b_one")")
+ctx6b_two=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6b" "$stdin6b_two")")
+
+path6b_one=$(extract_checkpoint_path_line "$ctx6b_one")
+path6b_two=$(extract_checkpoint_path_line "$ctx6b_two")
+dir6b_one=$(extract_checkpoint_dir_line "$ctx6b_one")
+dir6b_two=$(extract_checkpoint_dir_line "$ctx6b_two")
+
+if [ -n "$path6b_one" ] && [ -n "$path6b_two" ] && [ "$path6b_one" != "$path6b_two" ]; then
+  sessions6b_differ=yes
+else
+  sessions6b_differ=no
+fi
+assert_eq "yes" "$sessions6b_differ" "P1: two sessions in the SAME cwd must be handed DIFFERENT checkpoint paths (got one='$path6b_one' two='$path6b_two')"
+
+assert_eq "$dir6b_one" "$dir6b_two" "P1: two sessions in the same cwd must share ONE per-project checkpoint directory - /squirrel:pickup folds that directory, so a per-session directory would hide every other session's work"
+
+assert_eq "$dir6b_one/aaaaaaaa-1111-2222-3333-444444444444.md" "$path6b_one" "P1: the injected path must be exactly <checkpoint directory>/<session_id>.md - the two injected lines have to agree, since rule 14 writes the file and /squirrel:pickup reads the directory"
+
+# ==========================================================================
+# 6c. [P1] Missing or unsanitisable session_id still yields an
+#     EXCLUSIVELY-OWNED path.
+#
+#     A fixed name such as "anon.md" would reinstate, for exactly the
+#     sessions whose identity is unknown, the shared mutable cell 6b
+#     exists to remove. So: an "anon-" name, a DIFFERENT one on each
+#     invocation, and - the security half - a session_id built out of
+#     "../" must never escape the per-project directory, since it is
+#     rejected by sanitisation rather than pasted into a path.
+# ==========================================================================
+home6c=$(new_home)
+stdin6c_none=$(printf '{"cwd":"%s/anon-project"}' "$home6c")
+ctx6c_first=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6c" "$stdin6c_none")")
+ctx6c_second=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6c" "$stdin6c_none")")
+path6c_first=$(extract_checkpoint_path_line "$ctx6c_first")
+path6c_second=$(extract_checkpoint_path_line "$ctx6c_second")
+dir6c=$(extract_checkpoint_dir_line "$ctx6c_first")
+
+case "$path6c_first" in
+  "$dir6c"/anon-*.md) anon6c_shape=yes ;;
+  *) anon6c_shape=no ;;
+esac
+assert_eq "yes" "$anon6c_shape" "P1: a session with no session_id must be handed <checkpoint directory>/anon-<suffix>.md (got '$path6c_first')"
+
+if [ "$path6c_first" != "$path6c_second" ]; then
+  anon6c_unique=yes
+else
+  anon6c_unique=no
+fi
+assert_eq "yes" "$anon6c_unique" "P1: two anonymous invocations must be handed DIFFERENT paths - a fixed 'anon.md' would be the same shared file for every session that lacks an id, which is the exact defect P1 removes"
+
+stdin6c_traversal=$(printf '{"session_id":"../../../etc/passwd","cwd":"%s/anon-project"}' "$home6c")
+ctx6c_traversal=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6c" "$stdin6c_traversal")")
+path6c_traversal=$(extract_checkpoint_path_line "$ctx6c_traversal")
+case "$path6c_traversal" in
+  "$dir6c"/anon-*.md) traversal6c_contained=yes ;;
+  *) traversal6c_contained=no ;;
+esac
+assert_eq "yes" "$traversal6c_contained" "P1: a session_id containing '../' must be rejected by sanitisation and replaced with an anon- name inside the project's own directory, never pasted into the path (got '$path6c_traversal')"
+assert_not_contains "$path6c_traversal" ".." "P1: no '..' segment may survive into the injected checkpoint path"
+assert_not_contains "$path6c_traversal" "etc/passwd" "P1: a traversal-shaped session_id must not appear in the injected checkpoint path at all"
+
+# ==========================================================================
+# 6d. [P1] Both injected lines are ALWAYS emitted, before anything
+#     exists on disk (tech-lead Decision 1, extended to the directory).
+#     The model cannot compute the slug, so neither value can be left
+#     out and inferred later.
+# ==========================================================================
+home6d=$(new_home)
+stdin6d=$(printf '{"session_id":"sess-scenario-6d","cwd":"%s/never-used"}' "$home6d")
+ctx6d=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6d" "$stdin6d")")
+assert_contains "$ctx6d" "Project checkpoint directory:" "P1: the checkpoint DIRECTORY line must be emitted on a completely fresh install, before any file or directory exists"
+assert_contains "$ctx6d" "Project checkpoint path:" "P1: the checkpoint PATH line must still be emitted on a completely fresh install (Decision 1, unchanged)"
+assert_not_contains "$ctx6d" "Resume available" "P1: 'Resume available' must not appear when the project's checkpoint directory holds nothing"
+assert_not_contains "$ctx6d" "Legacy checkpoint file:" "P1: the legacy line must be absent when no pre-P1 flat checkpoint exists"
+
+dir6d=$(extract_checkpoint_dir_line "$ctx6d")
+if [ -e "$dir6d" ]; then
+  dir6d_created=yes
+else
+  dir6d_created=no
+fi
+assert_eq "no" "$dir6d_created" "P1: the SessionStart hook must NOT create the checkpoint directory - it only ever reads, so a read-only or unwritable \$HOME can never turn into a failed session start (the directory is created by the model's first Write)"
+
+# ==========================================================================
+# 6e. [P1] 'Resume available' is driven by the DIRECTORY, not by this
+#     session's own file.
+#
+#     The interesting case is the one that regressed most easily: a
+#     brand-new session, whose own file does not exist, in a project
+#     that has plenty of past work. Keying the line off the injected
+#     path - the pre-P1 behaviour, carried forward unchanged - would say
+#     "no checkpoint" to exactly the session that most needs to be told
+#     there is one.
+# ==========================================================================
+home6e=$(new_home)
+stdin6e_old=$(printf '{"session_id":"sess-6e-old","cwd":"%s/busy-project"}' "$home6e")
+ctx6e_old=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6e" "$stdin6e_old")")
+dir6e=$(extract_checkpoint_dir_line "$ctx6e_old")
+path6e_old=$(extract_checkpoint_path_line "$ctx6e_old")
+mkdir -p "$dir6e"
+printf '# checkpoint\n' >"$path6e_old"
+
+stdin6e_new=$(printf '{"session_id":"sess-6e-brand-new","cwd":"%s/busy-project"}' "$home6e")
+ctx6e_new=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6e" "$stdin6e_new")")
+path6e_new=$(extract_checkpoint_path_line "$ctx6e_new")
+
+if [ -e "$path6e_new" ]; then
+  own6e_file_exists=yes
+else
+  own6e_file_exists=no
+fi
+assert_eq "no" "$own6e_file_exists" "sanity (6e): the brand-new session's OWN checkpoint file must genuinely not exist, or this scenario proves nothing about what drives 'Resume available'"
+assert_contains "$ctx6e_new" "Resume available" "P1: 'Resume available' must fire for a brand-new session whose own file does not exist yet, because ANOTHER session's checkpoint is in the project's directory"
+
+# ==========================================================================
+# 6f. [P1, migration option (b)] A pre-P1 flat checkpoint is DETECTED
+#     and handed to /squirrel:pickup, never moved and never deleted.
+#
+#     The hook cannot fold the file itself - folding is a read-time
+#     operation the skill performs - but the skill must not recompute a
+#     slug to find it, so the hook is the only thing that can name it.
+# ==========================================================================
+home6f=$(new_home)
+stdin6f=$(printf '{"session_id":"sess-6f","cwd":"%s/legacy-project"}' "$home6f")
+ctx6f_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6f" "$stdin6f")")
+dir6f=$(extract_checkpoint_dir_line "$ctx6f_pre")
+legacy6f_file="$dir6f.md"
+mkdir -p "$(dirname "$legacy6f_file")"
+legacy6f_marker="LEGACY_BODY_MUST_NOT_BE_DUMPED_776655"
+printf '# checkpoint\n%s\n' "$legacy6f_marker" >"$legacy6f_file"
+
+ctx6f=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6f" "$stdin6f")")
+assert_eq "$legacy6f_file" "$(extract_legacy_checkpoint_line "$ctx6f")" "P1: a surviving pre-P1 flat checkpoint must be named on its own 'Legacy checkpoint file:' line - /squirrel:pickup cannot find it otherwise without recomputing the slug, which it is forbidden to do"
+assert_contains "$ctx6f" "Resume available" "P1: a project whose only checkpoint is the pre-P1 flat file must still report 'Resume available' - the migration must not look like data loss"
+assert_not_contains "$ctx6f" "$legacy6f_marker" "P1: the legacy checkpoint's own body text must never be dumped into context, exactly as for a current one"
+
+if [ -f "$legacy6f_file" ]; then
+  legacy6f_survives=yes
+else
+  legacy6f_survives=no
+fi
+assert_eq "yes" "$legacy6f_survives" "P1: the hook must never move or delete the pre-P1 flat checkpoint - it is read-only about it"
+
+# ==========================================================================
+# 6g. [P1] Per-session files are pruned CONSERVATIVELY: older than 30
+#     days AND outside the 10 most recently modified for that slug.
+#
+#     Age alone would be a time bomb aimed at exactly the wrong data -
+#     a project resumed after months is the case checkpoints exist for.
+#     Both halves of the conjunction are proved separately: 15 ancient
+#     files leave the 10 newest standing, and 5 ancient files with
+#     nothing newer than them are all kept.
+# ==========================================================================
+home6g=$(new_home)
+stdin6g=$(printf '{"session_id":"sess-6g","cwd":"%s/prune-project"}' "$home6g")
+ctx6g_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g" "$stdin6g")")
+dir6g=$(extract_checkpoint_dir_line "$ctx6g_pre")
+mkdir -p "$dir6g"
+
+i6g=1
+while [ "$i6g" -le 15 ]; do
+  printf 'x\n' >"$dir6g/old-$i6g.md"
+  touch -t "2401$(printf '%02d' "$i6g")1200" "$dir6g/old-$i6g.md"
+  i6g=$((i6g + 1))
+done
+printf 'x\n' >"$dir6g/fresh.md"
+
+capture_stdout "$load_profile_script" "$home6g" "$stdin6g" >/dev/null
+survivors6g=$(find "$dir6g" -type f | wc -l | awk '{print $1}')
+assert_eq "10" "$survivors6g" "P1 pruning: 16 files (15 older than 30 days, 1 fresh) must be cut to exactly the 10 most recently modified - the fresh one plus old-7 through old-15"
+
+if [ -f "$dir6g/old-15.md" ] && [ -f "$dir6g/old-7.md" ] && [ -f "$dir6g/fresh.md" ]; then
+  newest6g_kept=yes
+else
+  newest6g_kept=no
+fi
+assert_eq "yes" "$newest6g_kept" "P1 pruning: old-7 is the tenth-newest file in the directory (nine files are newer than it: the fresh one and old-8 through old-15), so it and everything above it must survive"
+
+if [ -e "$dir6g/old-1.md" ] || [ -e "$dir6g/old-6.md" ]; then
+  oldest6g_gone=no
+else
+  oldest6g_gone=yes
+fi
+assert_eq "yes" "$oldest6g_gone" "P1 pruning: files that are BOTH older than 30 days AND outside the 10 most recent (old-1 through old-6) must actually be deleted, or this pruner does nothing at all"
+
+home6g2=$(new_home)
+stdin6g2=$(printf '{"session_id":"sess-6g2","cwd":"%s/dormant-project"}' "$home6g2")
+ctx6g2_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g2" "$stdin6g2")")
+dir6g2=$(extract_checkpoint_dir_line "$ctx6g2_pre")
+mkdir -p "$dir6g2"
+i6g2=1
+while [ "$i6g2" -le 5 ]; do
+  printf 'x\n' >"$dir6g2/ancient-$i6g2.md"
+  touch -t "20010$i6g2"021200 "$dir6g2/ancient-$i6g2.md"
+  i6g2=$((i6g2 + 1))
+done
+
+capture_stdout "$load_profile_script" "$home6g2" "$stdin6g2" >/dev/null
+survivors6g2=$(find "$dir6g2" -type f | wc -l | awk '{print $1}')
+assert_eq "5" "$survivors6g2" "P1 pruning: a project dormant for 20 years, with only 5 checkpoints and nothing newer, must lose NONE of them - 'never delete recent work' is relative to the slug's own directory, not to the calendar"
+
+# The third half, and the one the two above CANNOT see: a busy project
+# whose files are ALL fresh. Both cases above have their outcome fixed
+# by the rank clause alone - in 6g the same 10 files survive whether or
+# not the age floor is consulted, and in 6g2 nothing is ranked out at
+# all - so lowering CHECKPOINT_PRUNE_MIN_AGE_DAYS to 0 leaves both
+# green. Discovered exactly that way: the mutant that zeroes the floor
+# passed the whole suite. Fourteen files written seconds ago is the
+# shape that separates them: age-gated, nothing is a candidate and
+# nothing is deleted; rank-only, the four oldest are ranked out and a
+# developer with fourteen sessions open this afternoon silently loses
+# the first four.
+home6g3=$(new_home)
+stdin6g3=$(printf '{"session_id":"sess-6g3","cwd":"%s/busy-project"}' "$home6g3")
+ctx6g3_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g3" "$stdin6g3")")
+dir6g3=$(extract_checkpoint_dir_line "$ctx6g3_pre")
+mkdir -p "$dir6g3"
+# Distinct mtimes, all dated today, set explicitly rather than left to
+# whatever the loop's write order happens to produce: the mutant this
+# scenario exists to catch decides by RANK, and a rank is meaningless if
+# fourteen files share one timestamp. A filesystem with one-second
+# granularity would hand every file the same mtime, `find -newer` would
+# report zero newer files for all of them, and the mutant would survive
+# looking healthy.
+today6g3=$(date +%Y%m%d)
+i6g3=0
+while [ "$i6g3" -le 13 ]; do
+  printf 'x\n' >"$dir6g3/today-$i6g3.md"
+  touch -t "${today6g3}00$(printf '%02d' "$i6g3")" "$dir6g3/today-$i6g3.md"
+  i6g3=$((i6g3 + 1))
+done
+
+capture_stdout "$load_profile_script" "$home6g3" "$stdin6g3" >/dev/null
+survivors6g3=$(find "$dir6g3" -type f | wc -l | awk '{print $1}')
+assert_eq "14" "$survivors6g3" "P1 pruning: 14 checkpoints all written today must ALL survive even though 4 of them fall outside the 10 most recent - the 30-day floor is a conjunct, not a tiebreaker, and without it a busy day silently deletes this morning's work"
 
 # ==========================================================================
 # 7. load-profile.sh - output is valid JSON in every scenario above
@@ -527,9 +814,15 @@ done
 # ==========================================================================
 # 14. allow-checkpoint.sh - file_path inside the checkpoints directory:
 #     permissionDecision must be "allow".
+#
+#     P1: the fixture is the NESTED, per-session shape
+#     checkpoints/<slug>/<session>.md, because that is the only shape
+#     anything correct writes now. The flat shape it used to use is
+#     covered separately, and differently, by scenario 14d below (tech-
+#     lead decision D1: Read allows, Write/Edit defer).
 # ==========================================================================
 home14=$(new_home)
-stdin14=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$home14")
+stdin14=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-123456/sess-abc.md"}}' "$home14")
 exit14=$(capture_exit "$allow_checkpoint_script" "$home14" "$stdin14")
 assert_eq "0" "$exit14" "allow-checkpoint.sh must exit 0 for a legitimate checkpoint write"
 out14=$(capture_stdout "$allow_checkpoint_script" "$home14" "$stdin14")
@@ -564,12 +857,74 @@ assert_eq "allow" "$decision14" "allow-checkpoint.sh must return 'allow' for a f
 # "allow"/"defer" assertions immediately following each one are that
 # evidence.
 # ==========================================================================
-stdin14r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$home14")
+stdin14r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-123456/sess-abc.md"}}' "$home14")
 exit14r=$(capture_exit "$allow_checkpoint_script" "$home14" "$stdin14r")
 assert_eq "0" "$exit14r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage (see the comment above and scenario 58's mutation proof): allow-checkpoint.sh must exit 0 for a legitimate checkpoint Read"
 out14r=$(capture_stdout "$allow_checkpoint_script" "$home14" "$stdin14r")
 decision14r=$(printf '%s' "$out14r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14r="<jq error>"
 assert_eq "allow" "$decision14r" "S10-1 BLOCKER fix: allow-checkpoint.sh must return 'allow' for tool_name Read on a file_path inside the checkpoints directory, identically to Write/Edit"
+
+# --- P1: an Edit on the same nested path allows too. Edit is the tool
+# rule 14 actually reaches for once a checkpoint file exists (Write is
+# the first-time case), so leaving it unasserted would leave the common
+# path uncovered.
+stdin14e=$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-123456/sess-abc.md"}}' "$home14")
+out14e=$(capture_stdout "$allow_checkpoint_script" "$home14" "$stdin14e")
+decision14e=$(printf '%s' "$out14e" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14e="<jq error>"
+assert_eq "allow" "$decision14e" "P1: allow-checkpoint.sh must return 'allow' for tool_name Edit on the nested, per-session checkpoint path"
+
+# --- P1: a DEEPER nested path still allows. The layout ships exactly
+# one intermediate component, but the boundary's own claim is "anything
+# that resolves inside checkpoints/, with no symlink on the way", not
+# "exactly two components" - and a depth-sensitive guard would be a
+# silent trap for any later layout change.
+stdin14deep=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/a/b/c/d.md"}}' "$home14")
+out14deep=$(capture_stdout "$allow_checkpoint_script" "$home14" "$stdin14deep")
+decision14deep=$(printf '%s' "$out14deep" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14deep="<jq error>"
+assert_eq "allow" "$decision14deep" "P1: a path nested more deeply than the shipped layout must still allow - the boundary is containment in checkpoints/, not a fixed depth"
+
+# ==========================================================================
+# 14d. [P1, TECH-LEAD DECISION D1] The pre-P1 FLAT path splits by tool:
+#      Read allows, Write and Edit defer.
+#
+#      Read must allow because /squirrel:pickup folds the legacy file in
+#      on first read, and ADR-0002's promise is that an ordinary
+#      checkpoint interaction never costs a permission prompt. Write and
+#      Edit defer because post-P1 the model is only ever handed a nested
+#      path, so nothing correct writes a flat one: the defer is a
+#      tripwire with no legitimate traffic behind it, and its cost when
+#      it fires is one permission prompt, never a denial.
+#
+#      Both directions are asserted. A test that only checked the defers
+#      would pass on a script that deferred the flat path outright,
+#      which would break the migration read.
+# ==========================================================================
+home14d=$(new_home)
+flat14d="$home14d/.squirrel/checkpoints/legacy-proj-987654.md"
+
+stdin14d_read=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s"}}' "$flat14d")
+out14d_read=$(capture_stdout "$allow_checkpoint_script" "$home14d" "$stdin14d_read")
+decision14d_read=$(printf '%s' "$out14d_read" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14d_read="<jq error>"
+assert_eq "allow" "$decision14d_read" "D1: a Read of the pre-P1 flat checkpoint must still ALLOW - /squirrel:pickup folds that file in on first read, and ADR-0002 promises no permission prompt for an ordinary checkpoint interaction"
+
+for tool14d in Write Edit; do
+  stdin14d_w=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "$tool14d" "$flat14d")
+  exit14d_w=$(capture_exit "$allow_checkpoint_script" "$home14d" "$stdin14d_w")
+  assert_eq "0" "$exit14d_w" "D1: allow-checkpoint.sh must still exit 0 when deferring a $tool14d on the pre-P1 flat checkpoint"
+  out14d_w=$(capture_stdout "$allow_checkpoint_script" "$home14d" "$stdin14d_w")
+  decision14d_w=$(printf '%s' "$out14d_w" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14d_w="<jq error>"
+  assert_eq "defer" "$decision14d_w" "D1: a $tool14d to the pre-P1 flat checkpoint must DEFER - post-P1 the model is only ever handed a nested path, so nothing correct writes a flat one"
+done
+
+# The rule is the SHAPE of the path (a direct child file of
+# checkpoints/), not the identity of one slug: matching the real old
+# file exactly would need `cwd`, which the PreToolUse payload does not
+# carry. Asserted against a name that is nothing like a slug, so the
+# check cannot be passing by coincidence of naming.
+stdin14d_any=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/notes.txt"}}' "$home14d")
+out14d_any=$(capture_stdout "$allow_checkpoint_script" "$home14d" "$stdin14d_any")
+decision14d_any=$(printf '%s' "$out14d_any" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision14d_any="<jq error>"
+assert_eq "defer" "$decision14d_any" "D1: EVERY direct child file of checkpoints/ defers on write, not just one that happens to look like a slug - the guard tests the path's shape, which is the more conservative of the two available tests"
 
 # ==========================================================================
 # 15. allow-checkpoint.sh - file_path elsewhere in $HOME: "defer".
@@ -839,7 +1194,12 @@ while [ "$n24" -le 19 ]; do
   n24=$((n24 + 1))
 done
 printf '\377\376\200\201 TAIL_MARKER_SURVIVES_998877\n' >>"$home24/.squirrel/profile.md"
-stdin24=$(printf '{"cwd":"%s/project-utf8"}' "$home24")
+# session_id supplied: this scenario compares two whole invocations
+# byte-for-byte, so the injected path has to be a deterministic function
+# of the input. Without an id the hook correctly emits a fresh random
+# anon- name each time and the comparison would measure that randomness
+# rather than the locale behaviour it is meant to test.
+stdin24=$(printf '{"session_id":"sess-scenario-24","cwd":"%s/project-utf8"}' "$home24")
 nojq_path24=$(make_tool_path "jq")
 
 exit24_ptbr=$(printf '%s' "$stdin24" | LANG=pt_BR.UTF-8 LC_ALL='' HOME="$home24" PATH="$nojq_path24" "$load_profile_script" >/dev/null 2>&1; printf '%s' "$?")
@@ -1001,7 +1361,12 @@ assert_contains "$ctx28" "truncated" "tech-lead cap: a one-line truncation notic
 home29=$(new_home)
 mkdir -p "$home29/.squirrel" "$home29/outside-secret-29"
 ln -s "$home29/outside-secret-29" "$home29/.squirrel/checkpoints"
-stdin29=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/evil.md"}}' "$home29")
+# P1: the fixture is NESTED on purpose. With a flat path the Write case
+# would defer at Layer 1b (tech-lead decision D1's write-side tripwire)
+# before the component walk ever ran, and this scenario would be
+# asserting the right answer for the wrong reason - the exact "a guard
+# that cannot fail for its own target" trap this suite exists to avoid.
+stdin29=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-29/evil.md"}}' "$home29")
 
 out29=$(capture_stdout "$allow_checkpoint_script" "$home29" "$stdin29")
 decision29=$(printf '%s' "$out29" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision29="<jq error>"
@@ -1012,7 +1377,7 @@ assert_eq "0" "$exit29" "allow-checkpoint.sh must exit 0 even when checkpoints_d
 
 # --- S10-1 Read mirror of scenario 29: checkpoints_dir itself is a
 # symlink, tool_name "Read", realpath/readlink present.
-stdin29r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/evil.md"}}' "$home29")
+stdin29r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-29/evil.md"}}' "$home29")
 out29r=$(capture_stdout "$allow_checkpoint_script" "$home29" "$stdin29r")
 decision29r=$(printf '%s' "$out29r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision29r="<jq error>"
 assert_eq "defer" "$decision29r" "S10-1: a symlink AT checkpoints_dir itself must defer for tool_name Read too, with realpath/readlink present"
@@ -1031,7 +1396,7 @@ assert_eq "0" "$exit29r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage
 home30=$(new_home)
 mkdir -p "$home30/.squirrel" "$home30/outside-secret-30"
 ln -s "$home30/outside-secret-30" "$home30/.squirrel/checkpoints"
-stdin30=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/evil.md"}}' "$home30")
+stdin30=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-30/evil.md"}}' "$home30")
 strip_path30=$(make_tool_path "realpath readlink")
 
 out30=$(capture_stdout_with_path "$allow_checkpoint_script" "$home30" "$strip_path30" "$stdin30")
@@ -1043,7 +1408,7 @@ assert_eq "0" "$exit30" "allow-checkpoint.sh must exit 0 for the symlinked-check
 
 # --- S10-1 Read mirror of scenario 30: same repro, realpath AND
 # readlink stripped from PATH, tool_name "Read".
-stdin30r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/evil.md"}}' "$home30")
+stdin30r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-30/evil.md"}}' "$home30")
 out30r=$(capture_stdout_with_path "$allow_checkpoint_script" "$home30" "$strip_path30" "$stdin30r")
 decision30r=$(printf '%s' "$out30r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision30r="<jq error>"
 assert_eq "defer" "$decision30r" "S10-1: a symlink AT checkpoints_dir itself must still defer for tool_name Read with realpath AND readlink stripped from PATH"
@@ -1068,7 +1433,7 @@ home31=$(new_home)
 real_squirrel31="$home31/real-dotfiles-squirrel-31"
 mkdir -p "$real_squirrel31/checkpoints"
 ln -s "$real_squirrel31" "$home31/.squirrel"
-stdin31=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$home31")
+stdin31=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-31/sess-a.md"}}' "$home31")
 
 out31=$(capture_stdout "$allow_checkpoint_script" "$home31" "$stdin31")
 decision31=$(printf '%s' "$out31" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision31="<jq error>"
@@ -1081,7 +1446,7 @@ assert_eq "0" "$exit31" "allow-checkpoint.sh must exit 0 for a legitimately syml
 # $HOME/.squirrel, tool_name "Read", realpath/readlink present. This is
 # the dotfile-manager regression guard the S10-1 fix must also satisfy
 # for reads, per the task's own requirement.
-stdin31r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$home31")
+stdin31r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-31/sess-a.md"}}' "$home31")
 out31r=$(capture_stdout "$allow_checkpoint_script" "$home31" "$stdin31r")
 decision31r=$(printf '%s' "$out31r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision31r="<jq error>"
 assert_eq "allow" "$decision31r" "S10-1 REGRESSION GUARD: a legitimately symlinked \$HOME/.squirrel (dotfile-manager pattern) must still ALLOW a genuine checkpoint Read beneath it, with realpath/readlink present"
@@ -1099,7 +1464,7 @@ home32=$(new_home)
 real_squirrel32="$home32/real-dotfiles-squirrel-32"
 mkdir -p "$real_squirrel32/checkpoints"
 ln -s "$real_squirrel32" "$home32/.squirrel"
-stdin32=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$home32")
+stdin32=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-32/sess-a.md"}}' "$home32")
 strip_path32=$(make_tool_path "realpath readlink")
 
 out32=$(capture_stdout_with_path "$allow_checkpoint_script" "$home32" "$strip_path32" "$stdin32")
@@ -1111,7 +1476,7 @@ assert_eq "0" "$exit32" "allow-checkpoint.sh must exit 0 for a legitimately syml
 
 # --- S10-1 Read mirror of scenario 32: same regression guard, realpath
 # AND readlink stripped from PATH, tool_name "Read".
-stdin32r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$home32")
+stdin32r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-32/sess-a.md"}}' "$home32")
 out32r=$(capture_stdout_with_path "$allow_checkpoint_script" "$home32" "$strip_path32" "$stdin32r")
 decision32r=$(printf '%s' "$out32r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision32r="<jq error>"
 assert_eq "allow" "$decision32r" "S10-1 REGRESSION GUARD: a legitimately symlinked \$HOME/.squirrel must still ALLOW a genuine checkpoint Read with realpath AND readlink stripped from PATH too"
@@ -1337,7 +1702,7 @@ assert_eq "0" "$exit_ctrl35" "allow-checkpoint.sh must exit 0 for a file_path co
 # JSON-escaped embedded newline (the realistic form: valid JSON with a
 # properly-escaped \n, not a raw unescaped newline byte, which is not
 # even legal JSON) inside an otherwise-legitimate filename.
-stdin_nl35=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/evil\\nname.md"}}' "$home35")
+stdin_nl35=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-35/evil\\nname.md"}}' "$home35")
 out_nl35=$(capture_stdout "$allow_checkpoint_script" "$home35" "$stdin_nl35")
 decision_nl35=$(printf '%s' "$out_nl35" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision_nl35="<jq error>"
 assert_eq "allow" "$decision_nl35" "a JSON-escaped embedded newline inside an otherwise-legitimate checkpoint filename must still allow"
@@ -1364,14 +1729,14 @@ out36_empty=$(printf '%s' "$stdin36" | HOME="" "$allow_checkpoint_script" 2>/dev
 decision36_empty=$(printf '%s' "$out36_empty" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36_empty="<jq error>"
 assert_eq "defer" "$decision36_empty" "\$HOME set to an empty string must defer, never allow"
 
-stdin36_root=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/.squirrel/checkpoints/proj36.md"}}')
+stdin36_root=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/.squirrel/checkpoints/proj36/sess36.md"}}')
 out36_root=$(printf '%s' "$stdin36_root" | HOME="/" "$allow_checkpoint_script" 2>/dev/null) || true
 decision36_root=$(printf '%s' "$out36_root" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36_root="<jq error>"
 assert_eq "allow" "$decision36_root" "\$HOME=/ (root) must still allow a genuine, nested checkpoint write under it"
 
 home36_trail=$(new_home)
 mkdir -p "$home36_trail/.squirrel/checkpoints"
-stdin36_trail=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj36.md"}}' "$home36_trail")
+stdin36_trail=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj36/sess36.md"}}' "$home36_trail")
 out36_trail=$(printf '%s' "$stdin36_trail" | HOME="$home36_trail/" "$allow_checkpoint_script" 2>/dev/null) || true
 decision36_trail=$(printf '%s' "$out36_trail" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36_trail="<jq error>"
 assert_eq "allow" "$decision36_trail" "\$HOME carrying a trailing slash must still allow a genuine, nested checkpoint write under it"
@@ -1389,14 +1754,14 @@ out36r_empty=$(printf '%s' "$stdin36r" | HOME="" "$allow_checkpoint_script" 2>/d
 decision36r_empty=$(printf '%s' "$out36r_empty" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36r_empty="<jq error>"
 assert_eq "defer" "$decision36r_empty" "S10-1: \$HOME set to an empty string must defer for tool_name Read too, never allow"
 
-stdin36r_root=$(printf '{"tool_name":"Read","tool_input":{"file_path":"/.squirrel/checkpoints/proj36.md"}}')
+stdin36r_root=$(printf '{"tool_name":"Read","tool_input":{"file_path":"/.squirrel/checkpoints/proj36/sess36.md"}}')
 out36r_root=$(printf '%s' "$stdin36r_root" | HOME="/" "$allow_checkpoint_script" 2>/dev/null) || true
 decision36r_root=$(printf '%s' "$out36r_root" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36r_root="<jq error>"
 assert_eq "allow" "$decision36r_root" "S10-1: \$HOME=/ (root) must still allow a genuine, nested checkpoint Read under it"
 
 home36r_trail=$(new_home)
 mkdir -p "$home36r_trail/.squirrel/checkpoints"
-stdin36r_trail=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj36.md"}}' "$home36r_trail")
+stdin36r_trail=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj36/sess36.md"}}' "$home36r_trail")
 out36r_trail=$(printf '%s' "$stdin36r_trail" | HOME="$home36r_trail/" "$allow_checkpoint_script" 2>/dev/null) || true
 decision36r_trail=$(printf '%s' "$out36r_trail" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision36r_trail="<jq error>"
 assert_eq "allow" "$decision36r_trail" "S10-1: \$HOME carrying a trailing slash must still allow a genuine, nested checkpoint Read under it"
@@ -1522,7 +1887,7 @@ fp4_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016 # single-quoted deliberately throughout this
 # block: literal source text/replacement for load-profile.sh, not an
 # expression to expand here.
-fp4_start=$(line_of "$fp4_script" '  if [ -n "$home_dir" ] && [ -f "$checkpoint_file" ]; then')
+fp4_start=$(line_of "$fp4_script" '  if [ -n "$home_dir" ] && { checkpoint_dir_has_any "$session_dir" || [ -f "$legacy_checkpoint_file" ]; }; then')
 [ -n "$fp4_start" ] || fp4_start=0
 fp4_end=$(line_of_after "$fp4_script" "$fp4_start" '  fi')
 [ -n "$fp4_end" ] || fp4_end=0
@@ -1539,7 +1904,11 @@ mkdir -p "$fp4_home/.squirrel"
 cat >"$fp4_home/.squirrel/profile.md" <<'EOF'
 language: en
 EOF
-fp4_stdin=$(printf '{"cwd":"%s/project-b"}' "$fp4_home")
+# session_id supplied for the same reason scenario 4's own fixture
+# supplies one: the path must be stable across the two invocations
+# below, or the file written after the first would not be the file the
+# second reads.
+fp4_stdin=$(printf '{"session_id":"sess-fp4","cwd":"%s/project-b"}' "$fp4_home")
 fp4_pre_ctx=$(extract_ctx "$(capture_stdout "$fp4_script" "$fp4_home" "$fp4_stdin")")
 fp4_checkpoint_path=$(extract_checkpoint_path_line "$fp4_pre_ctx")
 mkdir -p "$(dirname "$fp4_checkpoint_path")"
@@ -1564,8 +1933,11 @@ fp5_line=$(line_of "$fp5_script" "  printf '%s-%s' \"\$safe_base\" \"\$hash\"")
 replace_line "$fp5_script" "$fp5_line" "  printf '%s' \"\$safe_base\""
 
 fp5_home=$(new_home)
-fp5_stdin_a=$(printf '{"cwd":"%s/alice/myapp"}' "$fp5_home")
-fp5_stdin_b=$(printf '{"cwd":"%s/bob/other/myapp"}' "$fp5_home")
+# Both invocations carry the SAME session_id, mirroring scenario 5's own
+# fixture: with distinct ids the two paths would differ on the file name
+# alone and this proof would be measuring the wrong thing entirely.
+fp5_stdin_a=$(printf '{"session_id":"sess-fp5","cwd":"%s/alice/myapp"}' "$fp5_home")
+fp5_stdin_b=$(printf '{"session_id":"sess-fp5","cwd":"%s/bob/other/myapp"}' "$fp5_home")
 fp5_path_a=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$fp5_script" "$fp5_home" "$fp5_stdin_a")")")
 fp5_path_b=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$fp5_script" "$fp5_home" "$fp5_stdin_b")")")
 assert_eq "$fp5_path_a" "$fp5_path_b" "FAILURE PROOF (scenario 5): a bare-basename slug mutant (no hash suffix) must COLLIDE for two different cwd values sharing a basename - proving scenario 5's inequality assertion is not vacuous"
@@ -1902,7 +2274,10 @@ fp2930_home=$(new_home)
 mkdir -p "$fp2930_home/.squirrel" "$fp2930_home/outside-secret-fp"
 ln -s "$fp2930_home/outside-secret-fp" "$fp2930_home/.squirrel/checkpoints"
 fp2930_strip_path=$(make_tool_path "realpath readlink")
-fp2930_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/evil.md"}}' "$fp2930_home")
+# Nested, matching scenarios 29/30's own fixtures: a flat path would
+# defer at Layer 1b (decision D1) in the MUTANT too, so the mutant would
+# look correct and this proof would silently stop proving anything.
+fp2930_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-fp2930/evil.md"}}' "$fp2930_home")
 fp2930_out=$(capture_stdout_with_path "$fp2930_script" "$fp2930_home" "$fp2930_strip_path" "$fp2930_stdin")
 fp2930_decision=$(printf '%s' "$fp2930_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp2930_decision="<jq error>"
 assert_eq "allow" "$fp2930_decision" "FAILURE PROOF (scenarios 29/30): a component_walk_has_symlink mutant that never tests checkpoints_dir itself must incorrectly ALLOW a write when checkpoints_dir itself is the symlink - proving scenarios 29/30's defer assertions are not vacuous, and reproducing the exact pre-fix BLOCKER"
@@ -1911,7 +2286,7 @@ assert_eq "allow" "$fp2930_decision" "FAILURE PROOF (scenarios 29/30): a compone
 # (fixed) allow-checkpoint.sh with only the `[ -L "$base" ]` check
 # removed, so its case statement already includes Read - isolating the
 # checkpoints_dir-itself-symlink regression for tool_name Read too.
-fp2930_stdin_r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/evil.md"}}' "$fp2930_home")
+fp2930_stdin_r=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-fp2930/evil.md"}}' "$fp2930_home")
 fp2930_out_r=$(capture_stdout_with_path "$fp2930_script" "$fp2930_home" "$fp2930_strip_path" "$fp2930_stdin_r")
 fp2930_decision_r=$(printf '%s' "$fp2930_out_r" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp2930_decision_r="<jq error>"
 assert_eq "allow" "$fp2930_decision_r" "S10-1 FAILURE PROOF (scenarios 29/30 Read mirror): the same component_walk_has_symlink mutant must incorrectly ALLOW a Read when checkpoints_dir itself is the symlink"
@@ -2610,12 +2985,12 @@ fp58_line=$(line_of "$fp58_script" '    Write | Edit | Read) ;;')
 replace_line "$fp58_script" "$fp58_line" '    Write | Edit) ;;'
 
 fp58_home=$(new_home)
-fp58_stdin_read=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$fp58_home")
+fp58_stdin_read=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-58/sess.md"}}' "$fp58_home")
 fp58_out_read=$(capture_stdout "$fp58_script" "$fp58_home" "$fp58_stdin_read")
 fp58_decision_read=$(printf '%s' "$fp58_out_read" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp58_decision_read="<jq error>"
 assert_eq "defer" "$fp58_decision_read" "S10-1 CLASS-LEVEL FAILURE PROOF: reverting the case statement to 'Write | Edit) ;;' (the pre-fix matcher) must reproduce the exact BLOCKER - a legitimate checkpoint Read incorrectly deferring - proving every allow-side Read assertion added above is not vacuous"
 
-fp58_stdin_write=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj.md"}}' "$fp58_home")
+fp58_stdin_write=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-58/sess.md"}}' "$fp58_home")
 fp58_out_write=$(capture_stdout "$fp58_script" "$fp58_home" "$fp58_stdin_write")
 fp58_decision_write=$(printf '%s' "$fp58_out_write" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp58_decision_write="<jq error>"
 assert_eq "allow" "$fp58_decision_write" "S10-1 CLASS-LEVEL FAILURE PROOF sanity: reverting the case statement to pre-fix must leave a legitimate checkpoint Write completely unaffected, isolating the mutant's effect to Read specifically"
@@ -2694,7 +3069,7 @@ done
 # already covered by scenarios 14/14r and the symlink/traversal
 # matrix) - proving the fix did not become overbroad and start
 # deferring legitimate tool_input-only payloads.
-stdin59c=$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/.squirrel/checkpoints/legit.md"}}' "$home59")
+stdin59c=$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s/.squirrel/checkpoints/legit-59/sess.md"}}' "$home59")
 out59c=$(capture_stdout "$allow_checkpoint_script" "$home59" "$stdin59c")
 decision59c=$(printf '%s' "$out59c" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision59c="<jq error>"
 assert_eq "allow" "$decision59c" "AB1 sanity: tool_name Edit with a genuine tool_input.file_path inside checkpoints/ and no top-level field at all must still allow"
@@ -2721,7 +3096,7 @@ replace_line "$fp59d_script" "$fp59d_line" "$fp59d_replacement"
 
 fp59d_home=$(new_home)
 mkdir -p "$fp59d_home/.squirrel/checkpoints"
-fp59d_stdin=$(printf '{"tool_name":"Read","file_path":"%s/.squirrel/checkpoints/legit.md","tool_input":{"file_path":"%s/.squirrel/checkpoints/../../../../etc/passwd"}}' "$fp59d_home" "$fp59d_home")
+fp59d_stdin=$(printf '{"tool_name":"Read","file_path":"%s/.squirrel/checkpoints/legit-59d/sess.md","tool_input":{"file_path":"%s/.squirrel/checkpoints/../../../../etc/passwd"}}' "$fp59d_home" "$fp59d_home")
 fp59d_out=$(capture_stdout "$fp59d_script" "$fp59d_home" "$fp59d_stdin")
 fp59d_decision=$(printf '%s' "$fp59d_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp59d_decision="<jq error>"
 assert_eq "allow" "$fp59d_decision" "AB1 FAILURE PROOF (jq path): reverting extract_tool_input_field's jq filter to the old top-level-preferring form must reproduce the exact spoof-allow bug scenario 59a proves fixed, confirming 59a's jq-present assertions are not vacuous"
@@ -2776,7 +3151,11 @@ mkdir -p "$home60/.squirrel/checkpoints"
 nojq_path60=$(make_tool_path "jq")
 
 for tool60 in Read Write Edit; do
-  stdin60=$(printf '{"tool_name":"%s","tool_input":{"file_path":"/etc/passwd", "decoy":{"file_path":"%s/.squirrel/checkpoints/legit.md"}}}' "$tool60" "$home60")
+  # Nested decoy path, matching this scenario's own failure proof
+  # (fp60c) byte-for-byte in shape: the decoy has to be a path the
+  # boundary WOULD allow if it were believed, or neither the scenario
+  # nor its proof is exercising the confusion it is named for.
+  stdin60=$(printf '{"tool_name":"%s","tool_input":{"file_path":"/etc/passwd", "decoy":{"file_path":"%s/.squirrel/checkpoints/legit-60/sess.md"}}}' "$tool60" "$home60")
 
   out60=$(capture_stdout "$allow_checkpoint_script" "$home60" "$stdin60")
   decision60=$(printf '%s' "$out60" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision60="<jq error>"
@@ -2806,11 +3185,11 @@ done
 # first assertion of this exact shape, and it asserts the NEW, correct
 # behaviour directly rather than a stale "allow" expectation.
 for tool60b in Read Write Edit; do
-  stdin60b=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s/.squirrel/checkpoints/legit-60b.md"}}' "$tool60b" "$home60")
+  stdin60b=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s/.squirrel/checkpoints/legit-60b/sess.md"}}' "$tool60b" "$home60")
 
   out60b_jq=$(capture_stdout "$allow_checkpoint_script" "$home60" "$stdin60b")
   decision60b_jq=$(printf '%s' "$out60b_jq" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision60b_jq="<jq error>"
-  assert_eq "allow" "$decision60b_jq" "AC1 sanity: tool_name $tool60b on a genuinely legitimate, non-nested checkpoint path must still allow with jq present"
+  assert_eq "allow" "$decision60b_jq" "AC1 sanity: tool_name $tool60b on a genuinely legitimate checkpoint path, with no decoy anywhere in the payload, must still allow with jq present"
 
   out60b_nojq=$(capture_stdout_with_path "$allow_checkpoint_script" "$home60" "$nojq_path60" "$stdin60b")
   decision60b_nojq=$(printf '%s' "$out60b_nojq" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision60b_nojq="<jq error>"
@@ -2841,7 +3220,10 @@ replace_block "$fp60c_script" "$fp60c_return_line" "$fp60c_return_line" "$fp60c_
 
 fp60c_home=$(new_home)
 mkdir -p "$fp60c_home/.squirrel/checkpoints"
-fp60c_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd", "decoy":{"file_path":"%s/.squirrel/checkpoints/legit.md"}}}' "$fp60c_home")
+# The decoy path is NESTED: the mutant's sed fallback returns the decoy
+# value, and a flat decoy would then hit Layer 1b (decision D1) and
+# defer on this Write, hiding the very BLOCKER this mutant reproduces.
+fp60c_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd", "decoy":{"file_path":"%s/.squirrel/checkpoints/legit-60c/sess.md"}}}' "$fp60c_home")
 
 fp60c_out=$(capture_stdout_with_path "$fp60c_script" "$fp60c_home" "$nojq_path60" "$fp60c_stdin")
 fp60c_decision=$(printf '%s' "$fp60c_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp60c_decision="<jq error>"
@@ -2959,5 +3341,360 @@ else
   fp62_still_fires=no
 fi
 assert_eq "no" "$fp62_still_fires" "FAILURE PROOF (invariant S11, scenario 62): stubbing out detect_old_data_dir entirely must make a genuine pre-S11 directory WRONGLY show no migration notice - proving scenario 62's presence assertion is not vacuous"
+
+# ==========================================================================
+# P1 FAILURE PROOFS. One mutant per behaviour scenarios 6b-6g and 14d
+# assert, each reintroducing the specific wrong version of that
+# behaviour - the pre-P1 shape where there is one, and the plausible
+# wrong design where there is not.
+# ==========================================================================
+
+# --- fpP1a: revert the injected path to the pre-P1 FLAT shape. This is
+# the defect itself, verbatim: both sessions in one cwd are handed the
+# same file again. Proves scenario 6b's inequality assertion, and its
+# directory/file agreement assertion, are not vacuous.
+fpP1a_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016 # single-quoted deliberately throughout these
+# blocks: literal source text of load-profile.sh, not shell expansion.
+fpP1a_line=$(line_of "$fpP1a_script" '  checkpoint_file="$session_dir/$session_file_name"')
+[ -n "$fpP1a_line" ] || fpP1a_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1a_script" "$fpP1a_line" '  checkpoint_file="$checkpoints_dir/$slug.md"'
+
+fpP1a_home=$(new_home)
+fpP1a_one=$(printf '{"session_id":"session-one","cwd":"%s/one-project"}' "$fpP1a_home")
+fpP1a_two=$(printf '{"session_id":"session-two","cwd":"%s/one-project"}' "$fpP1a_home")
+fpP1a_path_one=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$fpP1a_script" "$fpP1a_home" "$fpP1a_one")")")
+fpP1a_ctx_two=$(extract_ctx "$(capture_stdout "$fpP1a_script" "$fpP1a_home" "$fpP1a_two")")
+fpP1a_path_two=$(extract_checkpoint_path_line "$fpP1a_ctx_two")
+fpP1a_dir_two=$(extract_checkpoint_dir_line "$fpP1a_ctx_two")
+assert_eq "$fpP1a_path_one" "$fpP1a_path_two" "FAILURE PROOF (scenario 6b): a load-profile.sh mutant restoring the pre-P1 flat path must hand two different sessions in one cwd the IDENTICAL file - reproducing the lost-update defect and proving 6b's inequality assertion is not vacuous"
+
+if [ "$fpP1a_path_two" = "$fpP1a_dir_two/session-two.md" ]; then
+  fpP1a_agrees=yes
+else
+  fpP1a_agrees=no
+fi
+assert_eq "no" "$fpP1a_agrees" "FAILURE PROOF (scenario 6b): under the same flat-path mutant the injected path no longer sits inside the injected directory - proving 6b's directory/file agreement assertion is not vacuous either"
+
+# --- fpP1b: give every session its OWN directory instead of its own
+# file. Plausible-looking, and fatal: /squirrel:pickup folds one
+# directory, so every past session's work becomes invisible. Proves
+# scenario 6b's shared-directory assertion.
+fpP1b_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1b_line=$(line_of "$fpP1b_script" '  session_dir="$checkpoints_dir/$slug"')
+[ -n "$fpP1b_line" ] || fpP1b_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1b_script" "$fpP1b_line" '  session_dir="$checkpoints_dir/$slug/$raw_session_id"'
+
+fpP1b_home=$(new_home)
+fpP1b_one=$(printf '{"session_id":"session-one","cwd":"%s/one-project"}' "$fpP1b_home")
+fpP1b_two=$(printf '{"session_id":"session-two","cwd":"%s/one-project"}' "$fpP1b_home")
+fpP1b_dir_one=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1b_script" "$fpP1b_home" "$fpP1b_one")")")
+fpP1b_dir_two=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1b_script" "$fpP1b_home" "$fpP1b_two")")")
+if [ "$fpP1b_dir_one" = "$fpP1b_dir_two" ]; then
+  fpP1b_shared=yes
+else
+  fpP1b_shared=no
+fi
+assert_eq "no" "$fpP1b_shared" "FAILURE PROOF (scenario 6b): a mutant that gives every session its own DIRECTORY must break the shared-directory assertion - proving that assertion is doing real work and not merely restating the path check above it"
+
+# --- fpP1c: load-profile.sh's OWN copy of sanitize_session_id, made a
+# no-op.
+#
+# This proof exists because of a specific trap this build has already
+# fallen into once: two functions share one fix, every existing proof
+# exercises only ONE of them, and reverting the other leaves the suite
+# green. scenario 12's proof (fp12, above) mutates check-off-flag.sh's
+# copy. Nothing there touches load-profile.sh's copy, which is a
+# deliberate duplicate (see that function's own comment). This is that
+# copy's own coverage.
+fpP1c_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1c_start=$(line_of "$fpP1c_script" 'sanitize_session_id() {')
+[ -n "$fpP1c_start" ] || fpP1c_start=0
+fpP1c_end=$(line_of_after "$fpP1c_script" "$fpP1c_start" '}')
+[ -n "$fpP1c_end" ] || fpP1c_end=0
+# shellcheck disable=SC2016
+fpP1c_noop='sanitize_session_id() {
+  raw=$1
+  printf "%s" "$raw"
+  return 0
+}'
+replace_block "$fpP1c_script" "$fpP1c_start" "$fpP1c_end" "$fpP1c_noop"
+
+fpP1c_home=$(new_home)
+fpP1c_stdin=$(printf '{"session_id":"../../../etc/passwd","cwd":"%s/anon-project"}' "$fpP1c_home")
+fpP1c_path=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$fpP1c_script" "$fpP1c_home" "$fpP1c_stdin")")")
+assert_contains "$fpP1c_path" "etc/passwd" "FAILURE PROOF (scenario 6c): with load-profile.sh's OWN sanitize_session_id made a no-op, a traversal-shaped session_id must escape straight into the injected checkpoint path - proving 6c's containment assertions cover this copy of the function, not just check-off-flag.sh's"
+assert_contains "$fpP1c_path" ".." "FAILURE PROOF (scenario 6c): the same no-op mutant must let '..' survive into the injected path"
+
+# --- fpP1d: make random_suffix a constant. Reintroduces the shared
+# "anon.md" cell in all but name. Proves scenario 6c's uniqueness
+# assertion.
+fpP1d_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1d_start=$(line_of "$fpP1d_script" 'random_suffix() {')
+[ -n "$fpP1d_start" ] || fpP1d_start=0
+fpP1d_end=$(line_of_after "$fpP1d_script" "$fpP1d_start" '}')
+[ -n "$fpP1d_end" ] || fpP1d_end=0
+fpP1d_fixed='random_suffix() {
+  printf "fixed"
+}'
+replace_block "$fpP1d_script" "$fpP1d_start" "$fpP1d_end" "$fpP1d_fixed"
+
+fpP1d_home=$(new_home)
+fpP1d_stdin=$(printf '{"cwd":"%s/anon-project"}' "$fpP1d_home")
+fpP1d_first=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$fpP1d_script" "$fpP1d_home" "$fpP1d_stdin")")")
+fpP1d_second=$(extract_checkpoint_path_line "$(extract_ctx "$(capture_stdout "$fpP1d_script" "$fpP1d_home" "$fpP1d_stdin")")")
+assert_eq "$fpP1d_first" "$fpP1d_second" "FAILURE PROOF (scenario 6c): a constant random_suffix must hand every anonymous session the same file - the shared mutable cell under another name - proving 6c's uniqueness assertion is not vacuous"
+
+# --- fpP1e: delete the injected directory line. Proves scenario 6d's
+# always-emitted assertion for the directory (the path line already has
+# scenario 44's own equivalent).
+fpP1e_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1e_line=$(line_of "$fpP1e_script" 'Project checkpoint directory: $session_dir')
+[ -n "$fpP1e_line" ] || fpP1e_line=0
+replace_line "$fpP1e_script" "$fpP1e_line" ''
+
+fpP1e_home=$(new_home)
+fpP1e_stdin=$(printf '{"session_id":"sess-fpP1e","cwd":"%s/never-used"}' "$fpP1e_home")
+fpP1e_ctx=$(extract_ctx "$(capture_stdout "$fpP1e_script" "$fpP1e_home" "$fpP1e_stdin")")
+assert_not_contains "$fpP1e_ctx" "Project checkpoint directory:" "FAILURE PROOF (scenario 6d): deleting the directory line from the emitted context must remove it - proving 6d's presence assertion is not matching some other line by accident"
+
+# --- fpP1f: have the hook create the directory. Proves scenario 6d's
+# "must not create it" assertion, which would otherwise pass simply
+# because nothing in the test ever asked for the directory.
+fpP1f_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1f_line=$(line_of "$fpP1f_script" '  prune_stale_session_checkpoints "$session_dir"')
+[ -n "$fpP1f_line" ] || fpP1f_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1f_script" "$fpP1f_line" '  mkdir -p "$session_dir" 2>/dev/null || true'
+
+fpP1f_home=$(new_home)
+fpP1f_stdin=$(printf '{"session_id":"sess-fpP1f","cwd":"%s/never-used"}' "$fpP1f_home")
+fpP1f_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1f_script" "$fpP1f_home" "$fpP1f_stdin")")")
+if [ -d "$fpP1f_dir" ]; then
+  fpP1f_created=yes
+else
+  fpP1f_created=no
+fi
+assert_eq "yes" "$fpP1f_created" "FAILURE PROOF (scenario 6d): a mutant that mkdir's the session directory must actually create it - proving 6d's 'the hook must not create it' assertion is checking a real, observable difference"
+
+# --- fpP1g: key "Resume available" off this session's OWN file again -
+# the pre-P1 condition, carried forward unchanged into the new layout.
+# Proves scenario 6e.
+fpP1g_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1g_line=$(line_of "$fpP1g_script" '  if [ -n "$home_dir" ] && { checkpoint_dir_has_any "$session_dir" || [ -f "$legacy_checkpoint_file" ]; }; then')
+[ -n "$fpP1g_line" ] || fpP1g_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1g_script" "$fpP1g_line" '  if [ -n "$home_dir" ] && [ -f "$checkpoint_file" ]; then'
+
+fpP1g_home=$(new_home)
+fpP1g_old=$(printf '{"session_id":"sess-fpP1g-old","cwd":"%s/busy-project"}' "$fpP1g_home")
+fpP1g_ctx_old=$(extract_ctx "$(capture_stdout "$fpP1g_script" "$fpP1g_home" "$fpP1g_old")")
+fpP1g_dir=$(extract_checkpoint_dir_line "$fpP1g_ctx_old")
+mkdir -p "$fpP1g_dir"
+printf '# checkpoint\n' >"$(extract_checkpoint_path_line "$fpP1g_ctx_old")"
+
+fpP1g_new=$(printf '{"session_id":"sess-fpP1g-brand-new","cwd":"%s/busy-project"}' "$fpP1g_home")
+fpP1g_ctx_new=$(extract_ctx "$(capture_stdout "$fpP1g_script" "$fpP1g_home" "$fpP1g_new")")
+assert_not_contains "$fpP1g_ctx_new" "Resume available" "FAILURE PROOF (scenario 6e): keying 'Resume available' off this session's own file must make a brand-new session report no checkpoint in a project full of them - proving 6e's assertion is not vacuous"
+
+# --- fpP1h: delete the legacy-detection block. Proves scenario 6f's
+# 'Legacy checkpoint file:' assertion AND its resume assertion, since
+# the flat file is the only checkpoint that project has.
+fpP1h_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1h_start=$(line_of "$fpP1h_script" '  if [ -n "$home_dir" ] && [ -f "$legacy_checkpoint_file" ]; then')
+[ -n "$fpP1h_start" ] || fpP1h_start=0
+fpP1h_end=$(line_of_after "$fpP1h_script" "$fpP1h_start" '  fi')
+[ -n "$fpP1h_end" ] || fpP1h_end=0
+# shellcheck disable=SC2016
+replace_block "$fpP1h_script" "$fpP1h_start" "$fpP1h_end" '  if [ -n "$home_dir" ] && [ -f "$legacy_checkpoint_file" ]; then
+    :
+  fi'
+
+fpP1h_home=$(new_home)
+fpP1h_stdin=$(printf '{"session_id":"sess-fpP1h","cwd":"%s/legacy-project"}' "$fpP1h_home")
+fpP1h_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1h_script" "$fpP1h_home" "$fpP1h_stdin")")")
+mkdir -p "$(dirname "$fpP1h_dir")"
+printf '# checkpoint\n' >"$fpP1h_dir.md"
+fpP1h_ctx=$(extract_ctx "$(capture_stdout "$fpP1h_script" "$fpP1h_home" "$fpP1h_stdin")")
+assert_not_contains "$fpP1h_ctx" "Legacy checkpoint file:" "FAILURE PROOF (scenario 6f): removing the legacy-detection block must stop the pre-P1 flat checkpoint being named - proving 6f's assertion is not matching some other line"
+
+# --- fpP1i: prune by AGE ALONE, dropping the "not among the 10 most
+# recently modified" clause. This is the time bomb the conjunction
+# exists to defuse, and it is the mutant that matters most: the
+# dormant-project scenario is the one real users hit. Proves scenario
+# 6g's second half.
+fpP1i_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1i_start=$(line_of "$fpP1i_script" '    newer_count=$(find "$slug_dir" -type f -newer "$candidate" 2>/dev/null | wc -l | awk '"'"'{print $1}'"'"') || newer_count=0')
+[ -n "$fpP1i_start" ] || fpP1i_start=0
+# shellcheck disable=SC2016
+fpP1i_end=$(line_of_after "$fpP1i_script" "$fpP1i_start" '    fi')
+[ -n "$fpP1i_end" ] || fpP1i_end=0
+# shellcheck disable=SC2016
+replace_block "$fpP1i_script" "$fpP1i_start" "$fpP1i_end" '    rm -f -- "$candidate" >/dev/null 2>&1 || true'
+
+fpP1i_home=$(new_home)
+fpP1i_stdin=$(printf '{"session_id":"sess-fpP1i","cwd":"%s/dormant-project"}' "$fpP1i_home")
+fpP1i_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1i_script" "$fpP1i_home" "$fpP1i_stdin")")")
+mkdir -p "$fpP1i_dir"
+i_fpP1i=1
+while [ "$i_fpP1i" -le 5 ]; do
+  printf 'x\n' >"$fpP1i_dir/ancient-$i_fpP1i.md"
+  touch -t "20010$i_fpP1i"021200 "$fpP1i_dir/ancient-$i_fpP1i.md"
+  i_fpP1i=$((i_fpP1i + 1))
+done
+capture_stdout "$fpP1i_script" "$fpP1i_home" "$fpP1i_stdin" >/dev/null
+fpP1i_survivors=$(find "$fpP1i_dir" -type f | wc -l | awk '{print $1}')
+assert_eq "0" "$fpP1i_survivors" "FAILURE PROOF (scenario 6g): pruning by age alone must wipe a dormant project's entire memory - proving 6g's 'a 20-year-dormant project loses none of its 5 checkpoints' assertion is not vacuous"
+
+# --- fpP1j: disable pruning entirely. Proves scenario 6g's first half -
+# that the deletions it asserts are the pruner's doing and not some
+# other cleanup.
+fpP1j_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1j_line=$(line_of "$fpP1j_script" '  [ -d "$slug_dir" ] || return 0')
+[ -n "$fpP1j_line" ] || fpP1j_line=0
+replace_line "$fpP1j_script" "$fpP1j_line" '  return 0'
+
+fpP1j_home=$(new_home)
+fpP1j_stdin=$(printf '{"session_id":"sess-fpP1j","cwd":"%s/prune-project"}' "$fpP1j_home")
+fpP1j_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1j_script" "$fpP1j_home" "$fpP1j_stdin")")")
+mkdir -p "$fpP1j_dir"
+i_fpP1j=1
+while [ "$i_fpP1j" -le 15 ]; do
+  printf 'x\n' >"$fpP1j_dir/old-$i_fpP1j.md"
+  touch -t "2401$(printf '%02d' "$i_fpP1j")1200" "$fpP1j_dir/old-$i_fpP1j.md"
+  i_fpP1j=$((i_fpP1j + 1))
+done
+printf 'x\n' >"$fpP1j_dir/fresh.md"
+capture_stdout "$fpP1j_script" "$fpP1j_home" "$fpP1j_stdin" >/dev/null
+fpP1j_survivors=$(find "$fpP1j_dir" -type f | wc -l | awk '{print $1}')
+assert_eq "16" "$fpP1j_survivors" "FAILURE PROOF (scenario 6g): with the pruner disabled all 16 files must survive - proving 6g's deletion assertions measure the pruner and nothing else"
+
+# --- fpP1jj: prune by RANK ALONE, dropping the 30-day floor from the
+# candidate `find`. The mirror image of fpP1i, and the mutant that
+# exposed a real hole: neither half of scenario 6g can see this one.
+# 6g's outcome is fixed by the rank clause whether or not the floor is
+# consulted, and 6g2 never ranks anything out. Scenario 6g3 - fourteen
+# files all written today - is the only shape where the two clauses
+# disagree, and this proves it says so.
+#
+# Note the mutation removes the `-mtime` predicate outright rather than
+# setting CHECKPOINT_PRUNE_MIN_AGE_DAYS to 0: `-mtime +0` still means
+# "at least one full day old", so a zeroed threshold is NOT the same
+# code path as an absent one and leaves today's files unreachable.
+fpP1jj_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1jj_line=$(line_of "$fpP1jj_script" '  candidates=$(find "$slug_dir" -type f -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidates=""')
+[ -n "$fpP1jj_line" ] || fpP1jj_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1jj_script" "$fpP1jj_line" '  candidates=$(find "$slug_dir" -type f 2>/dev/null) || candidates=""'
+
+fpP1jj_home=$(new_home)
+fpP1jj_stdin=$(printf '{"session_id":"sess-fpP1jj","cwd":"%s/busy-project"}' "$fpP1jj_home")
+fpP1jj_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1jj_script" "$fpP1jj_home" "$fpP1jj_stdin")")")
+mkdir -p "$fpP1jj_dir"
+fpP1jj_today=$(date +%Y%m%d)
+i_fpP1jj=0
+while [ "$i_fpP1jj" -le 13 ]; do
+  printf 'x\n' >"$fpP1jj_dir/today-$i_fpP1jj.md"
+  touch -t "${fpP1jj_today}00$(printf '%02d' "$i_fpP1jj")" "$fpP1jj_dir/today-$i_fpP1jj.md"
+  i_fpP1jj=$((i_fpP1jj + 1))
+done
+capture_stdout "$fpP1jj_script" "$fpP1jj_home" "$fpP1jj_stdin" >/dev/null
+fpP1jj_survivors=$(find "$fpP1jj_dir" -type f | wc -l | awk '{print $1}')
+assert_eq "10" "$fpP1jj_survivors" "FAILURE PROOF (scenario 6g3): pruning by rank alone must delete 4 of today's 14 checkpoints - proving 6g3's 'all 14 survive' assertion measures the 30-day floor and is not simply counting files nothing was ever going to touch"
+
+# --- fpP1k: delete Layer 1b entirely (the pre-P1 behaviour: the flat
+# path allowed for every tool). Proves scenario 14d's Write/Edit defer
+# assertions.
+fpP1k_script=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016 # single-quoted deliberately: literal source
+# text of allow-checkpoint.sh.
+fpP1k_start=$(line_of "$fpP1k_script" '  # Layer 1b (P1, tech-lead decision D1): a DIRECT CHILD FILE of')
+[ -n "$fpP1k_start" ] || fpP1k_start=0
+fpP1k_end=$(line_of_after "$fpP1k_script" "$fpP1k_start" '  esac')
+[ -n "$fpP1k_end" ] || fpP1k_end=0
+replace_block "$fpP1k_script" "$fpP1k_start" "$fpP1k_end" ''
+
+fpP1k_home=$(new_home)
+for tool_fpP1k in Write Edit; do
+  fpP1k_stdin=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s/.squirrel/checkpoints/legacy-proj-987654.md"}}' "$tool_fpP1k" "$fpP1k_home")
+  fpP1k_out=$(capture_stdout "$fpP1k_script" "$fpP1k_home" "$fpP1k_stdin")
+  fpP1k_decision=$(printf '%s' "$fpP1k_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fpP1k_decision="<jq error>"
+  assert_eq "allow" "$fpP1k_decision" "FAILURE PROOF (D1, scenario 14d): with Layer 1b removed, a $tool_fpP1k to the pre-P1 flat checkpoint reverts to 'allow' - proving 14d's defer assertions are the new guard's doing and not some pre-existing rule"
+done
+
+# --- fpP1l: defer the flat path OUTRIGHT, for every tool - the reading
+# of PLAN.md that decision D1 deliberately rejected. Proves scenario
+# 14d's Read-side ALLOW assertion, which nothing else covers: a suite
+# that only tested the defers would stay green on this mutant while the
+# migration read silently started costing a permission prompt.
+fpP1l_script=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016
+fpP1l_line=$(line_of "$fpP1l_script" '        Read) ;;')
+[ -n "$fpP1l_line" ] || fpP1l_line=0
+replace_line "$fpP1l_script" "$fpP1l_line" '        ThisToolNameCannotExist) ;;'
+
+fpP1l_home=$(new_home)
+fpP1l_stdin=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/.squirrel/checkpoints/legacy-proj-987654.md"}}' "$fpP1l_home")
+fpP1l_out=$(capture_stdout "$fpP1l_script" "$fpP1l_home" "$fpP1l_stdin")
+fpP1l_decision=$(printf '%s' "$fpP1l_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fpP1l_decision="<jq error>"
+assert_eq "defer" "$fpP1l_decision" "FAILURE PROOF (D1, scenario 14d): removing Read from Layer 1b's carve-out must make the migration read defer - proving 14d's Read-side 'allow' assertion is not vacuous, and that the split by tool is load-bearing in both directions"
+
+# --- fpP1m: require TWO intermediate components before a path counts as
+# nested. Proves scenarios 14 and 14e (the shipped one-level nested
+# layout must allow) while leaving 14deep untouched, so the two are not
+# covering for each other.
+fpP1m_script=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016
+fpP1m_line=$(line_of "$fpP1m_script" '    */*) ;;')
+[ -n "$fpP1m_line" ] || fpP1m_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1m_script" "$fpP1m_line" '    */*/*) ;;'
+
+fpP1m_home=$(new_home)
+for tool_fpP1m in Write Edit; do
+  fpP1m_stdin=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-123456/sess-abc.md"}}' "$tool_fpP1m" "$fpP1m_home")
+  fpP1m_out=$(capture_stdout "$fpP1m_script" "$fpP1m_home" "$fpP1m_stdin")
+  fpP1m_decision=$(printf '%s' "$fpP1m_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fpP1m_decision="<jq error>"
+  assert_eq "defer" "$fpP1m_decision" "FAILURE PROOF (scenarios 14/14e): a mutant that only recognises paths two levels deep must defer a $tool_fpP1m to the SHIPPED one-level nested layout - proving those allow assertions genuinely depend on Layer 1b letting the real layout through"
+done
+
+fpP1m_deep=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/a/b/c/d.md"}}' "$fpP1m_home")
+fpP1m_deep_out=$(capture_stdout "$fpP1m_script" "$fpP1m_home" "$fpP1m_deep")
+fpP1m_deep_decision=$(printf '%s' "$fpP1m_deep_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fpP1m_deep_decision="<jq error>"
+assert_eq "allow" "$fpP1m_deep_decision" "FAILURE PROOF isolation (scenarios 14/14e vs 14deep): the same mutant must leave the DEEPER path allowed - proving the two assertions exercise different code paths and neither is silently standing in for the other"
+
+# --- fpP1n: the mirror image - treat anything deeper than the shipped
+# layout as suspect. Proves scenario 14deep, the depth-insensitivity
+# assertion, which fpP1m by construction cannot.
+fpP1n_script=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016
+fpP1n_line=$(line_of "$fpP1n_script" '    */*) ;;')
+[ -n "$fpP1n_line" ] || fpP1n_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1n_script" "$fpP1n_line" '    */*/*) printf '"'"'defer'"'"'; return 0 ;;
+    */*) ;;'
+
+fpP1n_home=$(new_home)
+fpP1n_deep=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/a/b/c/d.md"}}' "$fpP1n_home")
+fpP1n_deep_out=$(capture_stdout "$fpP1n_script" "$fpP1n_home" "$fpP1n_deep")
+fpP1n_deep_decision=$(printf '%s' "$fpP1n_deep_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fpP1n_deep_decision="<jq error>"
+assert_eq "defer" "$fpP1n_deep_decision" "FAILURE PROOF (scenario 14deep): a depth-capped mutant must defer a path nested deeper than the shipped layout - proving 14deep's allow assertion is not vacuous"
+
+fpP1n_shallow=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/myproj-123456/sess-abc.md"}}' "$fpP1n_home")
+fpP1n_shallow_out=$(capture_stdout "$fpP1n_script" "$fpP1n_home" "$fpP1n_shallow")
+fpP1n_shallow_decision=$(printf '%s' "$fpP1n_shallow_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fpP1n_shallow_decision="<jq error>"
+assert_eq "allow" "$fpP1n_shallow_decision" "FAILURE PROOF isolation (scenario 14deep vs 14/14e): the same depth-capped mutant must leave the shipped one-level layout allowed - the two proofs are independent, in both directions"
 
 assert_report

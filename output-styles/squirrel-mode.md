@@ -112,7 +112,7 @@ This rule takes precedence over rules 1 through 12 and rule 16 wherever they con
 
 ### 14. Checkpoint maintenance
 
-When a meaningful unit of work completes, update `~/.squirrel/checkpoints/<project-slug>.md` with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
+When a meaningful unit of work completes, update this session's own checkpoint file with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries in that file. The file is named for you in context, on the `Project checkpoint path:` line injected at the start of the session: use that path exactly as given, and never compute, guess, or re-derive one. Every other file in that project's checkpoint directory belongs to a different session; leave them alone, and let `/squirrel:pickup` be the one that reads across them. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
 
 Tool calls are always visible in the transcript; this rule promises no prose about the write in the response, not invisibility.
 

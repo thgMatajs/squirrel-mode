@@ -236,6 +236,47 @@
 # the project's existing posture. This cost is stated in README.md and
 # docs/adr/0002-checkpoint-auto-allow.md, wherever the auto-approval
 # mechanism is described.
+#
+# ======================================================================
+# ADDED BY P1 (per-session checkpoint layout). Self-contained; nothing
+# above this line is restated or amended by it.
+# ======================================================================
+#
+# P1 moved a project's memory from one flat file,
+# checkpoints/<slug>.md, to one file per session inside a per-project
+# directory, checkpoints/<slug>/<session-id>.md. The security boundary
+# did NOT move with it: it is still the `checkpoints/` directory, and
+# every layer below still asks the single question "does this path
+# resolve inside checkpoints/, with no symlink at or below
+# checkpoints/". The nested layout adds one more intermediate component
+# (`<slug>/`) for the component walk to inspect, which it already does
+# by construction - it walks every component of the remainder, however
+# many there are - so the whole attack matrix was re-run against the
+# nested shape rather than assumed to still hold. See tests/
+# test_hooks.sh's nested-layout scenarios.
+#
+# One behaviour DOES change, tech-lead decision D1: on a path that is a
+# DIRECT CHILD FILE of checkpoints/ - i.e. the pre-P1 flat shape, with
+# no further "/" after checkpoints/ - `Read` still allows, while `Write`
+# and `Edit` now defer.
+#
+# Why the split rather than deferring the old path outright: the
+# migration path needs to READ the old flat file (/squirrel:pickup folds
+# it in, once, on first read), and ADR-0002's promise is that an
+# ordinary checkpoint interaction never costs the user a permission
+# prompt. Deferring that read would break both. Why the write side
+# defers at all: post-P1 the model is only ever handed a nested path, so
+# nothing correct writes a flat one. That makes the write-side defer a
+# tripwire with no legitimate traffic behind it, rather than a guard
+# that bars correct work - and its cost when it does fire is one
+# ordinary permission prompt, never a denial.
+#
+# The test is the SHAPE of the path, not the identity of the slug:
+# matching "the old file" exactly would mean recomputing the project
+# slug here, which needs `cwd` - a field the PreToolUse payload does not
+# carry. The shape test is also the more conservative of the two: it
+# covers every flat child of checkpoints/, not just the one this project
+# happens to own.
 set -eu
 
 # MAX_FILE_PATH_LEN: the DoS cap (see "FIXED MAJOR" above). 4096 bytes
@@ -520,6 +561,24 @@ decide() {
     printf 'defer'
     return 0
   fi
+
+  # Layer 1b (P1, tech-lead decision D1): a DIRECT CHILD FILE of
+  # checkpoints/ - no further "/" in the remainder - is the pre-P1 flat
+  # layout. Reading one is legitimate (that is how the legacy file gets
+  # folded in); writing one is not, because post-P1 nothing correct
+  # targets it. See the P1 paragraph in this file's header.
+  case "$after" in
+    */*) ;;
+    *)
+      case "$tool_name" in
+        Read) ;;
+        *)
+          printf 'defer'
+          return 0
+          ;;
+      esac
+      ;;
+  esac
 
   # Layer 2: unconditional POSIX component walk (see header) - the
   # only, always-active fallback, zero external tools. Tests
