@@ -75,3 +75,20 @@ own newer `profile.md` silently overwritten by an older one — and the cost of 
 user's calibration or Done log lost) is worse than the cost of asking them to run one command
 themselves. The notice repeats every session for as long as the old directory exists and stops the
 moment it is gone, with no separate "already told them" state to track.
+
+## Amendment (P3) — accept the torn-read window on `/squirrel:tune` Write
+
+`/squirrel:tune` is a skill: the model rewrites `~/.squirrel/profile.md` with the Write tool and
+cannot do an atomic temp+rename. That leaves a tiny window where a concurrent reader (another
+session's SessionStart or UserPromptSubmit reinjection, or a Codex/Cursor cadence read) can see a
+partial file. This amendment records the decision for that residual:
+
+**Accept the window. Do not route Write through a new installer-style auto-approved script.**
+
+Rationale: the window is tiny and low severity for a short, hand-sized markdown profile; closing it
+by handing the model another auto-approved write path expands exactly the surface this project
+already got hurt by twice (ADR-0002 auto-allow / protected-path collisions). Propagation of a
+finished tune to other open Claude Code sessions is handled separately by an mtime check on
+`UserPromptSubmit` in `scripts/load-profile.sh` (per-session seen files under
+`~/.squirrel/profile-seen/`), not by making the write itself atomic. Cross-tool staleness
+(Cursor/Codex lacking that reinjection) stays documented only — see `docs/OTHER-TOOLS.md`.

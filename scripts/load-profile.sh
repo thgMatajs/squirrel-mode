@@ -1,7 +1,8 @@
 #!/bin/sh
-# load-profile.sh - SessionStart hook.
+# load-profile.sh - SessionStart hook, and (P3) a second UserPromptSubmit
+# hook for profile mtime reinjection.
 #
-# Fires on session startup/resume/clear/compact (matcher in hooks.json).
+# SessionStart (matcher in hooks.json: startup|resume|clear|compact):
 # Emits hookSpecificOutput.additionalContext containing:
 #   - the user's ~/.squirrel/profile.md, if it exists, with a
 #     line stating its fields override the output style's defaults; or
@@ -53,6 +54,22 @@
 # It also prunes stale ~/.squirrel/off/<session_id> flag files
 # (see check-off-flag.sh) and stale per-session checkpoint files (see
 # prune_stale_session_checkpoints) so neither accumulates forever.
+# After injecting a REAL profile body it touches
+# ~/.squirrel/profile-seen/<sanitised-session-id> so later prompts know
+# the baseline (P3). Sanitize failure skips that touch only - SessionStart
+# JSON emission is unchanged.
+#
+# UserPromptSubmit (P3, second command alongside check-off-flag.sh):
+# Does NOT re-run prune, migration notice, off-token, checkpoint path, or
+# resume banner. Reads hook_event_name from stdin. When the event is
+# UserPromptSubmit: if profile.md is absent, print nothing (no /init nag
+# every prompt); if profile.md exists and is newer than this session's
+# seen file (or no seen file yet), emit the SAME profile framing
+# SessionStart uses for the body as PLAIN TEXT additionalContext (same
+# stdout convention as check-off-flag.sh - not SessionStart JSON), then
+# touch the seen file. Otherwise empty stdout. Sanitize failure skips
+# seen tracking and reinjection (empty stdout). emit_json stays
+# SessionStart-only.
 #
 # S11 MIGRATION NOTICE: squirrel-mode's data directory migrated from
 # ~/.claude/squirrel/ to ~/.squirrel/ (docs/adr/0003's Amendment (S11) -
@@ -108,23 +125,24 @@
 # expected to have curated. Reading one of them costs nothing and cannot
 # be wrong; moving one could be.
 #
-# Contract: this hook runs on every session start. It must NEVER exit
-# non-zero and must always print one well-formed SessionStart JSON
-# object on stdout for every command FAILURE it depends on, and for
-# every broken / bare / missing ~/.squirrel/ layout a fresh install can
-# present (nothing under ~/.squirrel/ at all is the common case on turn
-# one, not an edge case). Audited under a scratch HOME (P4 item 2): bad
-# HOME shapes, unreadable or non-file profile.md, malformed / empty /
-# closed-as-/dev/null stdin, jq absent, jq exiting non-zero, jq exiting
-# 0 with the literal `null` or with no output, a non-empty object that
-# is not a SessionStart payload, one-at-a-time absence of
-# cksum/od/cut/wc/tail/basename/tr/find/awk/sed, locales C and
-# pt_BR.UTF-8, and C0 / invalid-UTF-8 profile bodies all return exit 0
-# with a parseable SessionStart object (the jq-null and jq-empty cases
-# used to print `null` / a blank line and are closed in emit_json
-# below; the non-SessionStart-object case used to be emitted verbatim
-# and is closed by the same function's hookEventName check; the rest
-# already held).
+# Contract: this hook must NEVER exit non-zero. On SessionStart (or when
+# hook_event_name is missing/other) it must always print one well-formed
+# SessionStart JSON object on stdout for every command FAILURE it depends
+# on, and for every broken / bare / missing ~/.squirrel/ layout a fresh
+# install can present (nothing under ~/.squirrel/ at all is the common
+# case on turn one, not an edge case). On UserPromptSubmit it prints
+# plain text or nothing - never SessionStart JSON. Audited under a
+# scratch HOME (P4 item 2): bad HOME shapes, unreadable or non-file
+# profile.md, malformed / empty / closed-as-/dev/null stdin, jq absent,
+# jq exiting non-zero, jq exiting 0 with the literal `null` or with no
+# output, a non-empty object that is not a SessionStart payload,
+# one-at-a-time absence of cksum/od/cut/wc/tail/basename/tr/find/awk/sed,
+# locales C and pt_BR.UTF-8, and C0 / invalid-UTF-8 profile bodies all
+# return exit 0 with a parseable SessionStart object on the SessionStart
+# path (the jq-null and jq-empty cases used to print `null` / a blank
+# line and are closed in emit_json below; the non-SessionStart-object
+# case used to be emitted verbatim and is closed by the same function's
+# hookEventName check; the rest already held).
 #
 # `set -e` vs. "never exit non-zero": `set -e` stays ON for the whole
 # script, including inside build_context() below, so a bug fails fast
@@ -767,9 +785,65 @@ cap_profile_body() {
   printf '%s' "$body"
 }
 
+# --- Profile framing + per-session seen file (P3) ---------------------
+#
+# format_profile_framing <profile_file> <capped_body>: the same text
+# SessionStart uses for a real profile body. Shared so UserPromptSubmit
+# reinjection cannot drift from SessionStart's wording.
+format_profile_framing() {
+  profile_file=$1
+  profile_body=$2
+  printf 'A squirrel-mode profile exists at %s. These field values OVERRIDE the defaults already given to you in the squirrel-mode output style, field by field.\n\n%s' "$profile_file" "$profile_body"
+}
+
+# touch_profile_seen <home_dir> <raw_session_id>: after a real profile
+# inject, record that this session has seen the current profile.md.
+# Sanitize failure, empty HOME, or mkdir/touch problems are silent
+# no-ops - never fail the hook.
+touch_profile_seen() {
+  home_dir=$1
+  raw_session_id=$2
+  [ -n "$home_dir" ] || return 0
+  session_id=$(sanitize_session_id "$raw_session_id") || return 0
+  [ -n "$session_id" ] || return 0
+  seen_dir="$home_dir/.squirrel/profile-seen"
+  mkdir -p "$seen_dir" >/dev/null 2>&1 || return 0
+  touch -- "$seen_dir/$session_id" >/dev/null 2>&1 || true
+  return 0
+}
+
+# handle_user_prompt_submit <input_json>: P3 reinjection path. Prints
+# plain-text profile framing when profile.md is newer than this
+# session's seen file (or no seen file yet); otherwise prints nothing.
+# Never emits SessionStart JSON. Never nags /init. Never prunes.
+handle_user_prompt_submit() {
+  input=$1
+  raw_session_id=$(extract_field "$input" "session_id")
+  session_id=$(sanitize_session_id "$raw_session_id") || { printf ''; return 0; }
+  [ -n "$session_id" ] || { printf ''; return 0; }
+
+  home_dir="${HOME:-}"
+  [ -n "$home_dir" ] || { printf ''; return 0; }
+
+  profile_file="$home_dir/.squirrel/profile.md"
+  [ -f "$profile_file" ] || { printf ''; return 0; }
+
+  seen_file="$home_dir/.squirrel/profile-seen/$session_id"
+  if [ -f "$seen_file" ]; then
+    newer=$(find "$profile_file" -newer "$seen_file" 2>/dev/null) || newer=""
+    [ -n "$newer" ] || { printf ''; return 0; }
+  fi
+
+  profile_body=$(cat "$profile_file" 2>/dev/null) || profile_body=""
+  profile_body=$(cap_profile_body "$profile_body")
+  format_profile_framing "$profile_file" "$profile_body"
+  touch_profile_seen "$home_dir" "$raw_session_id"
+  return 0
+}
+
 # --- Context assembly -------------------------------------------------
 build_context() {
-  input=$(cat)
+  input=$1
   cwd=$(extract_field "$input" "cwd")
   raw_session_id=$(extract_field "$input" "session_id")
 
@@ -797,12 +871,12 @@ build_context() {
 
   prune_stale_session_checkpoints "$session_dir"
 
+  injected_real_profile=0
   if [ -n "$home_dir" ] && [ -f "$profile_file" ]; then
     profile_body=$(cat "$profile_file" 2>/dev/null) || profile_body=""
     profile_body=$(cap_profile_body "$profile_body")
-    context="A squirrel-mode profile exists at $profile_file. These field values OVERRIDE the defaults already given to you in the squirrel-mode output style, field by field.
-
-$profile_body"
+    context=$(format_profile_framing "$profile_file" "$profile_body")
+    injected_real_profile=1
   else
     context="squirrel-mode: no profile found yet. Suggest /squirrel:init once, briefly."
   fi
@@ -831,10 +905,36 @@ Legacy checkpoint file: $legacy_checkpoint_file"
 Resume available - run /squirrel:pickup"
   fi
 
+  if [ "$injected_real_profile" -eq 1 ]; then
+    touch_profile_seen "$home_dir" "$raw_session_id"
+  fi
+
   printf '%s' "$context"
 }
 
-if context=$(build_context 2>/dev/null); then
+# --- Entry ------------------------------------------------------------
+#
+# Read stdin once. UserPromptSubmit takes the P3 plain-text path;
+# SessionStart (and missing/other hook_event_name) keep today's
+# emit_json SessionStart contract.
+input=$(cat)
+hook_event_name=$(extract_field "$input" "hook_event_name")
+
+case "$hook_event_name" in
+  UserPromptSubmit)
+    if output=$(handle_user_prompt_submit "$input" 2>/dev/null); then
+      :
+    else
+      output=""
+    fi
+    if [ -n "$output" ]; then
+      printf '%s\n' "$output"
+    fi
+    exit 0
+    ;;
+esac
+
+if context=$(build_context "$input" 2>/dev/null); then
   :
 else
   # Last-resort fallback: something inside build_context failed in a way

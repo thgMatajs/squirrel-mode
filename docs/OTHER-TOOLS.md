@@ -72,6 +72,11 @@ defaults to reflect your own calibration, run `/squirrel:init` in Claude Code or
 open `~/.squirrel/profile.md` and use its values to hand-edit `~/.cursor/rules/squirrel-mode.mdc`
 yourself — Cursor will never do this for you.
 
+Claude Code reinjects an updated `profile.md` into already-open sessions on the next prompt
+(`UserPromptSubmit` mtime check). Cursor and Codex do not get that reinjection: a tune (or hand
+edit) elsewhere can leave their view stale until their own cadence re-reads the file or the user
+restarts — there is no cross-tool hook to engineer.
+
 ## Install
 
 Both installers are POSIX `sh`, make no network calls, send no telemetry, and are **dry-run by

@@ -26,7 +26,7 @@ disable-model-invocation: true
    - `extras_section`: `yes` or `no`.
    - `tone`: `neutral`, `warm`, or `terse`.
    If the requested value is not on this list, say so in one line and ask again, for that same field only.
-6. Rewrite `~/.squirrel/profile.md` with the new value in place and every other field unchanged, keeping the same `field: value` shape the file already has.
+6. Rewrite `~/.squirrel/profile.md` with the new value in place and every other field unchanged, keeping the same `field: value` shape the file already has. Write is non-atomic (ADR-0003 Amendment P3); other open Claude Code sessions pick up the change on their next prompt via profile mtime reinjection - do not invent an installer-style write script.
 7. Confirm the change in one line, naming the field and its new value. Do not re-show the whole profile unless asked.
 8. If the user asks to change more than one field, handle them one at a time: confirm the first change, then repeat the one-question step for the next field. Never ask about two fields in the same message.
 

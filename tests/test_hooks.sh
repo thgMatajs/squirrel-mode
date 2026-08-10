@@ -284,6 +284,15 @@ assert_eq "Write|Edit|Read" "$pretooluse_matcher" "hooks.json PreToolUse matcher
 userpromptsubmit_present=$(jq -r '(.hooks.UserPromptSubmit // []) | length > 0' "$hooks_json" 2>/dev/null) || userpromptsubmit_present="<jq error>"
 assert_eq "true" "$userpromptsubmit_present" "hooks.json must define at least one UserPromptSubmit hook entry"
 
+userpromptsubmit_matcher=$(jq -r '.hooks.UserPromptSubmit[0].matcher // "<missing>"' "$hooks_json" 2>/dev/null) || userpromptsubmit_matcher="<jq error>"
+assert_eq "" "$userpromptsubmit_matcher" "hooks.json UserPromptSubmit matcher must be the empty string"
+
+userpromptsubmit_cmds=$(jq -r '.hooks.UserPromptSubmit[0].hooks[]?.command // empty' "$hooks_json" 2>/dev/null) || userpromptsubmit_cmds=""
+userpromptsubmit_cmd_count=$(printf '%s\n' "$userpromptsubmit_cmds" | grep -c '.' || true)
+assert_eq "2" "$userpromptsubmit_cmd_count" "hooks.json UserPromptSubmit must run exactly two command hooks (check-off-flag.sh + load-profile.sh)"
+assert_contains "$userpromptsubmit_cmds" 'check-off-flag.sh' "hooks.json UserPromptSubmit must include check-off-flag.sh"
+assert_contains "$userpromptsubmit_cmds" 'load-profile.sh' "hooks.json UserPromptSubmit must include load-profile.sh (P3 reinjection)"
+
 session_start_count=$(jq -r '(.hooks.SessionStart // []) | length' "$hooks_json" 2>/dev/null) || session_start_count="<jq error>"
 assert_eq "1" "$session_start_count" "hooks.json must define exactly one SessionStart matcher entry"
 
@@ -292,7 +301,7 @@ assert_eq "1" "$pretooluse_count" "hooks.json must define exactly one PreToolUse
 
 all_commands=$(jq -r '.hooks[][] | .hooks[]?.command // empty' "$hooks_json" 2>/dev/null) || all_commands=""
 command_count=$(printf '%s\n' "$all_commands" | grep -c '.' || true)
-assert_eq "3" "$command_count" "hooks.json must define exactly 3 hook commands total (one per script)"
+assert_eq "4" "$command_count" "hooks.json must define exactly 4 hook commands total (SessionStart load-profile, UserPromptSubmit check-off-flag + load-profile, PreToolUse allow-checkpoint)"
 
 # Collect commands into positional parameters (never a piped while-read
 # loop, which would fork a subshell and silently discard every
@@ -2037,13 +2046,12 @@ fp2_cat_line=$(line_of "$fp2_script" '    profile_body=$(cat "$profile_file" 2>/
 replace_line "$fp2_script" "$fp2_cat_line" '    profile_body=$(cat "$profile_file")'
 
 # shellcheck disable=SC2016
-fp2_ifnet_start=$(line_of "$fp2_script" 'if context=$(build_context 2>/dev/null); then')
+fp2_ifnet_start=$(line_of "$fp2_script" 'if context=$(build_context "$input" 2>/dev/null); then')
 [ -n "$fp2_ifnet_start" ] || fp2_ifnet_start=0
 fp2_ifnet_end=$(line_of_after "$fp2_script" "$fp2_ifnet_start" "fi")
 [ -n "$fp2_ifnet_end" ] || fp2_ifnet_end=0
 # shellcheck disable=SC2016
-replace_block "$fp2_script" "$fp2_ifnet_start" "$fp2_ifnet_end" 'context=$(build_context)'
-
+replace_block "$fp2_script" "$fp2_ifnet_start" "$fp2_ifnet_end" 'context=$(build_context "$input")'
 fp2_home=$(new_home)
 fp2_stdin=$(printf '{"cwd":"%s/project-a"}' "$fp2_home")
 fp2_exit=$(capture_exit "$fp2_script" "$fp2_home" "$fp2_stdin")
@@ -4461,5 +4469,129 @@ fpP1n_shallow=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squi
 fpP1n_shallow_out=$(capture_stdout "$fpP1n_script" "$fpP1n_home" "$fpP1n_shallow")
 fpP1n_shallow_decision=$(printf '%s' "$fpP1n_shallow_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fpP1n_shallow_decision="<jq error>"
 assert_eq "allow" "$fpP1n_shallow_decision" "FAILURE PROOF isolation (scenario 14deep vs 14/14e): the same depth-capped mutant must leave the shipped one-level layout allowed - the two proofs are independent, in both directions"
+
+# ==========================================================================
+# P3 — profile propagation via UserPromptSubmit mtime reinjection
+# ==========================================================================
+
+# P3-1..5: Session A SessionStart (v1 + seen), external write to v2,
+# Session A UserPromptSubmit sees v2, second UPS empty, Session B UPS
+# also sees v2. P3-6: SessionStart JSON regression (profile + off-token
+# + checkpoint path). Deterministic mtimes via touch -t (no sleep).
+
+home_p3=$(new_home)
+mkdir -p "$home_p3/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: PROFILE_V1_MARKER' >"$home_p3/.squirrel/profile.md"
+stdin_p3_a_start=$(printf '{"session_id":"sess-p3-a","cwd":"%s/proj-p3","hook_event_name":"SessionStart","source":"startup"}' "$home_p3")
+stdin_p3_a_ups=$(printf '{"session_id":"sess-p3-a","cwd":"%s/proj-p3","hook_event_name":"UserPromptSubmit"}' "$home_p3")
+stdin_p3_b_ups=$(printf '{"session_id":"sess-p3-b","cwd":"%s/proj-p3","hook_event_name":"UserPromptSubmit"}' "$home_p3")
+
+out_p3_start=$(capture_stdout "$load_profile_script" "$home_p3" "$stdin_p3_a_start")
+exit_p3_start=$(capture_exit "$load_profile_script" "$home_p3" "$stdin_p3_a_start")
+assert_eq "0" "$exit_p3_start" "P3-1: SessionStart must exit 0 after injecting profile v1"
+out_p3_start_json_valid=$(printf '%s' "$out_p3_start" | jq empty >/dev/null 2>&1 && echo yes || echo no)
+assert_eq "yes" "$out_p3_start_json_valid" "P3-1: SessionStart stdout must be valid JSON"
+event_p3_start=$(printf '%s' "$out_p3_start" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event_p3_start=""
+assert_eq "SessionStart" "$event_p3_start" "P3-6: SessionStart path must keep hookEventName SessionStart"
+ctx_p3_start=$(extract_ctx "$out_p3_start")
+assert_contains "$ctx_p3_start" "PROFILE_V1_MARKER" "P3-1: SessionStart must inject profile v1"
+assert_contains "$ctx_p3_start" "Session off-token:" "P3-6: SessionStart must still emit Session off-token"
+assert_contains "$ctx_p3_start" "Project checkpoint path:" "P3-6: SessionStart must still emit Project checkpoint path"
+assert_file_exists "$home_p3/.squirrel/profile-seen/sess-p3-a" "P3-1: SessionStart must touch profile-seen/<session_id> after a real profile inject"
+
+# Force seen older than the upcoming v2 write so find -newer is decisive
+# even on filesystems with one-second mtime resolution.
+touch -t 202001011200.00 "$home_p3/.squirrel/profile-seen/sess-p3-a"
+
+printf '%s\n' '# squirrel-mode profile' 'language: PROFILE_V2_MARKER' >"$home_p3/.squirrel/profile.md"
+touch -t 202501011200.00 "$home_p3/.squirrel/profile.md"
+
+out_p3_a_ups=$(capture_stdout "$load_profile_script" "$home_p3" "$stdin_p3_a_ups")
+exit_p3_a_ups=$(capture_exit "$load_profile_script" "$home_p3" "$stdin_p3_a_ups")
+assert_eq "0" "$exit_p3_a_ups" "P3-3: UserPromptSubmit reinjection must exit 0"
+assert_contains "$out_p3_a_ups" "PROFILE_V2_MARKER" "P3-3: Session A UserPromptSubmit must contain v2 after external tune"
+assert_contains "$out_p3_a_ups" "OVERRIDE" "P3-3: reinjection must use the same OVERRIDE framing as SessionStart"
+case "$out_p3_a_ups" in
+  \{*) p3_a_ups_json=yes ;;
+  *) p3_a_ups_json=no ;;
+esac
+assert_eq "no" "$p3_a_ups_json" "P3-3: UserPromptSubmit reinjection must be plain text, not SessionStart JSON"
+assert_not_contains "$out_p3_a_ups" "Session off-token:" "P3-3: UserPromptSubmit must not re-emit off-token"
+assert_not_contains "$out_p3_a_ups" "Project checkpoint path:" "P3-3: UserPromptSubmit must not re-emit checkpoint path"
+assert_not_contains "$out_p3_a_ups" "Suggest /squirrel:init" "P3: UserPromptSubmit must never nag /init"
+
+out_p3_a_ups2=$(capture_stdout "$load_profile_script" "$home_p3" "$stdin_p3_a_ups")
+assert_eq "" "$out_p3_a_ups2" "P3-4: second UserPromptSubmit with unchanged profile must print empty stdout"
+
+out_p3_b_ups=$(capture_stdout "$load_profile_script" "$home_p3" "$stdin_p3_b_ups")
+assert_contains "$out_p3_b_ups" "PROFILE_V2_MARKER" "P3-5: Session B (different session_id, same HOME) UserPromptSubmit must get v2 when it has no seen baseline"
+
+# No profile on UserPromptSubmit → empty (not /init nag)
+home_p3_empty=$(new_home)
+stdin_p3_empty=$(printf '{"session_id":"sess-p3-empty","cwd":"%s/proj","hook_event_name":"UserPromptSubmit"}' "$home_p3_empty")
+out_p3_empty=$(capture_stdout "$load_profile_script" "$home_p3_empty" "$stdin_p3_empty")
+assert_eq "" "$out_p3_empty" "P3: UserPromptSubmit with no profile.md must print empty stdout (no /init nag)"
+
+# Sanitize failure → empty, never non-zero
+stdin_p3_bad=$(printf '{"session_id":"../evil","cwd":"%s/proj","hook_event_name":"UserPromptSubmit"}' "$home_p3")
+exit_p3_bad=$(capture_exit "$load_profile_script" "$home_p3" "$stdin_p3_bad")
+out_p3_bad=$(capture_stdout "$load_profile_script" "$home_p3" "$stdin_p3_bad")
+assert_eq "0" "$exit_p3_bad" "P3: UserPromptSubmit with unsanitisable session_id must exit 0"
+assert_eq "" "$out_p3_bad" "P3: UserPromptSubmit with unsanitisable session_id must skip reinjection (empty stdout)"
+
+# --- fpP3a: drop the -newer / no-seen reinjection gate so UPS never
+# reinjects after SessionStart has created a seen file. Proves P3-3.
+fpP3a_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP3a_line=$(line_of "$fpP3a_script" '  if [ -f "$seen_file" ]; then')
+[ -n "$fpP3a_line" ] || fpP3a_line=0
+# Replace the whole newer-check block with an unconditional empty return
+# whenever a seen file exists - simulating a broken -newer gate that
+# never treats an updated profile as newer.
+fpP3a_end=$(line_of_after "$fpP3a_script" "$fpP3a_line" '  fi')
+[ -n "$fpP3a_end" ] || fpP3a_end=0
+# shellcheck disable=SC2016 # single-quoted deliberately: literal mutant
+# source text for load-profile.sh, not an expression to expand here.
+replace_block "$fpP3a_script" "$fpP3a_line" "$fpP3a_end" '  if [ -f "$seen_file" ]; then
+    printf '"'"''"'"'; return 0
+  fi'
+
+home_fpP3a=$(new_home)
+mkdir -p "$home_fpP3a/.squirrel"
+printf '%s\n' 'language: FP_P3A_V1' >"$home_fpP3a/.squirrel/profile.md"
+stdin_fpP3a_start=$(printf '{"session_id":"sess-fpP3a","cwd":"%s/p","hook_event_name":"SessionStart","source":"startup"}' "$home_fpP3a")
+stdin_fpP3a_ups=$(printf '{"session_id":"sess-fpP3a","cwd":"%s/p","hook_event_name":"UserPromptSubmit"}' "$home_fpP3a")
+capture_stdout "$fpP3a_script" "$home_fpP3a" "$stdin_fpP3a_start" >/dev/null
+touch -t 202001011200.00 "$home_fpP3a/.squirrel/profile-seen/sess-fpP3a"
+printf '%s\n' 'language: FP_P3A_V2' >"$home_fpP3a/.squirrel/profile.md"
+touch -t 202501011200.00 "$home_fpP3a/.squirrel/profile.md"
+out_fpP3a=$(capture_stdout "$fpP3a_script" "$home_fpP3a" "$stdin_fpP3a_ups")
+assert_eq "" "$out_fpP3a" "FAILURE PROOF (P3-3): a mutant that ignores profile.md -newer than seen must print empty on UserPromptSubmit after an external v2 write - proving the -newer gate is what delivers propagation"
+
+# --- fpP3b: UserPromptSubmit event name never matches → always takes
+# SessionStart JSON path. Proves the UPS wire / event branch is load-
+# bearing for plain-text reinjection (and that hooks.json's second
+# command would be useless without the branch).
+fpP3b_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP3b_line=$(line_of "$fpP3b_script" '  UserPromptSubmit)')
+[ -n "$fpP3b_line" ] || fpP3b_line=0
+replace_line "$fpP3b_script" "$fpP3b_line" '  UserPromptSubmitNeverMatch)'
+
+home_fpP3b=$(new_home)
+mkdir -p "$home_fpP3b/.squirrel"
+printf '%s\n' 'language: FP_P3B_V1' >"$home_fpP3b/.squirrel/profile.md"
+stdin_fpP3b_start=$(printf '{"session_id":"sess-fpP3b","cwd":"%s/p","hook_event_name":"SessionStart","source":"startup"}' "$home_fpP3b")
+stdin_fpP3b_ups=$(printf '{"session_id":"sess-fpP3b","cwd":"%s/p","hook_event_name":"UserPromptSubmit"}' "$home_fpP3b")
+capture_stdout "$fpP3b_script" "$home_fpP3b" "$stdin_fpP3b_start" >/dev/null
+touch -t 202001011200.00 "$home_fpP3b/.squirrel/profile-seen/sess-fpP3b"
+printf '%s\n' 'language: FP_P3B_V2' >"$home_fpP3b/.squirrel/profile.md"
+touch -t 202501011200.00 "$home_fpP3b/.squirrel/profile.md"
+out_fpP3b=$(capture_stdout "$fpP3b_script" "$home_fpP3b" "$stdin_fpP3b_ups")
+case "$out_fpP3b" in
+  \{*) fpP3b_json=yes ;;
+  *) fpP3b_json=no ;;
+esac
+assert_eq "yes" "$fpP3b_json" "FAILURE PROOF (P3 wire): renaming the UserPromptSubmit case arm must make a UPS stdin fall through to SessionStart JSON emission - proving the event branch (and thus the hooks.json second command that feeds it) is load-bearing for plain-text reinjection"
 
 assert_report
