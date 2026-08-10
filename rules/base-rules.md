@@ -128,7 +128,7 @@ This rule takes precedence over rules 1 through 12 and rule 16 wherever they con
 
 <!-- targets: claude-code -->
 
-When a meaningful unit of work completes, update `~/.claude/squirrel/checkpoints/<project-slug>.md` with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
+When a meaningful unit of work completes, update `~/.squirrel/checkpoints/<project-slug>.md` with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
 
 Tool calls are always visible in the transcript; this rule promises no prose about the write in the response, not invisibility.
 

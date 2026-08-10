@@ -1,14 +1,14 @@
 # squirrel-mode profile — reference
 
 This is a reference, not a file to copy. squirrel-mode never reads `profile.example.md` —
-the file that matters is `~/.claude/squirrel/profile.md`, and `/squirrel:init` is how you
+the file that matters is `~/.squirrel/profile.md`, and `/squirrel:init` is how you
 create it: a seven-question interview, one question per message, writing all 11 fields for
 you. Run `/squirrel:tune` afterward to change one field at a time, without repeating the
 interview.
 
 ## The exact shape
 
-`/squirrel:init` writes this shape to `~/.claude/squirrel/profile.md`. The defaults are shown
+`/squirrel:init` writes this shape to `~/.squirrel/profile.md`. The defaults are shown
 below; your own file will hold your own answers instead.
 
 ```markdown

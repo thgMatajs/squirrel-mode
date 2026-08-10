@@ -169,7 +169,7 @@ done
 # ==========================================================================
 # 3. No generated Codex or Cursor artifact mentions a mechanism its
 #    host lacks: injected-context lines, hooks, sentinels, PENDING,
-#    CLEAR, or ~/.claude/squirrel/off/. Case-SENSITIVE throughout -
+#    CLEAR, or ~/.squirrel/off/. Case-SENSITIVE throughout -
 #    PENDING/CLEAR specifically (the sentinel filename prefixes), not
 #    the ordinary English words "clear"/"unclear"/"clearly" that
 #    legitimately appear in this prose (e.g. init's "a clearly
@@ -181,7 +181,7 @@ forbidden_terms="hook sentinel PENDING CLEAR SessionStart UserPromptSubmit"
 # (the documented path as written in prose), never a path this shell
 # opens or expands - a leading "~" here is not tilde-expansion gone
 # wrong.
-off_flag_dir_needle='~/.claude/squirrel/off/'
+off_flag_dir_needle='~/.squirrel/off/'
 for cmd_name in digest plan init tune; do
   content=$(read_file "$repo_root/targets/codex/skills/$cmd_name/SKILL.md")
   for term in $forbidden_terms; do
@@ -205,7 +205,7 @@ done
 # 4. init and tune (Codex) reference the exact shared profile path.
 # ==========================================================================
 # shellcheck disable=SC2088 # same reasoning as off_flag_dir_needle above.
-profile_path_needle='~/.claude/squirrel/profile.md'
+profile_path_needle='~/.squirrel/profile.md'
 for cmd_name in init tune; do
   content=$(read_file "$repo_root/targets/codex/skills/$cmd_name/SKILL.md")
   assert_contains "$content" "$profile_path_needle" "Codex $cmd_name skill must reference the shared squirrel-mode profile path (the same file Claude Code and Cursor read)"

@@ -10,13 +10,15 @@ itself" in particular, for why.
 without a live, interactive session: filesystem effects, generated-artifact correctness, script
 behavior, and the text of every shipped skill, rule, and doc. That static sweep is still the
 backbone of every criterion below. **It no longer stops there.** The tech lead ran eight live,
-headless probes against the real Claude Code CLI during S9, then six more during a later, read-only
-S10 sweep (see "Live probe method" below), and their evidence is folded in throughout: several
+headless probes against the real Claude Code CLI during S9, six more during a later, read-only
+S10 sweep, and one further probe during a follow-up S11 sweep once the checkpoint data directory
+moved (see "Live probe method" below), and their evidence is folded in throughout: several
 criteria that were `unverifiable-by-automation`/`manual` before the probes now carry direct
 behavioral evidence and are marked `observed`. What the probes did **not** reach — most of the
-interview/tune/checkpoint/off-switch behavior, `digest`'s Jira-tool-available fetch branch, and
-anything past 3 chained turns in one session — stays `manual`, and each of those criteria says so
-plainly rather than letting fourteen single-shot observations imply more than they support.
+interview/tune/off-switch behavior, all but a fresh-file write of checkpoint behavior,
+`digest`'s Jira-tool-available fetch branch, and anything past 3 chained turns in one session —
+stays `manual`, and each of those criteria says so plainly rather than letting fifteen single-shot
+observations imply more than they support.
 
 **How to read the status column.**
 
@@ -42,15 +44,35 @@ plainly rather than letting fourteen single-shot observations imply more than th
   19 below are `not met`; four static gaps were found and closed during the static pass (see
   "Static gaps found and closed during this sweep" at the end of this document, and the notes under
   criteria 2, 17, and 18), and are reported as closed, not as pre-existing failures papered over.
+- **Multi-branch criteria.** Several criterion headings below name more than one distinct,
+  independently checkable branch — a separate input case, a separate named sub-instruction, a
+  separate part of the same claim. When a heading does this, the status word for the **whole**
+  criterion tracks its **least-covered** named branch, never an average of the branches and never
+  its best-covered one — a criterion with three branches individually `observed` and a fourth no
+  probe has ever reached is `manual` in full, not `observed` with a footnote. The better-covered
+  branches are not dropped: they are named plainly in that criterion's own notes, so the record
+  still shows exactly how far verification got — that detail simply never gets to lift the status
+  word past what the weakest named branch supports. This is a deliberate choice, not an oversight:
+  overstating verification coverage is the failure this project has rejected repeatedly across
+  every earlier sweep, while understating it only costs someone a redundant re-check of something
+  already covered.
 
 ---
 
 ## Live probe method
 
+**Note on the path named throughout this section (S11).** Every probe below (S9 and S10 alike) ran
+before the data directory moved; at the time, the path checked was the pre-S11 one. This document
+uses the current name (`~/.squirrel/`) throughout for consistency with the rest of the repo — the
+substance of every observation ("the directory did not exist", "no profile was present") is about
+the plugin's data directory as a concept, not about the literal string used to spell it, so nothing
+below overstates what was actually checked. See `docs/adr/0003-profile-outside-plugin-data.md`'s
+Amendment (S11) for the exact old path and why it changed.
+
 Eight live, headless probes ran against the real Claude Code CLI (`2.1.225`) on 2026-08-08,
 authorised by the user because a scratch `$HOME` cannot authenticate — the probes ran against the
-**real** `$HOME`, accepting that rule 14 might create `~/.claude/squirrel/` there.
-`~/.claude/squirrel/` did **not** exist before the probes; its presence was checked before and
+**real** `$HOME`, accepting that rule 14 might create `~/.squirrel/` there.
+`~/.squirrel/` did **not** exist before the probes; its presence was checked before and
 after every one, and it was still absent after all eight.
 
 - **Single-turn form:** `claude -p --plugin-dir . "<prompt>" < /dev/null`, run from this repository
@@ -69,7 +91,7 @@ after every one, and it was still absent after all eight.
   is evidence that a rule fires correctly, not proof that it always will — that is exactly why
   `observed` is defined above as a separate, weaker word than `met`, and why nothing below claims
   more than these eight runs can support.
-- **No profile existed for any of the eight probes.** `~/.claude/squirrel/profile.md` was absent
+- **No profile existed for any of the eight probes.** `~/.squirrel/profile.md` was absent
   before, during, and after every one (confirmed above). Every field-driven behavior a probe
   observed — answer-first, the numbered-list cap, one recommendation, language mirroring, and so on
   — was therefore driven by the output style's **baked-in defaults** (`rules/base-rules.md`'s
@@ -102,11 +124,11 @@ probes" section, the source record for every observation cited below):
    this same sweep (see `rules/base-rules.md` and `tests/test_base_rules.sh` assertion 18).
 
 **S10 probes (B, C, D, E, F, G) — added in a later, read-only sweep.** The user declined authorising
-writes to `~/.claude/squirrel/`, so S10 ran only probes reachable without one: `--for-reply` and
+writes to `~/.squirrel/`, so S10 ran only probes reachable without one: `--for-reply` and
 Jira-by-ID branches of `/squirrel:digest`, `/squirrel:plan`'s full output shape, and the scope guard
 firing on drift from a task declared earlier in the same session. Same method as the eight S9 probes
 above — `claude -p --plugin-dir . "<prompt>" < /dev/null`, or `--session-id`/`--resume` for multi-turn
-— and the same discipline: `~/.claude/squirrel/` was checked before and after every one and stayed
+— and the same discipline: `~/.squirrel/` was checked before and after every one and stayed
 absent throughout. Full detail is in `.build-checkpoint.md`'s "S10 — closing what read-only probes can
 reach" section, the source record for every S10 observation cited below, the same way the S9 section
 is for probes 1-8.
@@ -119,6 +141,14 @@ is for probes 1-8.
 - **F** — two turns exercising the combined Extra-section-and-scope-guard-flag case, plus a checkpoint
   auto-approval doubt now resolved separately by AB1 (see `scripts/allow-checkpoint.sh`).
 - **G** — `/squirrel:digest` on a file path (`docs/adr/0005-...md`).
+
+**The S11 probe — added in a follow-up sweep, after the data directory moved.** One further live,
+headless probe ran once `~/.squirrel/` became the runtime location in place of the pre-S11 path (see
+`docs/adr/0002-checkpoint-auto-allow.md`'s and `docs/adr/0003-profile-outside-plugin-data.md`'s own
+Amendment (S11) sections for the old path and why the move happened). Same method as the probes above; this one
+specifically completed a checkpoint-worthy unit of work from a fresh state (`~/.squirrel` absent
+beforehand) to exercise rule 14's write path at the new location. Full detail is in
+`.build-checkpoint.md`'s "S11 — the fix works" section, the source record for this observation.
 
 ---
 
@@ -175,22 +205,23 @@ $ echo $?
 - **The Claude Code plugin's own runtime** (`scripts/load-profile.sh`, `scripts/check-off-flag.sh`,
   `scripts/allow-checkpoint.sh`). Verified by reading every write-capable statement in all three
   files: none of them ever builds a destination path from `cwd` or `file_path` pointing outside
-  `$HOME/.claude/squirrel/`.
+  `$HOME/.squirrel/`.
   - `load-profile.sh` never writes a file at all (its only filesystem mutation is
-    `prune_stale_off_flags`, `scripts/load-profile.sh:144-149`, which deletes stale files strictly
-    inside `$HOME/.claude/squirrel/off/`). `cwd` is used only to compute a checkpoint filename
-    (`project_slug`, `scripts/load-profile.sh:123-132`) that is then joined onto
-    `$HOME/.claude/squirrel/checkpoints/` (`scripts/load-profile.sh:369-377`) — never onto `cwd`
+    `prune_stale_off_flags`, `scripts/load-profile.sh:169-174`, which deletes stale files strictly
+    inside `$HOME/.squirrel/off/`). `cwd` is used only to compute a checkpoint filename
+    (`project_slug`, `scripts/load-profile.sh:148-157`) that is then joined onto
+    `$HOME/.squirrel/checkpoints/` (`scripts/load-profile.sh:422-430`) — never onto `cwd`
     itself.
   - `check-off-flag.sh` treats `cwd` as an opaque string compared byte-for-byte against sentinel
     file *contents* (`scripts/check-off-flag.sh:216-267`); it is never used to build a filesystem
-    path. Every `mv`/`rm` in the file targets a path under `$home_dir/.claude/squirrel/off/`
+    path. Every `mv`/`rm` in the file targets a path under `$home_dir/.squirrel/off/`
     (`scripts/check-off-flag.sh:336`).
   - `allow-checkpoint.sh` never reads `cwd` at all and never writes anything — its entire job is to
-    return `allow` or `defer` for a `file_path` it did not create (`scripts/allow-checkpoint.sh:270-342`).
-  - Every instruction that tells the model to write a file — rule 14 (`rules/base-rules.md:125-131`,
+    return `allow` or `defer` for a `file_path` it did not create, computed in `decide()`
+    (`scripts/allow-checkpoint.sh:463-535`).
+  - Every instruction that tells the model to write a file — rule 14 (`rules/base-rules.md:127-131`,
     checkpoints), `skills/init/SKILL.md:99-119` (profile), `skills/tune/SKILL.md:29`
-    (profile) — names only paths under `~/.claude/squirrel/`. No skill or rule anywhere instructs a
+    (profile) — names only paths under `~/.squirrel/`. No skill or rule anywhere instructs a
     write inside the current project.
 
 **Status:** `met`.
@@ -226,7 +257,7 @@ ten turns the criterion names — only a longer live session can close that rema
 **Manual verification (turns 4–10, and the `/compact` re-injection, are what remains open):**
 
 1. Run `claude --plugin-dir <absolute path to this repo>` from an empty scratch directory (not this
-   repo), with `HOME` pointed at a fresh directory with no `~/.claude/squirrel/` yet, so the session
+   repo), with `HOME` pointed at a fresh directory with no `~/.squirrel/` yet, so the session
    starts with no profile.
 2. Send 10 consecutive ordinary prompts (any content requiring a substantive answer — e.g. "explain
    how binary search works", "list three ways to speed up a slow SQL query", etc.), one per turn,
@@ -283,9 +314,9 @@ mechanism this criterion names.
 
 **Verified:** static (the injected instruction) — a live session is required for "exactly once."
 
-- `scripts/load-profile.sh:386` emits, verbatim, `"squirrel-mode: no profile found yet. Suggest
-  /squirrel:init once, briefly."` whenever `$HOME/.claude/squirrel/profile.md` does not exist.
-- `tests/test_hooks.sh` scenario 2 (fresh install, no `~/.claude/squirrel/` at all) asserts this
+- `scripts/load-profile.sh:439` emits, verbatim, `"squirrel-mode: no profile found yet. Suggest
+  /squirrel:init once, briefly."` whenever `$HOME/.squirrel/profile.md` does not exist.
+- `tests/test_hooks.sh` scenario 2 (fresh install, no `~/.squirrel/` at all) asserts this
   exact string is present in the hook's `additionalContext` output.
 
 The hook re-emits this line at every `SessionStart` event for as long as no profile exists — by
@@ -302,7 +333,7 @@ the whole session, not merely within a single response, which is the specific be
 check could confirm on its own.
 
 **Further manual verification** (optional, since probes 1/3/8 already cover the specified
-behavior): with no `~/.claude/squirrel/profile.md`, start a session and send an ordinary first
+behavior): with no `~/.squirrel/profile.md`, start a session and send an ordinary first
 message. **Observable:** the response answers the question and mentions `/squirrel:init` exactly
 once, in one line; send two more ordinary prompts and confirm the suggestion is not repeated.
 
@@ -314,12 +345,12 @@ the whole criterion, and it was exercised directly and repeatedly.
 
 ---
 
-## 6. `/squirrel:init` asks one multiple-choice question at a time, 7 total, and writes all 11 fields to `~/.claude/squirrel/profile.md`. Question 2 sets four fields.
+## 6. `/squirrel:init` asks one multiple-choice question at a time, 7 total, and writes all 11 fields to `~/.squirrel/profile.md`. Question 2 sets four fields.
 
 **Verified:** static (the instructions) — a live interview transcript is required for the rest.
 
-**Not reached by the S9 probes.** `/squirrel:init` writes `~/.claude/squirrel/profile.md`; none of
-the eight probes ran the interview or wrote a profile (`~/.claude/squirrel/` stayed absent
+**Not reached by the S9 probes.** `/squirrel:init` writes `~/.squirrel/profile.md`; none of
+the eight probes ran the interview or wrote a profile (`~/.squirrel/` stayed absent
 throughout — see "Live probe method" above). This criterion stays entirely `manual`.
 
 - `skills/init/SKILL.md` states the rule ("Ask exactly one question per message", section "Rules for
@@ -350,7 +381,7 @@ reply, or writes the file with the user's actual choices — only a transcript c
 3. Answer question 2 with option B ("jumps around, disorganized"). **Observable:** the final profile
    summary before the save confirmation shows `step_style: numbered`, `explanation_budget: 3`,
    `extras_section: yes`, `tone: neutral` — the exact B row.
-4. After confirming "y" to save, **observable:** `~/.claude/squirrel/profile.md` exists with exactly
+4. After confirming "y" to save, **observable:** `~/.squirrel/profile.md` exists with exactly
    11 `field: value` lines, matching the `skills/init/SKILL.md` step-4 shape.
 
 **Status:** `manual`.
@@ -363,7 +394,7 @@ reply, or writes the file with the user's actual choices — only a transcript c
 the rest; this is the core, hardest-to-automate claim in the whole plan.
 
 - `rules/base-rules.md` rules 1 (answer-first, lines 27–33), 3 (numbering and `max_list_items`,
-  lines 43–51), and 12 (language, lines 111–115) state the mechanism precisely, including the
+  lines 43–51), and 12 (language, lines 113–117) state the mechanism precisely, including the
   `progress_recap` interaction rule 1 explicitly defers to rule 8 for.
 - `tests/test_base_rules.sh`'s 26 numbered checks verify these rule bodies exist, are attached to
   the correct `targets:` marker, reference the correct fields, and (assertions 14/17) that rule 3's
@@ -390,7 +421,7 @@ including inside the `/squirrel:init` suggestion line itself. This is direct beh
 that the rule-interpretation mechanism works, not an inference from reading the rule text.
 
 **Why this stays `manual` rather than `observed`: every probe ran with no profile present** (see
-"Live probe method" above — `~/.claude/squirrel/` stayed absent throughout). What was observed is
+"Live probe method" above — `~/.squirrel/` stayed absent throughout). What was observed is
 the model correctly obeying the **default** value of each field, via the output style's baked-in
 `## Defaults` table — a genuinely different mechanism from `SessionStart` injecting a written
 profile and its values overriding those defaults field by field. The criterion says "obey **the
@@ -408,7 +439,7 @@ the current phase (with later phases named in one line each, per rule 3), not mo
 
 **Status:** `manual`. The live-probe evidence above is real but partial — it observed the
 rule-interpretation mechanism firing correctly against the **defaults table**, exactly the way
-criteria 3, 10, 11, and 14 record partial evidence under a `manual` status. It does not touch the
+criteria 3, 10, and 12 record partial evidence under a `manual` status. It does not touch the
 `SessionStart`-injected, written-profile path the criterion is actually about, which remains tied to
 the `manual` `/squirrel:init`/`/squirrel:tune` criteria.
 
@@ -419,7 +450,7 @@ the `manual` `/squirrel:init`/`/squirrel:tune` criteria.
 **Verified:** static (the instructions) — a live tune session is required for the rest.
 
 **Not reached by the S9 probes.** `/squirrel:tune` also requires an existing, written
-`~/.claude/squirrel/profile.md` to edit; no probe created one (see "Live probe method" above). This
+`~/.squirrel/profile.md` to edit; no probe created one (see "Live probe method" above). This
 criterion stays entirely `manual`.
 
 - `skills/tune/SKILL.md` states the field list, per-field validation rules, and "It never re-runs
@@ -430,7 +461,7 @@ criterion stays entirely `manual`.
 
 **Manual verification:** with an existing profile (`tone: neutral`), run `/squirrel:tune`, ask to
 change `tone` to `warm`. **Observable:** exactly one question is asked (which field / what value);
-`~/.claude/squirrel/profile.md` afterward has `tone: warm` and every other field byte-identical to
+`~/.squirrel/profile.md` afterward has `tone: warm` and every other field byte-identical to
 before; no interview questions (language, code style, etc.) are asked.
 
 **Status:** `manual`.
@@ -446,7 +477,7 @@ exists in the code) — the model's actual compliance across 10 turns is behavio
   proving the ADR-0005 sentinel mechanism: `PENDING`/`CLEAR` sentinel claiming scoped to the
   session id and matching `cwd`; a claimed flag has **no turn counter or expiry** other than
   `/squirrel:on`'s `CLEAR` claim or the unrelated 7-day staleness prune
-  (`scripts/load-profile.sh:144-149`) — confirmed by reading `scripts/check-off-flag.sh`'s `decide()`
+  (`scripts/load-profile.sh:169-174`) — confirmed by reading `scripts/check-off-flag.sh`'s `decide()`
   end to end (lines 318–387): step 5 unconditionally emits `COUNTER_INSTRUCTION` whenever
   `off/<session_id>` exists, with nothing in the function counting how many prompts that has been
   true for. This is what makes "stays suppressed for at least 10 turns" true *by construction* at
@@ -596,16 +627,18 @@ some future run.
 
 ---
 
-## 12. Checkpoints are written to `~/.claude/squirrel/checkpoints/` with **no permission prompt and no prose in the response**, at most once per turn. `/squirrel:pickup` opens with recent wins, then Doing/Next/Open decisions, then stops.
+## 12. Checkpoints are written to `~/.squirrel/checkpoints/` with **no permission prompt and no prose in the response**, at most once per turn. `/squirrel:pickup` opens with recent wins, then Doing/Next/Open decisions, then stops.
 
 **Verified:** automated (the auto-approval mechanism, for both the read and the write) + static (the
-pickup output order) — the "no prose" and "at most once per turn" halves are instructions to the
-model, not something a hook can enforce or a static check can observe.
+pickup output order) + live probe (S11, the write itself) — the "at most once per turn" half, the
+read-then-update path, and `/squirrel:pickup`'s own output order are instructions and behavior a
+hook cannot enforce and a static check cannot observe; see below for exactly which of those the S11
+probe reached and which it did not.
 
 - `tests/test_hooks.sh`'s `allow-checkpoint.sh` scenarios (roughly 14–21, plus the symlink defenses
   at 19, 25, 29–32, and the DoS-cap scenario 33 — each now mirrored for `Read`, not only `Write`/
   `Edit`, per S10-1 below) prove the hook returns `allow` for a `Write`, `Edit`, **or `Read`** whose
-  path genuinely resolves inside `$HOME/.claude/squirrel/checkpoints/`, and `defer` for every
+  path genuinely resolves inside `$HOME/.squirrel/checkpoints/`, and `defer` for every
   boundary case tried (traversal, prefix-escape, a symlink at or below the directory, an oversized
   path) — this is what removes the permission prompt specifically for legitimate checkpoint reads
   and writes, with the symlink and traversal cases proving it cannot be tricked into auto-approving
@@ -622,7 +655,7 @@ model, not something a hook can enforce or a static check can observe.
   allowing with `jq` present and deferring with `jq` absent), and `tests/run.sh` already treats `jq`
   as a hard prerequisite for the whole suite, so this is the same baseline assumption already made
   everywhere else in this project, not a new one.
-- `rules/base-rules.md:125-131` (rule 14) states "no commentary in the response... at most one such
+- `rules/base-rules.md:127-131` (rule 14) states "no commentary in the response... at most one such
   write per turn" as an instruction — there is no code that counts writes per turn or inspects
   response text, so this half is inherently the model's responsibility, not a hook's.
 - `skills/pickup/SKILL.md`'s fixed output order (Recent wins → You were doing → Next action → Open
@@ -645,30 +678,110 @@ distinguish "the matcher gap" from "headless `-p` mode not honouring the hook" a
 the former has been directly confirmed and fixed) — that is exactly what the manual verification below
 still has to establish.
 
-**Not reached by the S9 probes, and not re-attempted live since the S10-1 fix.** `~/.claude/squirrel/`
-remained absent after all eight S9 probes (see "Live probe method" above), which means rule 14's
-checkpoint write never fired in any of them — no probe completed a multi-turn unit of work substantial
-enough to trigger it, and `/squirrel:pickup` was never run against a real checkpoint in an interactive
-session. This fix removes a known, reproduced blocker to this criterion passing, but nobody has yet
-watched a checkpoint round-trip — a `Read` by `/squirrel:pickup` or rule 14's update path, followed by
-a `Write`, both with no visible permission prompt — in a live interactive session. Both halves of this
-criterion stay entirely `manual`; say that precisely rather than inferring it from the mechanism-level
-evidence above.
+**S10-2 (BLOCKER, design) — found by exactly the experiment probe F's doubt called for.** The S10-1
+fix closed the matcher gap but explicitly could not rule out the other candidate cause probe F left
+open: "headless `-p` mode not honouring the hook." A follow-up experiment resolved it, and the answer
+invalidated a design decision, not a line of code. Established, in order: (1) the `PreToolUse` hook
+**is** invoked for both `Read` and `Write` on the checkpoint path, with the real payload shape, and
+(2) it **does** return `permissionDecision: "allow"`, exit 0, well-formed JSON, for both — the hook
+was never the problem. (3) **The write was still denied anyway**, and creating the checkpoints
+directory by hand did not help. (4) A three-target experiment with a hook rewritten to allow
+*everything*, cwd set to a scratch directory, found: a path inside the cwd wrote; a path outside the
+cwd and outside `.claude` also wrote; a path inside the old `~/.claude/` location was denied
+regardless. A hook's `allow` **is** honoured and **does** cross the working-directory boundary — the
+only thing that failed was `.claude` itself, which Claude Code treats as a protected path checked
+*before* any hook's `allow`, matching the documented rule that hooks "can tighten restrictions but
+not loosen them past what permission rules allow." ADR-0003 had put this data inside `.claude` so it
+would survive plugin uninstall; ADR-0002 then relied on a hook `allow` to write there without
+prompting. Those two decisions turned out to be incompatible, and no static test could see it — the
+hook does exactly what it was built to do, and something above it says no.
 
-**Manual verification:** complete a meaningful unit of work in a live session (e.g. finish
-implementing a small function after a few back-and-forth turns). **Observable:** the `Read` that
-begins the checkpoint interaction and the `Write` tool call that targets
-`~/.claude/squirrel/checkpoints/<slug>.md` both proceed with no visible permission prompt, and the
-response text contains no sentence announcing or describing either one (the tool calls themselves are
-still visible in the transcript, per ADR-0002 — what's being checked is the *prose*, not the tool
-calls). Then run `/squirrel:pickup`. **Observable:** output appears in exactly the order Recent
-wins → You were doing → Next action → Open decisions, then stops with no follow-up question.
+**The S11 fix.** The data directory moved to `~/.squirrel/` — outside `.claude` entirely, the exact
+shape the experiment's second case proved a hook's `allow` handles correctly. `rules/base-rules.md`,
+every script, every skill, and this document have all been updated to the new path; the symlink trust
+boundary and every path-validation check in `scripts/allow-checkpoint.sh` were re-derived at the new
+location, not pattern-substituted, and the full hostile-plus-legitimate matrix in
+`tests/test_hooks.sh` still passes there. See `docs/adr/0002-checkpoint-auto-allow.md`'s and
+`docs/adr/0003-profile-outside-plugin-data.md`'s Amendment (S11) sections for the full record of the
+experiment and the reasoning. This removes the design-level reason the "no permission prompt" half of
+this criterion could never have held at the old location. At the time this paragraph was first
+written, no live session had yet watched that hold true — the paragraph below records the probe that
+has since done exactly that.
 
-**Status:** `manual`.
+**Fix cycle 1 (AE1) — the write itself is now `observed` live, from a fresh state.** A live, headless
+S11 probe completed a checkpoint-worthy unit of work from a fresh state (`~/.squirrel` absent
+beforehand) and `~/.squirrel/checkpoints/squirrel-mode-<slug>.md` was written, with **no permission
+prompt** — the `PreToolUse` `allow` is honoured now that the path sits outside the protected
+`.claude` directory — and **no prose about the write** anywhere in the response, exactly as rule 14
+requires. The file's own structure matched rule 14's spec exactly: `## Doing`, `## Next`, `## Done`,
+with the completed step moved into the Done log and two concrete next steps recorded. This is the
+first time this specific feature has actually worked in a live session; the full record, including a
+diagnostic note on two unrelated transient empty runs that preceded it (ruled out by a control
+matrix, not a defect in this plugin), is in `.build-checkpoint.md`'s "S11 — the fix works" section.
+
+**Named precisely, per the tech lead's own instruction, what this one probe covers and what it does
+not — do not read more into a single fresh-file write than it showed.** It exercised exactly one
+`Write`, to a checkpoint that did not exist before the probe ran. Three named parts of this
+criterion's own heading were untouched by it, and stay open:
+
+1. **`/squirrel:pickup`** did not run in this probe at all. Its fixed output order (Recent wins →
+   You were doing → Next action → Open decisions, then stop) has no live evidence behind it yet.
+2. **The read-then-update path on an existing checkpoint** — rule 14's update path, which reads the
+   current Done log before trimming it to the last 10 entries and only then writes — is a different
+   code path from a fresh-file create, and this probe could not exercise it: there was nothing to
+   read first, by construction of the probe itself.
+3. **The once-per-turn cap** needs a turn with a plausible second checkpoint-write candidate to show
+   the cap actually holds it to one; a single write in a single turn cannot demonstrate that a second
+   one would have been suppressed.
+
+**Judgment call, superseded — kept as history, not scrubbed.** Criterion 10 keeps its own status at
+`manual` specifically because one of its four named branches (a Jira ticket fetched via an authorized
+tool) has never been exercised by any probe, even though the other three are individually `observed`
+— the whole-criterion status there tracks the least-covered named branch. The three gaps above
+(`/squirrel:pickup`'s output order, the once-per-turn cap, the read-then-update path) are the same
+shape of thing for this criterion.
+
+**What actually happened, in order.** The S11 sweep that first wrote this section moved criterion 12
+to `observed` anyway, on the strength of the specific, previously-doubted claim its own heading leads
+with — a checkpoint write reaching disk with no permission prompt and no prose — now directly
+demonstrated, while naming the three items above individually rather than folding them into the
+status word. A later cycle put criteria 10 and 12 side by side and found them scored under opposite
+conventions, with no rule written down anywhere saying which one governs: criterion 10 tracked its
+least-covered named branch; criterion 12, on the ruling restated above, tracked its best-covered one.
+The project owner resolved the ambiguity in favor of the least-covered-branch convention — now stated
+in "How to read the status column" near the top of this document — because overstating verification
+coverage is the failure this project has rejected repeatedly, while understating it only costs
+someone a cheap re-check. Under that convention, criterion 12 moves back to `manual`, matching
+criterion 10's own reasoning instead of contradicting it. This paragraph keeps the original S11 ruling
+on the record rather than deleting it, the same way this document's earlier "Rule 2 / 7 / 15, re-read
+as a set" passages preserve a superseded framing instead of silently rewriting it away.
+
+**Manual verification (the three items above, still open):**
+
+1. Complete a meaningful unit of work in a live session so a checkpoint already exists, then in a
+   later turn complete a second small unit of work. **Observable:** the `Read` of the existing Done
+   log and the follow-up `Write` both proceed with no visible permission prompt and no announcing
+   prose, the Done log gains exactly one new entry, and entries beyond the most recent 10 are gone.
+2. In one turn capable of producing two candidate checkpoint-worthy moments, confirm only one
+   `Write` to the checkpoints path actually happens.
+3. Run `/squirrel:pickup` against a real checkpoint file. **Observable:** output appears in exactly
+   the order Recent wins → You were doing → Next action → Open decisions, then stops with no
+   follow-up question.
+
+**Status:** `manual`. Three named parts of this criterion's heading —
+`/squirrel:pickup`'s output order, the once-per-turn cap, and the read-then-update path on an
+existing checkpoint — have no live evidence behind them at all (named above). Under the convention
+now stated in "How to read the status column," the whole-criterion status word tracks the
+least-covered named branch — the same rule criterion 10 already follows — so this criterion is
+`manual` in full, not `observed` with three open footnotes. That does not erase what the S11 probe
+directly demonstrated: a fresh checkpoint write reaching `~/.squirrel/checkpoints/` with **no
+permission prompt** and **no announcing prose** in the response, from a state where the file did not
+exist beforehand — real evidence, not a guarantee of consistency on every future run, and not a
+guarantee that covers the three parts named above.
 
 ---
 
-## 13. Uninstalling the plugin leaves `~/.claude/squirrel/` intact; reinstalling restores the profile and Done log.
+## 13. Uninstalling the plugin leaves `~/.squirrel/` intact; reinstalling restores the profile and Done log.
 
 **Verified:** static, by construction — confirming Claude Code's own uninstall behavior needs a live
 install/uninstall cycle.
@@ -680,7 +793,7 @@ install/uninstall cycle.
   anything under `checkpoints/` (confirmed by reading all three end to end — the only deletions
   anywhere are `check-off-flag.sh`'s sentinel claiming inside `off/` and
   `load-profile.sh`'s 7-day stale-flag prune, also inside `off/`).
-- `docs/adr/0003-profile-outside-plugin-data.md` records the design reasoning: `~/.claude/squirrel/`
+- `docs/adr/0003-profile-outside-plugin-data.md` records the design reasoning: `~/.squirrel/`
   is deliberately outside `${CLAUDE_PLUGIN_DATA}` specifically because that path *is* deleted on
   uninstall (unless `--keep-data` is passed), which would destroy the Done log — "the least
   disposable thing the plugin holds."
@@ -702,7 +815,7 @@ the plugin — doing so was outside the read-only, `claude -p`-only authorizatio
 **Manual verification:**
 
 1. Run `/squirrel:init` and complete a checkpoint-worthy unit of work, so both
-   `~/.claude/squirrel/profile.md` and a file under `~/.claude/squirrel/checkpoints/` exist.
+   `~/.squirrel/profile.md` and a file under `~/.squirrel/checkpoints/` exist.
 2. Run `/plugin uninstall squirrel@squirrel-mode`. **Observable:** both files still exist on disk
    afterward.
 3. Reinstall (`/plugin marketplace add ...` if needed, then `/plugin install squirrel@squirrel-mode`)
@@ -717,7 +830,7 @@ the plugin — doing so was outside the read-only, `claude -p`-only authorizatio
 
 **Verified:** static (the instruction) — behavioral for the rest.
 
-- `rules/base-rules.md:133-141` (rule 15) states the one-line format, the offer to park, "Never
+- `rules/base-rules.md:139-143` (rule 15) states the one-line format, the offer to park, "Never
   lecture about the drift," "Never refuse an explicit choice... to continue," and "Flag the same
   drift only once."
 - `tests/test_base_rules.sh` verifies rule 15 exists, is targeted `all` (applies on every target,
@@ -897,8 +1010,8 @@ zero hits.
   catch a future regression — but it is a genuine second pass over the actual command-position
   tokens in these six files, not a repetition of the same fixed list read twice.
 - **Disclosure:** `README.md`'s "Privacy and what it writes" section states the auto-approval
-  (lines 128–132), the symlink trust boundary (lines 134–136), and the one-write-per-turn cap (line
-  138). **New in this sweep:** `tests/test_targets.sh` scenario 35 pins both the symlink-boundary
+  (lines 130–136), the symlink trust boundary (lines 138–140), and the one-write-per-turn cap (line
+  147). **New in this sweep:** `tests/test_targets.sh` scenario 35 pins both the symlink-boundary
   and per-turn-cap sentences by exact substring, as an S8-5 regression guard (that fix had landed in
   prose with nothing pinning it afterward). Mutation-proved against the real README text: deleting
   the per-turn-cap sentence in a scratch copy turned the suite from 328 pass / 0 fail to 326 pass / 2
@@ -974,7 +1087,7 @@ any other — and needs none**, because it never reproduces the banned phrasing 
   full stop — this document included, with nothing exempted anywhere in it.
 - `tests/test_skills.sh` scenario 5 independently checks the same class of claim is absent from
   every one of the 8 skill files specifically.
-- `rules/base-rules.md:125-131` and its generated copies state the corrective framing directly:
+- `rules/base-rules.md:127-133` and its generated copies state the corrective framing directly:
   "Tool calls are always visible in the transcript; this rule promises no prose about the write in
   the response, not invisibility." — this is the sentence rule 14 (and ADR-0002) exist to make
   unambiguous, and it is present, not merely absent of the banned phrasing.
@@ -1038,8 +1151,8 @@ would trip the very check this paragraph documents.
 | 9 | `/squirrel:off`/`/squirrel:on`, 10-turn, no leak | automated (mechanism) + manual | manual |
 | 10 | `/squirrel:digest` | static + live probe (pasted/file/`--for-reply`/no-tool-Jira) + manual (Jira-tool-available fetch) | manual |
 | 11 | `/squirrel:plan` | static + live probe (ceiling, fork, and full output shape) | observed |
-| 12 | Silent checkpoints; `/squirrel:pickup` order | automated (mechanism) + static + manual | manual |
-| 13 | Uninstall/reinstall preserves `~/.claude/squirrel/` | static (by construction) + manual | manual |
+| 12 | Silent checkpoints; `/squirrel:pickup` order | automated (mechanism) + static + live probe (S11, the write) + manual (`/squirrel:pickup`, once-per-turn cap, read-then-update) | manual |
+| 13 | Uninstall/reinstall preserves `~/.squirrel/` | static (by construction) + manual | manual |
 | 14 | Scope guard | static + live probe (declared-task drift and the combined case) | observed |
 | 15 | `build.sh` idempotent; CI drift check | automated | met |
 | 16 | Codex/Cursor installers work; losses documented | automated | met |
@@ -1051,18 +1164,28 @@ would trip the very check this paragraph documents.
 exercised the behavior and it held, at least once — real evidence, not a guarantee of consistency.
 (Criteria 11 and 14 moved from `manual` to `observed` in the S10 sweep: probe B produced
 `/squirrel:plan`'s full output shape, and probes E/F produced the scope guard firing on a declared
-task's drift, including the combined Extra-section-and-flag case — see each criterion's own section
-for the mutation-proof-free, live evidence behind that move.) 8 remain `manual`: criteria 3, 6, 7, 8,
-9, 12, and 13 in full, and criterion 10 for the one branch no probe has ever reached — a Jira ticket
+task's drift, including the combined Extra-section-and-flag case.) 8 remain `manual`: criteria 3, 6,
+7, 8, 9, and 13 in full; criterion 10 for the one branch no probe has ever reached — a Jira ticket
 digested via a tool actually connected and authorized, as distinct from the no-tool fallback S10
 probe D observed (see criterion 10's own section, which corrects `.build-checkpoint.md`'s "fully
-closed" characterization of this criterion rather than repeating it). Criterion 7 is `manual`
-even though probes exercised the same rule-interpretation mechanism repeatedly, because they only
-ever did so against the output style's baked-in defaults — no probe ever ran against a written,
-`SessionStart`-injected profile, which is what "obey the profile" actually names; see criterion 7's
-own section for the one-sentence statement of what a human still has to check. None are `not met`.
-Every `manual` criterion still has a tested mechanism underneath and names the exact remaining
-scenario and observable, ready for whoever runs it.
+closed" characterization of this criterion rather than repeating it); and criterion 12, which **moved
+twice**. A follow-up S11 sweep first moved criterion 12 from `manual` to `observed`, on the strength
+of a live probe that completed a fresh checkpoint write with no permission prompt and no announcing
+prose. A later cycle found criteria 10 and 12 scored under opposite conventions for the identical
+shape of gap — several named branches, one or more of them never reached by any probe — with no
+written rule saying which convention governs a criterion like that. The project owner settled it in
+favor of the least-covered-named-branch convention (now stated in "How to read the status column"
+near the top of this document), and criterion 12 moved back to `manual`: `/squirrel:pickup`'s output
+order, the once-per-turn cap, and the read-then-update path on an existing checkpoint were never
+exercised by any probe and stay open, named in that criterion's own section rather than folded into
+its status word. See criterion 12's own "Judgment call" note for the full history of both moves, kept
+rather than scrubbed. Criterion 7 is `manual` even though probes exercised the same
+rule-interpretation mechanism repeatedly, because they only ever did so against the output style's
+baked-in defaults — no probe ever ran against a written, `SessionStart`-injected profile, which is
+what "obey the profile" actually names; see criterion 7's own section for the one-sentence statement
+of what a human still has to check. None are `not met`. Every `manual` criterion still has a tested
+mechanism underneath and names the exact remaining scenario and observable, ready for whoever runs
+it.
 
 ---
 

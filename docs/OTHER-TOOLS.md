@@ -19,7 +19,7 @@ feature set; this page states the practical consequences plainly, with no hedgin
 | :-- | :-- | :-- | :-- | :-- |
 | `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the target. |
 | `plan` | ✅ | ✅ | ✅ | Same. |
-| `init` | ✅ | ✅ | ❌ | Writes `~/.claude/squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
+| `init` | ✅ | ✅ | ❌ | Writes `~/.squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |
 | `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
 | `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
@@ -28,10 +28,10 @@ feature set; this page states the practical consequences plainly, with no hedgin
 
 **Codex loses:**
 
-- **Automatic profile injection.** Nothing reads `~/.claude/squirrel/profile.md` for you. The
+- **Automatic profile injection.** Nothing reads `~/.squirrel/profile.md` for you. The
   `AGENTS.md` block instructs Codex to read that file if it exists, but there is no lifecycle hook to
   guarantee the read happens — it is best-effort, every session, with no verification.
-- **Automatic checkpoints.** Nothing writes to `~/.claude/squirrel/checkpoints/`. There is no
+- **Automatic checkpoints.** Nothing writes to `~/.squirrel/checkpoints/`. There is no
   `pickup` skill on Codex, because there is no hook to hand it the checkpoint's absolute path, and
   recomputing that path independently is exactly the drift failure this project has already hit once
   (ADR-0003) — it is not implemented rather than implemented unsafely.
@@ -51,7 +51,7 @@ feature set; this page states the practical consequences plainly, with no hedgin
 
 - **No calibration interview at all.** Cursor gets no `init` and no `tune`. You cannot run the
   seven-question interview from inside Cursor, and you cannot hand-tune a single field from inside
-  Cursor either — both would need to write `~/.claude/squirrel/profile.md`, and Cursor's commands are
+  Cursor either — both would need to write `~/.squirrel/profile.md`, and Cursor's commands are
   project-scoped with no user-level install path to put such a thing at.
 - **No personalization, period, on Cursor alone.** The `.mdc` rules file applies the same fixed
   defaults to everyone. It cannot read the profile, because Cursor rules cannot execute anything —
@@ -64,12 +64,12 @@ feature set; this page states the practical consequences plainly, with no hedgin
 
 ## The one consequence worth knowing before you install anything
 
-All three targets read the **same** file: `~/.claude/squirrel/profile.md`. Nothing about the path
+All three targets read the **same** file: `~/.squirrel/profile.md`. Nothing about the path
 changes per target. This means running `/squirrel:init` **once**, in Claude Code or in Codex,
 calibrates every target installed on that machine — Cursor included, even though Cursor cannot run
 the interview itself and has no way to read the file automatically. If you want Cursor's fixed
 defaults to reflect your own calibration, run `/squirrel:init` in Claude Code or Codex first, then
-open `~/.claude/squirrel/profile.md` and use its values to hand-edit `~/.cursor/rules/squirrel-mode.mdc`
+open `~/.squirrel/profile.md` and use its values to hand-edit `~/.cursor/rules/squirrel-mode.mdc`
 yourself — Cursor will never do this for you.
 
 ## Install
@@ -206,7 +206,7 @@ either install or uninstall, so a problem found at one path (say, a directory si
 four Codex skill files belongs) can never let an earlier path (say, `AGENTS.md`) already have been
 written by the time the installer reports it and stops.
 
-Uninstalling either one does **not** touch `~/.claude/squirrel/` — your profile and checkpoints are
+Uninstalling either one does **not** touch `~/.squirrel/` — your profile and checkpoints are
 Claude Code's concern (ADR-0003) and survive independently of any target's install state.
 
 ## Turning the rules off

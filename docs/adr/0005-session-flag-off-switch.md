@@ -8,7 +8,7 @@ A running skill has no access to its `session_id` — Claude Code exposes it to 
 
 The first implementation inferred the id by scanning `~/.claude/projects/<escaped-cwd>/*.jsonl` for the most recently modified transcript. That was rejected: it depends on undocumented internals whose path shape and escaping rule can change without notice, and with two sessions open on the same project it disables whichever one wrote last — quite possibly not the one the user typed in.
 
-Instead the two halves cooperate. `/squirrel:off` writes a sentinel named `PENDING.<random>` in `~/.claude/squirrel/off/`, whose contents are the current working directory. On the next prompt the `UserPromptSubmit` hook — which does receive both `session_id` and `cwd` — globs for `PENDING.*`, and claims the one whose recorded directory matches its own `cwd` by renaming it to `<session_id>`. From that point the flag is session-scoped exactly as before.
+Instead the two halves cooperate. `/squirrel:off` writes a sentinel named `PENDING.<random>` in `~/.squirrel/off/`, whose contents are the current working directory. On the next prompt the `UserPromptSubmit` hook — which does receive both `session_id` and `cwd` — globs for `PENDING.*`, and claims the one whose recorded directory matches its own `cwd` by renaming it to `<session_id>`. From that point the flag is session-scoped exactly as before.
 
 `/squirrel:on` has the identical problem and gets the mirror solution: it writes `CLEAR.<random>`, also containing the current directory. The hook claims a matching `CLEAR.*` by deleting both `off/<session_id>` and the sentinel itself. Without this, `on` would be stuck with the same rejected transcript scan and only half the feature would work.
 

@@ -179,7 +179,7 @@ Five decisions shape this and are recorded as ADRs. Read them before changing th
 | :-- | :-- |
 | [0001](./docs/adr/0001-output-style-not-skill.md) | Base rules ship as an **output style**, not a skill |
 | [0002](./docs/adr/0002-checkpoint-auto-allow.md) | The plugin **auto-approves** writes to its own checkpoint directory |
-| [0003](./docs/adr/0003-profile-outside-plugin-data.md) | Profile and checkpoints live in `~/.claude/squirrel/`, not `${CLAUDE_PLUGIN_DATA}` |
+| [0003](./docs/adr/0003-profile-outside-plugin-data.md) | Profile and checkpoints live in `~/.squirrel/`, not `${CLAUDE_PLUGIN_DATA}` |
 | [0004](./docs/adr/0004-tiered-parity-across-targets.md) | Targets get **tiered parity** from one canonical rules file |
 | [0005](./docs/adr/0005-session-flag-off-switch.md) | The off switch is a **session flag** plus a per-prompt counter-injection |
 
@@ -244,7 +244,7 @@ fails if the tree is dirty — that is the drift check. Never hand-edit a GENERA
 
 ### The profile
 
-- Location: `~/.claude/squirrel/profile.md` (ADR-0003). Never inside a repo — document the ignore
+- Location: `~/.squirrel/profile.md` (ADR-0003). Never inside a repo — document the ignore
   pattern so users don't commit it by accident.
 - Plain markdown, human-editable, ~15 lines, 11 fields.
 - **The SessionStart hook caps what it injects at 100 lines / 4 KB**, truncating with a one-line
@@ -281,13 +281,13 @@ tone: neutral              # neutral | warm | terse
 2. **The output style** is already in the system prompt, carrying the base rules and the instruction
    *"a squirrel-mode profile may be present in context; obey its fields. If absent, use these
    defaults."* It cannot interpolate anything (ADR-0001), so the profile path appears literally.
-3. **UserPromptSubmit** runs `check-off-flag.sh`: if `~/.claude/squirrel/off/<session_id>` exists,
+3. **UserPromptSubmit** runs `check-off-flag.sh`: if `~/.squirrel/off/<session_id>` exists,
    inject the counter-instruction (ADR-0005). Otherwise exit silently.
 4. **PreToolUse**, matcher `Write|Edit|Read`, runs `allow-checkpoint.sh` on every one. The hook's
    `if` field cannot safely express the path gate itself (ADR-0002: unverified whether it expands
    `~`/`$HOME` at plugin-build time), so the matcher is broad and the script reads
    `tool_input.file_path` and returns `permissionDecision: "allow"` only for a path that genuinely
-   resolves inside `$HOME/.claude/squirrel/checkpoints/`, `"defer"` otherwise — for a `Read` exactly
+   resolves inside `$HOME/.squirrel/checkpoints/`, `"defer"` otherwise — for a `Read` exactly
    as for a `Write`/`Edit`, per S10-1's amendment to ADR-0002. This read requires `jq`: a regex
    cannot safely parse `tool_input` when it carries a nested object, so without `jq` on `PATH` the
    script never guesses and always returns `"defer"` (S10 review cycle 2, AC1's amendment to
@@ -351,7 +351,7 @@ tone: neutral              # neutral | warm | terse
     rules 1–12 and 16 wherever they conflict, explicitly including rule 7's `extras_section: no`
     gate** — a safety warning is never dropped because the Extra section is disabled.
 14. **Checkpoint maintenance:** when a meaningful unit of work completes, update
-    `~/.claude/squirrel/checkpoints/<project-slug>.md` **with no commentary in the response** — do
+    `~/.squirrel/checkpoints/<project-slug>.md` **with no commentary in the response** — do
     not announce it, do not ask. At most **one write per turn**, and only when `Doing` or `Next`
     actually changed. Append finished items to the Done log, keeping the last 10.
     *Never describe this as happening without the user's knowledge. Tool calls are always visible in
@@ -431,7 +431,7 @@ that question 2 set as a bundle.
 
 ### `/squirrel:off` and `/squirrel:on`
 
-`/squirrel:off` writes `~/.claude/squirrel/off/<session_id>` and confirms in one line.
+`/squirrel:off` writes `~/.squirrel/off/<session_id>` and confirms in one line.
 `/squirrel:on` removes it. Suppression is delivered by the `UserPromptSubmit` hook, not by an
 in-conversation instruction (ADR-0005). README documents `/plugin disable squirrel@squirrel-mode`,
 then a new session, as the hard off.
@@ -533,7 +533,7 @@ Jira and a Jira tool is available, show a preview, get a single confirm, then cr
 
 ### Checkpoints and `/squirrel:pickup`
 
-- Location: `~/.claude/squirrel/checkpoints/<project-slug>.md`, slug derived from the project
+- Location: `~/.squirrel/checkpoints/<project-slug>.md`, slug derived from the project
   directory path. Never inside the project repo.
 - Max ~15 lines:
 
@@ -584,13 +584,13 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | :-- | :-- | :-- | :-- | :-- |
 | `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the host. |
 | `plan` | ✅ | ✅ | ✅ | Same. |
-| `init` | ✅ | ✅ | ❌ | Writes `~/.claude/squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
+| `init` | ✅ | ✅ | ❌ | Writes `~/.squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |
 | `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
 | `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
 
 One consequence worth stating plainly in `docs/OTHER-TOOLS.md`: because all three targets read the
-**same** `~/.claude/squirrel/profile.md`, running `/squirrel:init` once in Claude Code or Codex
+**same** `~/.squirrel/profile.md`, running `/squirrel:init` once in Claude Code or Codex
 calibrates every target on that machine — including Cursor, which cannot run the interview itself.
 
 Facts the older draft got wrong: Codex skills live in **`~/.agents/skills/`**, not `~/.codex/skills/`,
@@ -640,7 +640,7 @@ generated artifacts into place and is idempotent.
 - [ ] Claude's coding behaviour is unchanged (`keep-coding-instructions: true` is set and working).
 - [ ] Fresh install with no profile → Claude suggests `/squirrel:init` exactly once, in one line.
 - [ ] `/squirrel:init` asks one multiple-choice question at a time, 7 total, and writes all 11 fields
-      to `~/.claude/squirrel/profile.md`. Question 2 sets four fields.
+      to `~/.squirrel/profile.md`. Question 2 sets four fields.
 - [ ] Responses obey the profile: answer-first, numbered steps, list/length limits, chosen language.
 - [ ] `/squirrel:tune` edits a single field, including a bundle-set one, without redoing the interview.
 - [ ] `/squirrel:off` suppresses the rules for the rest of the session and **stays** suppressed for
@@ -651,10 +651,10 @@ generated artifacts into place and is idempotent.
 - [ ] `/squirrel:plan` converges a messy dump into the fixed format (≤3 clarifying questions, one at
       a time), always includes First action and Parking lot, expands only Phase 1, and every Phase-1
       step has a concrete estimate ≤45 min.
-- [ ] Checkpoints are written to `~/.claude/squirrel/checkpoints/` with **no permission prompt and no
+- [ ] Checkpoints are written to `~/.squirrel/checkpoints/` with **no permission prompt and no
       prose in the response**, at most once per turn. `/squirrel:pickup` opens with recent wins, then
       Doing/Next/Open decisions, then stops.
-- [ ] Uninstalling the plugin leaves `~/.claude/squirrel/` intact; reinstalling restores the profile
+- [ ] Uninstalling the plugin leaves `~/.squirrel/` intact; reinstalling restores the profile
       and Done log.
 - [ ] Scope guard fires as ONE line on task drift, offers to park the tangent, never lectures, never
       repeats for the same drift.

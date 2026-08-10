@@ -1243,4 +1243,1599 @@ else
 fi
 assert_eq "no" "$mutant_paraphrase13_caught" "DEMONSTRATION, not a defect (invariant 13, AC3 #3): a paraphrase of the retired claim ('Nobody has watched this happen live yet') is NOT caught by ACCEPTANCE_NOT_RUN_REGEX, flattened or not - grep matches literal phrases, not meaning, and this is a permanent, stated limitation of this mechanism, not a gap this cycle's fix was asked to close"
 
+# --- 14. No tracked file references the pre-S11 data-directory path
+# (~/.claude/squirrel) any more, except three narrowly, structurally scoped
+# exceptions (S11) --------------------------------------------------------
+#
+# S11 moved every runtime data path from ~/.claude/squirrel/ to ~/.squirrel/
+# (docs/adr/0003's Amendment (S11); the reason is docs/adr/0002's own
+# Amendment (S11): `.claude` is a protected path Claude Code checks before
+# any hook's `allow`, so the auto-approval ADR-0002 designs can never apply
+# there). This closes the loop the task itself named: a whole-file denylist
+# is how a BLOCKER survived TWICE in this repo already (the docs/ACCEPTANCE.md
+# visibility-scan exemption, S9's Y1 and then S9 review cycle 2's Z1) — so
+# none of the three exceptions below is "this whole file doesn't count";
+# each is a narrow, structural, content-based rule that a real edit can
+# still trip.
+#
+# The three exceptions, and why each is legitimate:
+#
+#   (a) tests/* — self-reference, the identical reasoning the four
+#       word-content scans above already use (see "Known, documented
+#       exclusions" #1 at the top of this file): THIS check's own pattern
+#       constant, comments, and mutation-proof fixtures below must contain
+#       the literal old-path text to describe and test it, and
+#       tests/test_hooks.sh legitimately builds old-path fixtures on
+#       purpose to exercise scripts/load-profile.sh's migration-detection
+#       feature. This does NOT excuse tests/*.sh from actually testing the
+#       new ~/.squirrel/ boundary — that correctness is enforced by
+#       tests/test_hooks.sh's own decision-outcome assertions (allow/defer
+#       against the real, current checkpoints_dir), not by this scan.
+#
+#   (b) scripts/load-profile.sh's migration notice — the ONE place this
+#       plugin is allowed to name the old path at runtime, because telling
+#       the user where their old data is IS the feature (see that script's
+#       own "S11 MIGRATION NOTICE" header paragraph and its
+#       detect_old_data_dir function). Scoped structurally, not by
+#       exempting the whole file: an old-path line is allowed only if it
+#       falls INSIDE one of two bounded regions — (i) the header's own
+#       "S11 MIGRATION NOTICE:" paragraph (bounded: starts at that exact
+#       marker, ends at the next lone "#" paragraph-separator line,
+#       matching this file's own existing convention for separating
+#       header paragraphs), or (ii) the "# --- S11 migration notice ---"
+#       section (bounded: starts at that divider, ends at the next
+#       "# ---" divider — the existing, established shape of every
+#       section boundary in this file). Any other line naming the old
+#       path in this file is a violation, REGARDLESS of what else that
+#       line says.
+#       [AE2, review cycle 1 fix] A prior version of this rule also
+#       allowed a THIRD, standalone alternative: a same-line "migrat"
+#       co-occurrence, with no requirement that the line be inside either
+#       region above. That was the actual defect: a stray comment placed
+#       ANYWHERE in this file, mentioning the old path and the word
+#       "migrat" together on one line, evaded detection outright — proven
+#       by the reviewer, 0 failures. Region membership is now mandatory;
+#       a same-line keyword no longer substitutes for it. (Nothing in
+#       this file currently needs "migrat" to additionally NARROW within
+#       a region — every line inside either region is legitimate content
+#       of the migration feature itself — but the rule permits doing so
+#       later without weakening this fix: co-occurrence may narrow inside
+#       a region, it may never stand in for the region check.)
+#
+#   (c) docs/adr/0002-checkpoint-auto-allow.md and
+#       docs/adr/0003-profile-outside-plugin-data.md's own "## Amendment
+#       (S11)" sections — the decision record of the move itself, which
+#       cannot honestly describe what changed without naming what it
+#       changed FROM. Scoped structurally: anything BEFORE the file's own
+#       "## Amendment (S11)" heading is the frozen, pre-existing decision
+#       text (docs/adr/0002 already has four earlier "## Amendment" sections
+#       that never touched that original body across this whole build, S10-1
+#       through AD1 — the established, existing convention this reuses, not
+#       a new one invented for this task) and is exempt unconditionally, by
+#       position, not content. From the "## Amendment (S11)" heading onward,
+#       a PARAGRAPH (blank-line-delimited, matching the AC3/AD4 precedent
+#       already in invariant 13 above) naming the old path is allowed only
+#       if that SAME paragraph also names the new path (~/.squirrel),
+#       ANCHORED to a real path boundary — the literal text "~/.squirrel"
+#       must be immediately followed by "/", by a character that is not a
+#       letter, digit, underscore, dot, or hyphen, or by the end of the
+#       paragraph, never by an arbitrary character — proving it is
+#       stating a "moved from X to Y" fact, not a bare, unexplained
+#       repetition of the retired claim.
+#       [AE3, review cycle 1 fix] A prior version of this rule checked for
+#       the new path as an UNANCHORED substring, `$0 !~ /~\/\.squirrel/`.
+#       A decoy such as "~/.squirrel-old-notes-backup.txt" contains that
+#       exact substring while naming a completely different path, so a
+#       paragraph pairing the real old path with only that decoy read as
+#       if it had named the new path too — proven by the reviewer, 0
+#       failures. The anchor closes this: "~/.squirrel-old-notes-..." no
+#       longer satisfies the new-path check, because the character right
+#       after "~/.squirrel" ("-") is not "/" and not in the allowed
+#       boundary set. A first version of the anchor excluded only
+#       letters/digits/"_"/"-" from that boundary set, which still
+#       admitted a second decoy shape, "~/.squirrel.old-notes-....txt"
+#       ("." left as a valid boundary character) — caught before shipping
+#       and closed by also excluding "." from the boundary set, since a
+#       dot is exactly as much a part of one unbroken filename token as a
+#       hyphen or underscore is.
+#
+# DISCLOSED, NOT FIXED: exception (c)'s "before the heading" half is a
+# positional rule, not a content rule — a new paragraph inserted into the
+# pre-existing, frozen portion of either ADR would not be caught by this
+# scan. Tightening it to "byte-identical to some frozen baseline" would need
+# a baseline commit reference this ongoing build does not have, and would be
+# its own source of fragility (which commit IS the baseline, forever?) — the
+# same class of overreach this project has already rejected for narrower
+# guards (AC1's removed sed fallback, AD4's rejected sentence-bounding).
+# Demonstrated, not silently ignored, below.
+
+OLD_DATA_DIR_PATTERN='\.claude/squirrel'
+# The new-path marker (a literal `~/.squirrel` occurrence) is checked
+# directly inside the two awk functions below, not hoisted into its own
+# shell variable: passing a pattern containing `~` through an unquoted
+# shell variable risks exactly the tilde-expansion confusion shellcheck's
+# SC2088 warns about, for no benefit here since both call sites are awk
+# regex literals, never shell-expanded paths.
+
+check_load_profile_old_path_lines() {
+  # Prints one "NR: line" per disqualifying old-path line in
+  # scripts/load-profile.sh — see exception (b) above for the exact rule.
+  # [AE2 fix] Region membership (r1 or r2) is now the ONLY path to
+  # exemption — no standalone same-line keyword check. A same-line
+  # "migrat" match is deliberately NOT computed here any more: keeping an
+  # unused co-occurrence check around, even if never OR'd into `exempt`,
+  # would be exactly the kind of latent, easy-to-misuse building block
+  # that produced the original defect.
+  awk '
+    BEGIN { r1 = 0; r2 = 0 }
+    {
+      line = $0
+      if (r1 == 0 && index(line, "S11 MIGRATION NOTICE:") > 0) { r1 = 1 }
+      else if (r1 == 1 && line == "#") { r1 = 0 }
+
+      if (r2 == 0 && line ~ /^# --- S11 migration notice/) { r2 = 1 }
+      else if (r2 == 1 && line ~ /^# ---/) { r2 = 0 }
+
+      exempt = (r1 == 1 || r2 == 1)
+      if (line ~ /\.claude\/squirrel/ && !exempt) { print NR": "line }
+    }
+  ' "$1"
+}
+
+# [AE2 fix] The OLD (vulnerable) exemption mechanism, reproduced inline for
+# comparison only — never called against the real script, only against
+# scratch fixtures in the failure-proof mutants below. Region membership OR
+# a standalone same-line "migrat" match, exactly as this file used to ship.
+check_load_profile_old_path_lines_OLD_VULNERABLE() {
+  awk '
+    BEGIN { r1 = 0; r2 = 0 }
+    {
+      line = $0
+      if (r1 == 0 && index(line, "S11 MIGRATION NOTICE:") > 0) { r1 = 1 }
+      else if (r1 == 1 && line == "#") { r1 = 0 }
+
+      if (r2 == 0 && line ~ /^# --- S11 migration notice/) { r2 = 1 }
+      else if (r2 == 1 && line ~ /^# ---/) { r2 = 0 }
+
+      same_line_migrat = (line ~ /[Mm][Ii][Gg][Rr][Aa][Tt]/)
+      exempt = (r1 == 1 || r2 == 1 || same_line_migrat)
+      if (line ~ /\.claude\/squirrel/ && !exempt) { print NR": "line }
+    }
+  ' "$1"
+}
+
+check_adr_s11_old_path_paragraphs() {
+  # Prints one flattened-paragraph record per disqualifying old-path
+  # paragraph in an ADR file — see exception (c) above for the exact rule.
+  # [AE3 fix] The new-path check is ANCHORED to a real path boundary: the
+  # literal text "~/.squirrel" must be followed by "/" or by a
+  # non-identifier character (anything other than a letter, digit,
+  # underscore, dot, or hyphen), or sit at the very end of the paragraph.
+  # An unanchored substring match (the old, vulnerable form) would treat a
+  # decoy like "~/.squirrel-old-notes-backup.txt" as if it were a genuine
+  # mention of the new path, because "~/.squirrel" is a literal substring
+  # of that decoy too — proven by the reviewer, 0 failures. "." is
+  # EXCLUDED from the set of valid boundary characters, not just
+  # letters/digits/"_"/"-": a first attempt at this anchor treated "."
+  # as a boundary too, which left a second decoy shape,
+  # "~/.squirrel.old-notes-backup.txt", satisfying the check for the
+  # identical reason the hyphenated one did — "." is exactly as much a
+  # part of an unbroken filename token as "-" or "_" is, so it cannot be
+  # treated as a token separator here either.
+  awk -v RS="" '
+    BEGIN { seen = 0 }
+    {
+      if (index($0, "## Amendment (S11)") > 0) { seen = 1 }
+      if (seen && $0 ~ /\.claude\/squirrel/ && $0 !~ /~\/\.squirrel([^A-Za-z0-9_.-]|$)/) {
+        print "---"
+        print $0
+      }
+    }
+  ' "$1"
+}
+
+# [AE3 fix] The OLD (vulnerable) new-path check, reproduced inline for
+# comparison only — never called against the real ADR files, only against
+# scratch fixtures in the failure-proof mutants below. Unanchored substring
+# match, exactly as this file used to ship.
+check_adr_s11_old_path_paragraphs_OLD_VULNERABLE() {
+  awk -v RS="" '
+    BEGIN { seen = 0 }
+    {
+      if (index($0, "## Amendment (S11)") > 0) { seen = 1 }
+      if (seen && $0 ~ /\.claude\/squirrel/ && $0 !~ /~\/\.squirrel/) {
+        print "---"
+        print $0
+      }
+    }
+  ' "$1"
+}
+
+old_path_hits=""
+for f in $(git -C "$repo_root" ls-files); do
+  case "$f" in
+    tests/*)
+      continue
+      ;;
+    scripts/load-profile.sh)
+      hits=$(check_load_profile_old_path_lines "$repo_root/$f")
+      [ -z "$hits" ] || old_path_hits="$old_path_hits $f"
+      ;;
+    docs/adr/0002-checkpoint-auto-allow.md | docs/adr/0003-profile-outside-plugin-data.md)
+      hits=$(check_adr_s11_old_path_paragraphs "$repo_root/$f")
+      [ -z "$hits" ] || old_path_hits="$old_path_hits $f"
+      ;;
+    *)
+      if grep -qE "$OLD_DATA_DIR_PATTERN" "$repo_root/$f" 2>/dev/null; then
+        old_path_hits="$old_path_hits $f"
+      fi
+      ;;
+  esac
+done
+
+assert_eq "" "$old_path_hits" "no tracked file (outside tests/, self-referential) may still reference the pre-S11 path ~/.claude/squirrel, except scripts/load-profile.sh's migration-notice region and docs/adr/0002 + docs/adr/0003's own S11 amendments, each checked under its own narrow, structural rule above rather than a whole-file exemption"
+
+# Sanity: each of the three exceptions is actually exercised against the
+# real, current repo — none of the rules above is passing vacuously because
+# the file it protects happens to contain no old-path text at all right now.
+real_lp_old_path_count=$(grep -cE "$OLD_DATA_DIR_PATTERN" "$repo_root/scripts/load-profile.sh")
+assert_eq "yes" "$([ "$real_lp_old_path_count" -gt 0 ] && echo yes || echo no)" "sanity (invariant 14): scripts/load-profile.sh must genuinely contain the old path today (in its migration notice), or exception (b) above is protecting nothing"
+
+real_adr2_old_path_count=$(grep -cE "$OLD_DATA_DIR_PATTERN" "$repo_root/docs/adr/0002-checkpoint-auto-allow.md")
+assert_eq "yes" "$([ "$real_adr2_old_path_count" -gt 0 ] && echo yes || echo no)" "sanity (invariant 14): docs/adr/0002-checkpoint-auto-allow.md must genuinely contain the old path today, or exception (c) above is protecting nothing"
+
+real_adr3_old_path_count=$(grep -cE "$OLD_DATA_DIR_PATTERN" "$repo_root/docs/adr/0003-profile-outside-plugin-data.md")
+assert_eq "yes" "$([ "$real_adr3_old_path_count" -gt 0 ] && echo yes || echo no)" "sanity (invariant 14): docs/adr/0003-profile-outside-plugin-data.md must genuinely contain the old path today, or exception (c) above is protecting nothing"
+
+# FAILURE PROOF 1: an ordinary tracked file, outside every exception, gets a
+# stray old-path reference — must be caught.
+old_path_scratch="$glossary_avoid_scratch"
+fp1_fixture="$old_path_scratch/ordinary_stray_old_path.md"
+printf '# Sample doc\n\nSome stray reference to ~/.claude/squirrel/profile.md here.\n' >"$fp1_fixture"
+if grep -qE "$OLD_DATA_DIR_PATTERN" "$fp1_fixture" 2>/dev/null; then
+  fp1_caught=yes
+else
+  fp1_caught=no
+fi
+assert_eq "yes" "$fp1_caught" "FAILURE PROOF (invariant 14, #1): an ordinary file outside every exception must be caught the moment it names the old path"
+
+# FAILURE PROOF 2: scripts/load-profile.sh gets a stray old-path reference
+# INSIDE build_context (real code, far from both marker regions, no
+# "migrat" word nearby) — must be caught.
+fp2_fixture="$old_path_scratch/load-profile_stray.sh"
+awk '{ print } /home_dir="\$\{HOME:-\}"/ && !done { print "  # stray reference to $home_dir/.claude/squirrel/profile.md here"; done = 1 }' "$repo_root/scripts/load-profile.sh" >"$fp2_fixture"
+fp2_hits=$(check_load_profile_old_path_lines "$fp2_fixture")
+assert_eq "yes" "$([ -n "$fp2_hits" ] && echo yes || echo no)" "FAILURE PROOF (invariant 14, #2): a stray old-path line inside scripts/load-profile.sh's real code, outside both marker regions and with no 'migrat' co-occurring on the same line, must be caught"
+
+# FAILURE PROOF 3: the SAME stray line, placed immediately after the NEXT
+# section divider following the migration-notice function (i.e. just past
+# where exception (b)'s region (ii) ends) — must ALSO be caught, proving
+# that region is bounded rather than open-ended once entered.
+fp3_fixture="$old_path_scratch/load-profile_stray_boundary.sh"
+awk '{ print } /^# --- JSON escaping/ && !done { print "# stray $HOME/.claude/squirrel mention right after the next divider"; done = 1 }' "$repo_root/scripts/load-profile.sh" >"$fp3_fixture"
+fp3_hits=$(check_load_profile_old_path_lines "$fp3_fixture")
+assert_eq "yes" "$([ -n "$fp3_hits" ] && echo yes || echo no)" "FAILURE PROOF (invariant 14, #3): a stray old-path line placed just past exception (b)'s region-(ii) end boundary must still be caught — the region does not leak past its own next divider"
+
+# ==========================================================================
+# DEMONSTRATION + FIX PROOF (invariant 14, AE2) — the review's exact
+# evasion for exception (b): a stray line placed OUTSIDE both bounded
+# regions (the same insertion point FAILURE PROOF 2 above uses — real code
+# inside build_context, far from either marker region), but this one also
+# names "migrat" on that SAME line. Under the OLD (region-OR-same-line-
+# keyword) exemption this evaded detection outright, reported by the
+# reviewer at 0 failures against the real check. The NEW (region-only) rule
+# catches it, because region membership is now the only path to exemption.
+# ==========================================================================
+ae2_fixture="$old_path_scratch/load-profile_stray_migrat_outside_region.sh"
+awk '{ print } /home_dir="\$\{HOME:-\}"/ && !done { print "  # stray note: migrated users may still have data at $home_dir/.claude/squirrel/profile.md"; done = 1 }' "$repo_root/scripts/load-profile.sh" >"$ae2_fixture"
+
+if grep -qE "$OLD_DATA_DIR_PATTERN" "$ae2_fixture" 2>/dev/null && grep -qiE 'migrat' "$ae2_fixture" 2>/dev/null; then
+  ae2_fixture_has_both=yes
+else
+  ae2_fixture_has_both=no
+fi
+assert_eq "yes" "$ae2_fixture_has_both" "sanity (invariant 14, AE2): the fixture must genuinely contain both the old path and the word 'migrat' on the inserted line, or this is not testing the reviewer's evasion at all"
+
+ae2_old_hits=$(check_load_profile_old_path_lines_OLD_VULNERABLE "$ae2_fixture")
+assert_eq "" "$ae2_old_hits" "DEMONSTRATION (invariant 14, AE2): the OLD (region-OR-same-line-keyword) exemption must MISS a stray old-path line placed outside both bounded regions merely because it also says 'migrat' on the same line — the reviewer's exact evasion, reproduced here against the OLD mechanism for comparison only; never called against the real script"
+
+ae2_new_hits=$(check_load_profile_old_path_lines "$ae2_fixture")
+assert_eq "yes" "$([ -n "$ae2_new_hits" ] && echo yes || echo no)" "FIX PROOF (invariant 14, AE2): the NEW (region-only) rule must CATCH the identical stray line the OLD mechanism just missed, above"
+
+# FAILURE PROOF 4: a new paragraph inserted AFTER docs/adr/0002's own "##
+# Amendment (S11)" heading, naming the old path with no accompanying new-path
+# mention in the same paragraph — must be caught.
+fp4_fixture="$old_path_scratch/adr0002_stray_after_heading.md"
+awk '{ print } /## Amendment \(S11\)/ && !done { print ""; print "Stray sentence mentioning ~/.claude/squirrel/ with no accompanying new-path note in this same paragraph."; done = 1 }' "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" >"$fp4_fixture"
+fp4_hits=$(check_adr_s11_old_path_paragraphs "$fp4_fixture")
+assert_eq "yes" "$([ -n "$fp4_hits" ] && echo yes || echo no)" "FAILURE PROOF (invariant 14, #4): a new paragraph after docs/adr/0002's Amendment (S11) heading naming the old path with no new-path mention in the same paragraph must be caught"
+
+# FAILURE PROOF 5: the identical construction against docs/adr/0003 — proves
+# the same function catches it there too, not just in docs/adr/0002.
+fp5_fixture="$old_path_scratch/adr0003_stray_after_heading.md"
+awk '{ print } /## Amendment \(S11\)/ && !done { print ""; print "Another stray sentence mentioning ~/.claude/squirrel/ with no accompanying new-path note in this same paragraph."; done = 1 }' "$repo_root/docs/adr/0003-profile-outside-plugin-data.md" >"$fp5_fixture"
+fp5_hits=$(check_adr_s11_old_path_paragraphs "$fp5_fixture")
+assert_eq "yes" "$([ -n "$fp5_hits" ] && echo yes || echo no)" "FAILURE PROOF (invariant 14, #5): the identical construction against docs/adr/0003 must also be caught"
+
+# ==========================================================================
+# DEMONSTRATION + FIX PROOF (invariant 14, AE3) — the review's exact
+# evasion for exception (c): a paragraph naming the real old path plus a
+# DECOY that merely contains "~/.squirrel" as a substring
+# ("~/.squirrel-old-notes-backup.txt"), with no genuine new-path mention
+# anywhere in it. Under the OLD (unanchored substring) new-path check the
+# decoy satisfied `$0 ~ /~\/\.squirrel/` and the paragraph read as if it
+# had named the new path — reported by the reviewer at 0 failures against
+# the real check. The NEW (anchored) check requires "~/.squirrel" to be
+# followed by "/", a non-identifier character, or paragraph-end, so the
+# decoy's own trailing "-" defeats it.
+# ==========================================================================
+ae3_fixture="$old_path_scratch/adr0002_decoy_after_heading.md"
+awk '{ print } /## Amendment \(S11\)/ && !done { print ""; print "Stray sentence mentioning ~/.claude/squirrel/ alongside an unrelated backup file at ~/.squirrel-old-notes-backup.txt, naming no real new-path location anywhere in this same paragraph."; done = 1 }' "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" >"$ae3_fixture"
+
+# shellcheck disable=SC2088 # single-quoted deliberately: this is a
+# literal needle grep searches the fixture's TEXT for, never a path this
+# shell opens or expands - a leading "~" here is not tilde-expansion gone
+# wrong.
+if grep -qE "$OLD_DATA_DIR_PATTERN" "$ae3_fixture" 2>/dev/null && grep -qF -- '~/.squirrel-old-notes-backup.txt' "$ae3_fixture" 2>/dev/null; then
+  ae3_fixture_has_decoy=yes
+else
+  ae3_fixture_has_decoy=no
+fi
+assert_eq "yes" "$ae3_fixture_has_decoy" "sanity (invariant 14, AE3): the fixture must genuinely contain both the old path and the decoy string, or this is not testing the reviewer's evasion at all"
+
+ae3_old_hits=$(check_adr_s11_old_path_paragraphs_OLD_VULNERABLE "$ae3_fixture")
+assert_eq "" "$ae3_old_hits" "DEMONSTRATION (invariant 14, AE3): the OLD (unanchored substring) new-path check must MISS a paragraph pairing the real old path with only a decoy like '~/.squirrel-old-notes-backup.txt' — the reviewer's exact evasion, reproduced here against the OLD mechanism for comparison only; never called against the real ADR files"
+
+ae3_new_hits=$(check_adr_s11_old_path_paragraphs "$ae3_fixture")
+assert_eq "yes" "$([ -n "$ae3_new_hits" ] && echo yes || echo no)" "FIX PROOF (invariant 14, AE3): the NEW (anchored) new-path check must CATCH the identical decoy paragraph the OLD mechanism just missed, above"
+
+# ==========================================================================
+# FIX PROOF (invariant 14, AE3 dot-decoy variant) — a SECOND decoy shape,
+# caught only because "." is also excluded from the anchor's boundary set.
+# A first draft of the anchor excluded letters/digits/"_"/"-" but left "."
+# as a valid boundary character, which would have let
+# "~/.squirrel.old-notes-backup.txt" through for the identical reason the
+# hyphenated decoy did: a dot is exactly as much a part of one unbroken
+# filename token as a hyphen or underscore. Caught before this fix shipped
+# — pinned here so it cannot come back unnoticed.
+# ==========================================================================
+ae3_dot_fixture="$old_path_scratch/adr0002_dot_decoy_after_heading.md"
+awk '{ print } /## Amendment \(S11\)/ && !done { print ""; print "Stray sentence mentioning ~/.claude/squirrel/ alongside an unrelated backup file at ~/.squirrel.old-notes-backup.txt, naming no real new-path location anywhere in this same paragraph."; done = 1 }' "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" >"$ae3_dot_fixture"
+
+# shellcheck disable=SC2088 # single-quoted deliberately: literal needle
+# text, never a path this shell opens or expands.
+if grep -qE "$OLD_DATA_DIR_PATTERN" "$ae3_dot_fixture" 2>/dev/null && grep -qF -- '~/.squirrel.old-notes-backup.txt' "$ae3_dot_fixture" 2>/dev/null; then
+  ae3_dot_fixture_has_decoy=yes
+else
+  ae3_dot_fixture_has_decoy=no
+fi
+assert_eq "yes" "$ae3_dot_fixture_has_decoy" "sanity (invariant 14, AE3 dot-decoy): the fixture must genuinely contain both the old path and the dot-decoy string, or this is not testing anything"
+
+ae3_dot_old_hits=$(check_adr_s11_old_path_paragraphs_OLD_VULNERABLE "$ae3_dot_fixture")
+assert_eq "" "$ae3_dot_old_hits" "DEMONSTRATION (invariant 14, AE3 dot-decoy): the OLD (unanchored substring) new-path check must also MISS the dot-decoy variant — the identical class of evasion, a different separator character"
+
+ae3_dot_new_hits=$(check_adr_s11_old_path_paragraphs "$ae3_dot_fixture")
+assert_eq "yes" "$([ -n "$ae3_dot_new_hits" ] && echo yes || echo no)" "FIX PROOF (invariant 14, AE3 dot-decoy): the NEW anchor, which excludes \".\" from the boundary set in addition to letters/digits/\"_\"/\"-\", must CATCH the dot-decoy paragraph — a narrower anchor that left \".\" as a valid boundary would NOT catch this"
+
+# DEMONSTRATION, not a defect (invariant 14, exception (c)'s disclosed
+# limitation): a stray old-path sentence inserted BEFORE either ADR's own
+# "## Amendment (S11)" heading — inside the frozen, pre-existing decision
+# text — is NOT caught, because exception (c) exempts that region by
+# position, not content. Stated plainly per this project's own convention
+# (AC3's paraphrase limitation, AD4's within-one-paragraph residual): this
+# is a known, bounded gap, not an oversight.
+fp6_fixture="$old_path_scratch/adr0003_stray_before_heading.md"
+awk '{ print } /^Claude Code provides/ && !done { print "Another stray sentence: ~/.claude/squirrel/ mentioned again here, no new path nearby."; done = 1 }' "$repo_root/docs/adr/0003-profile-outside-plugin-data.md" >"$fp6_fixture"
+fp6_hits=$(check_adr_s11_old_path_paragraphs "$fp6_fixture")
+assert_eq "no" "$([ -n "$fp6_hits" ] && echo yes || echo no)" "DEMONSTRATION, not a defect (invariant 14): a stray old-path sentence inserted BEFORE docs/adr/0003's own Amendment (S11) heading is NOT caught — exception (c) is positional, not content-based, for the frozen pre-existing decision text, a disclosed and bounded limitation, not an oversight"
+
+# --- 15. docs/ACCEPTANCE.md's status word must agree across its three
+# recording places: each criterion's own **Status:** line, its row in the
+# ## Summary table, and the counts stated in the tally paragraph right
+# after that table ------------------------------------------------------
+#
+# WHY THIS EXISTS. Nothing before this invariant ever checked that these
+# three places agree with each other, and they silently drifted: criterion
+# 12 was `observed` in its own Status line and in the summary table while
+# criteria 10 and 12 were scored under two different, undocumented
+# conventions for a criterion whose heading names several branches (see
+# "How to read the status column"'s new "Multi-branch criteria" bullet,
+# and criterion 12's own "Judgment call" note, for the full history). A
+# human happened to catch that one by re-reading the document closely.
+# This invariant makes the mechanical half of that class impossible to
+# ship unnoticed a second time: it does NOT adjudicate which convention is
+# correct (that is a judgment call for a human, recorded in prose, not a
+# fact a script can derive) — it only checks that the three places that
+# record whatever the current judgment call decided stay byte-for-byte
+# consistent with each other from here on.
+#
+# WHAT THIS CHECKS, exactly:
+#   (a) for every one of the 19 criteria, the status word on its own
+#       "**Status:**" line equals the status word in its own row of the
+#       "## Summary table";
+#   (b) the three counts stated in the tally paragraph immediately after
+#       that table (the met-count, the observed-count, the manual-count)
+#       each equal the actual number of criteria whose own "**Status:**"
+#       line says so;
+#   (c) [FIX 1] every one of the 19 criteria's section contains EXACTLY
+#       ONE "**Status:**" line — neither zero (missing) nor two-or-more
+#       (duplicated, whether or not the duplicate contradicts the real
+#       one). Found by review: a second, CONTRADICTING "**Status:**" line
+#       placed AFTER the real one is invisible to (a) above, because
+#       extract_status_word()'s `head -n 1` still returns the correct,
+#       first line — the criterion's own line and its table row still
+#       agree, so (a) never fires. A duplicate placed BEFORE the real one
+#       IS caught by (a) (the wrong, first-found word disagrees with the
+#       table row) — that direction was already covered before this fix;
+#       proving only it would have been the exact "guard that could not
+#       fail for its own target" trap named below, so the embedded FAILURE
+#       PROOF targets the AFTER direction specifically. As of cycle 3, the
+#       "**Status:**" marker itself may be preceded by leading whitespace
+#       (a second review finding: an indented duplicate was invisible to
+#       the literal, unindented anchor) — see extract_status_word()'s own
+#       header comment for exactly what that tolerance covers and, just as
+#       deliberately, does not;
+#   (d) [FIX 2] the tally paragraph's `observed` parenthetical enumerates
+#       EXACTLY the SET of criterion numbers whose own "**Status:**" line
+#       says `observed` — not merely the same COUNT as (b) already checks.
+#       Found by review: rewriting the observed clause to name a wrong
+#       criterion while leaving the leading count untouched (e.g. "4
+#       (criteria 4, 5, 11, 16) are `observed`" when 16 is actually `met`)
+#       passes (b) outright; the `manual` prose has the identical gap. The
+#       `manual` span's own check is deliberately NOT the same equality,
+#       as of cycle 3 — see "FIX 2'S OWN ENUMERATION CHECK, SCOPED
+#       DELIBERATELY" below for why containment replaced it there.
+#
+# WHAT THIS DOES NOT CHECK, stated plainly per this project's own
+# convention of disclosing a guard's limits rather than implying it is
+# complete: it does not check that a status word is the RIGHT one for the
+# evidence a criterion's section actually describes (that is exactly the
+# judgment call above) — only that the three places recording whatever
+# word was chosen agree. A `not met` criterion is supported structurally
+# (case-matched below like the other three words) but none exist today, so
+# no live assertion below exercises that branch; if one is ever added,
+# invariant 12 (byte-identical headings) and this invariant's own
+# not-met/total-19 sanity check both still apply to it unchanged.
+#
+# ACCEPTED RESIDUE (reviewed and deliberately left as-is, not a gap this
+# cycle closes):
+#   - A status word whose CASE is flipped IDENTICALLY in both the
+#     "**Status:**" line and the summary-table row (e.g. both say `Manual`
+#     instead of `manual`) is not named by (a) — the two sides still agree
+#     with each other, byte-for-byte, so there is nothing for a per-
+#     criterion diff to report. It IS still caught, LOUDLY, by MULTIPLE
+#     mechanisms at once — empirically reconfirmed against the CURRENT
+#     text (not just reasoned about, and RE-run after the cycle 3
+#     containment change below, since that change alters this residue's
+#     own shape) by flipping criterion 8 to `Manual` in both places, in a
+#     scratch copy. THREE are PURPOSE-BUILT detectors: the
+#     per-criterion-counts-sum-to-19 sanity check fails (18, not 19, since
+#     the flipped word matches none of the four `case` branches in
+#     compute_status_and_counts()); the tally's own manual-count (15b)
+#     fails (the real count drops to 7 while the prose still says 8); and
+#     the manual-span CONTAINMENT check (Fix 2, cycle 3, below) fails too
+#     — and, unlike cycle 2's set-EQUALITY version, now NAMES the
+#     criterion directly: its own "actual" field prints exactly "8", since
+#     8 stays in the tally's enumerated set while dropping out of the real
+#     one. A FOURTH thing also goes red in the same scratch copy, and this
+#     is the one worth saying plainly is NOT a fourth purpose-built
+#     detector: it is this invariant's own embedded FAILURE PROOF for the
+#     13->11 mis-enumeration case (below), breaking as INCIDENTAL
+#     COLLATERAL, not designed detection. That proof's "actual" field,
+#     which should read exactly "11" (the number it exists to catch),
+#     instead reads "8 11" in this scratch copy — its own containment
+#     check runs against the SAME real manual set, which just lost "8" for
+#     a reason that proof was never written to detect. This is not
+#     systematic, and saying so is part of being honest about it: two of
+#     the four LEGITIMATE-REWORDING self-tests for the manual span
+#     (below) — the ones whose own fixture text happens to name criterion
+#     8 (the plain reordering and the added-sentence ones) — go red the
+#     same collateral way, while the other two (the range and semicolon
+#     reworks, whose severe under-extraction never reaches "8" at all)
+#     stay green throughout. Whether a given embedded self-test breaks
+#     this way depends on whether its own fixture happens to reference the
+#     same criterion number, not on any of them being designed to catch a
+#     case flip. Deliberately not case-normalized: normalizing would make
+#     a genuinely flipped, wrong-cased status word compare as if it
+#     matched, turning a real drift into a silent pass — worse than
+#     today's "fails loudly, several times over, and by name at least
+#     once" residue.
+#   - A rewording that changes the tally paragraph's SHAPE enough to break
+#     one of this invariant's own anchor phrases (the three in point (b)
+#     above, reused by point (d) for the `observed`/`manual` enumeration
+#     checks) produces a LOUD, NAMED false positive, not a silent pass —
+#     but not all by the SAME mechanism, and stating that precisely is the
+#     Fix 3 correction: the two "found all 19" sanity checks, the "exactly
+#     one tally paragraph" check, and the two Fix-2 "must yield at least
+#     one criterion number" checks each have their OWN dedicated
+#     vacuousness assertion, exactly as this paragraph used to claim for
+#     everything below. The three bare tally-COUNT anchors (met/
+#     observed/manual, point (b)) have no such dedicated assertion at
+#     all, yet are equally safe, for a different reason: each is compared
+#     against a real, independently-computed count that is never itself
+#     empty, so a broken anchor there produces "expected: 7, actual: "
+#     (a genuine, named mismatch) — never "" == "" comparing something it
+#     never tested. What was FALSE here before Fix 3, for exactly one
+#     function, named plainly rather than left implicit: the general claim
+#     "an anchor that stops matching returns empty and fails that sanity
+#     check by name" was NOT true for extract_observed_number_set() — its
+#     own inner pipeline ended in a `grep` that, on no match, could ABORT
+#     THE WHOLE SCRIPT under `set -eu`, skipping every remaining assertion
+#     in this file rather than failing one check by name. See that
+#     function's own header comment for the fix and the exact hazard.
+#     After Fix 3, every extraction below genuinely degrades to a graceful,
+#     named failure (by one of the two mechanisms above); none can abort
+#     the run, and none can pass by comparing two empty strings.
+#
+# NARROWED TO THE MECHANICAL FACT, DELIBERATELY (per this build's own
+# "guard that blocks correct work" warning). The tally-count extraction
+# below is anchored on the three phrases "N of 19 criteria are `met`", "N
+# (criteria ...) are `observed`", and "N remain `manual`" — not because
+# those exact eleven words are sacred, but because SOME numeral has to sit
+# next to SOME status word for a tally paragraph to state a count at all;
+# any future rewording of this paragraph that keeps stating "how many
+# criteria are met/observed/manual" will keep producing text these
+# patterns can find. A rewrite that drops the count sentences entirely
+# would make the extraction below return empty — caught by the "exactly
+# one tally paragraph found" sanity check below, not silently ignored — at
+# which point a human updates this invariant's anchors deliberately,
+# rather than the check quietly rotting into a vacuous pass. What this
+# invariant intentionally does NOT pin: a criterion legitimately changing
+# status (met legitimately becoming manual because a regression is found;
+# a manual criterion legitimately becoming observed because a new live
+# probe closes it) is not rejected by anything below — the three places
+# just have to agree about whatever the new, true status is.
+#
+# FIX 2's OWN ENUMERATION CHECK, SCOPED DELIBERATELY, AND — as of cycle 3
+# — COMPARED DIFFERENTLY ON EACH SIDE. The `observed` parenthetical is a
+# clean, machine-shaped list ("N (criteria a, b, c, d) are `observed`")
+# and is compared by set EQUALITY: the real `observed` set and the
+# enumerated one must match exactly, in both directions.
+#
+# The `manual` span is free-form prose spread across several sentences (a
+# main list, a per-branch aside, cross-references like "see criterion 10's
+# own section," the history of criterion 12's two moves) — collecting
+# every criterion-introduced number from the anchor phrase "N remain
+# `manual`" to the END of the tally paragraph (never past it:
+# get_tally_paragraph flattens per PARAGRAPH, so this can never spill into
+# unrelated text elsewhere in the document). Cycle 2 also compared this
+# side by set equality; the review reproduced two legitimate rewordings of
+# the identical true facts — an elliptical range ("criteria 3 and 6
+# through 9, plus 13, in full") and a semicolon restructure ("criteria 3;
+# 6; 7; 8; 9; and 13") — that equality REJECTED, because
+# extract_criteria_numbers()'s own comma/"and"-joined grammar cannot
+# expand either shape and so legitimately extracts a proper SUBSET of the
+# true set. A guard that rejects correct work is worse than no guard, so
+# cycle 3 replaced equality with CONTAINMENT for this span only, via
+# set_subset_violations() (defined above, near sorted_unique_set()): every
+# number the manual span's prose enumerates must genuinely be `manual`;
+# the real `manual` set is no longer required to appear here IN FULL.
+# This tolerates re-sentencing, reordering, incidental repeated mentions,
+# AND now under-extraction, all for the same reason — proved by the four
+# embedded LEGITIMATE REWORDING assertions below (reordering; the range
+# wording; the semicolon restructure; an added explanatory sentence).
+#
+# The one thing this wide-but-paragraph-bounded, containment-based scope
+# does NOT close, stated plainly: an incidental mention of a NON-manual
+# criterion anywhere after the anchor, still inside the same paragraph,
+# would be swept into the set too and would then legitimately fail the
+# containment check — a loud false positive that NAMES the offending
+# number directly (the same disclosed class as the anchor-rewording
+# residue above, but more precisely reported than equality's "compare two
+# whole sets" ever was), not a silent miss. Today's real text has no such
+# stray mention after the anchor (every number named there — 3, 6, 7, 8,
+# 9, 13, 10, 12 — is genuinely `manual`); see extract_manual_number_set()'s
+# and set_subset_violations()'s own header comments for the full
+# reasoning.
+#
+# Symmetrically, and just as plainly: this same containment scope does not
+# close FALSE EXCLUSION either — silently DROPPING a genuinely-`manual`
+# criterion number from this span's enumeration, while leaving the count
+# at (b) untouched, passes clean, because containment only forbids naming
+# a criterion that is not `manual` and never requires naming every one
+# that is — and that is acceptable here, not a second defect, because the
+# dropped criterion's own recorded status stays fully pinned regardless of
+# what this prose omits, by the section-vs-table check (15a) and the
+# tally's own count check (15b); only this span's self-enumeration
+# COMPLETENESS goes unverified, never any criterion's actual status.
+
+get_section_between() {
+  # get_section_between <content> <start-heading-regex> - lines from the
+  # first line matching <start-heading-regex> (inclusive) to the next
+  # "^## " heading (exclusive) or EOF. A generic, named-heading version of
+  # get_acceptance_section (invariant 13, above) for a section identified
+  # by its heading text rather than a criterion number.
+  content=$1
+  start_re=$2
+  printf '%s\n' "$content" | awk -v start="$start_re" '
+    $0 ~ start { insec = 1; print; next }
+    insec && /^## / { insec = 0 }
+    insec { print }
+  '
+}
+
+extract_status_word() {
+  # extract_status_word <section-text> - the status word inside a
+  # criterion's own "**Status:**" line's FIRST backtick pair (e.g. "met",
+  # "observed", "manual", "not met"). Empty if no such line exists in the
+  # given text.
+  #
+  # DELIBERATELY FIRST-MATCH-ONLY, and that is exactly the gap
+  # count_status_lines() (below) exists to close: this function alone
+  # cannot tell "exactly one Status line" apart from "two or more, with
+  # every line after the first silently ignored." A duplicate, contradicting
+  # "**Status:**" line placed AFTER the real one is invisible to this
+  # function specifically because `head -n 1` still returns the correct,
+  # first line's word - the criterion's own Status line and its summary-
+  # table row still agree, so invariant 15a's cross-check does not fire
+  # either. See count_status_lines() and its own FAILURE PROOF for the
+  # mechanism that catches that direction.
+  #
+  # [FIX 1] Anchored on "^[[:space:]]*\*\*Status:\*\*" - leading whitespace
+  # before the marker is now tolerated, so a duplicate, contradicting
+  # "**Status:**" line indented by even a single space is still found by
+  # this function (and, more importantly, counted by count_status_lines()
+  # below) instead of being invisible to both. STATED PLAINLY, what this
+  # does NOT cover, on purpose, not by oversight: the marker itself must
+  # still be the literal text "**Status:**" - that exact word, that exact
+  # colon, bold with double asterisks. A hand-written variant spelling of
+  # the same idea - "__Status:__", "*Status:*", or any other Markdown
+  # emphasis syntax around the same word - is NOT matched, deliberately not
+  # widened to catch it. This guard exists to catch ACCIDENTAL drift, and
+  # accidental drift copies the shape of the surrounding line, because
+  # that is what a human editor is looking at when they duplicate, indent,
+  # or reflow a line near one that already reads "**Status:**" - leading
+  # whitespace is exactly that class of accident. A hand-crafted
+  # "__Status:__" duplicate is not; it is a deliberately different
+  # spelling, and chasing every Markdown emphasis variant this invariant
+  # could imagine buys nothing against the threat model this guard is
+  # actually for. Also out of scope, by design: a status-shaped line
+  # sitting OUTSIDE all 19 numbered criterion sections (e.g. loose prose
+  # above criterion 1's own heading, or after criterion 19's) is never fed
+  # to this function at all - get_acceptance_section (invariant 13) bounds
+  # every call site's input to one criterion's own section, so nothing
+  # outside every section is checked by invariant 15. That is a correct
+  # scope boundary, not a gap: this invariant's whole job is comparing the
+  # three places a CRITERION records ITS OWN status, and text outside every
+  # criterion's section is not any criterion's status record.
+  # shellcheck disable=SC2016 # single-quoted deliberately: literal
+  # backtick-quoted markdown syntax in the sed pattern, never substitution.
+  printf '%s\n' "$1" | grep -E '^[[:space:]]*\*\*Status:\*\*' | head -n 1 \
+    | sed -n 's/^[[:space:]]*\*\*Status:\*\* `\([a-zA-Z ]*\)`.*/\1/p'
+}
+
+count_status_lines() {
+  # count_status_lines <section-text> - how many lines in <section-text>
+  # begin with the literal "**Status:**" marker, leading whitespace
+  # tolerated [FIX 1] (see extract_status_word()'s own comment,
+  # immediately above, for exactly what "tolerated" covers - leading
+  # spaces/tabs only, never a different Markdown emphasis spelling of the
+  # same marker, and never text outside a criterion's own section): 0
+  # (missing), 1 (correct), or 2+ (duplicated - possibly contradicting each
+  # other, possibly not; this function does not care which, only that
+  # there must be exactly one). `|| true`: under `set -eu`, `grep -c` with
+  # zero matches exits 1, which would abort the whole script from inside a
+  # command-substitution assignment rather than reporting a single named
+  # failure - the same guard-rail every other grep-in-assignment in this
+  # invariant already uses (see get_tally_paragraph's own comment on the
+  # identical hazard).
+  printf '%s\n' "$1" | grep -c -E '^[[:space:]]*\*\*Status:\*\*' || true
+}
+
+get_summary_table_line() {
+  # get_summary_table_line <content> <n> - the "| N | ... | ... | status |"
+  # row of the "## Summary table" section whose FIRST column, trimmed,
+  # equals <n> EXACTLY (so criterion "1" can never match rows "10".."19").
+  # Scoped to that one named section (via get_section_between) so a
+  # coincidentally numbered first column in some unrelated table elsewhere
+  # in this document (several mutation-proof tables further down use
+  # "| Mutation | Result | Assertion |" rows) can never be mistaken for a
+  # criterion row.
+  content=$1
+  n=$2
+  section=$(get_section_between "$content" '^## Summary table')
+  printf '%s\n' "$section" | awk -F'|' -v want="$n" '
+    NF >= 5 {
+      col1 = $2
+      gsub(/^[ \t]+|[ \t]+$/, "", col1)
+      if (col1 == want) { print; exit }
+    }
+  '
+}
+
+extract_table_status() {
+  # extract_table_status <table-row-line> - the LAST non-empty,
+  # whitespace-trimmed column of a "| ... | ... |" markdown table row (the
+  # Status column, for a summary-table row — found by position from the
+  # right, not by counting from the left, so it is immune to the
+  # Verification column's own free-text width).
+  printf '%s\n' "$1" | awk -F'|' '
+    {
+      n = NF
+      while (n > 0 && $n ~ /^[ \t]*$/) n--
+      s = $n
+      gsub(/^[ \t]+|[ \t]+$/, "", s)
+      print s
+    }
+  '
+}
+
+mutate_table_status() {
+  # mutate_table_status <table-row-line> <new-status> - <table-row-line>
+  # with its LAST non-empty column replaced by <new-status>, every other
+  # column and the pipe structure left byte-identical.
+  printf '%s\n' "$1" | awk -F'|' -v new=" $2 " '
+    {
+      n = NF
+      while (n > 0 && $n ~ /^[ \t]*$/) n--
+      $n = new
+      out = $1
+      for (i = 2; i <= NF; i++) out = out "|" $i
+      print out
+    }
+  '
+}
+
+get_tally_paragraph() {
+  # get_tally_paragraph <content> - the single, flattened paragraph inside
+  # the "## Summary table" section that states the met/observed/manual
+  # counts, identified by containing the literal substring "of 19
+  # criteria" (the one phrase any version of this tally has had to use, to
+  # say "out of a fixed total of 19" at all). Flattened per-paragraph via
+  # flatten_acceptance_section (defined above, for invariant 13), so a
+  # re-wrap at a different column width never changes which words the
+  # regexes below see adjacent to each other.
+  # `|| true`: if the "## Summary table" heading itself is missing or
+  # renamed, $section is empty and this grep legitimately finds nothing —
+  # under `set -eu`, an unguarded failing grep inside a command
+  # substitution assignment (the call sites below all do
+  # `x=$(get_tally_paragraph ...)`) would abort the WHOLE script before
+  # assert_report ever runs, hiding every other assertion rather than
+  # reporting one clean, named failure. The sanity check right after every
+  # call site below (tally_paragraphs_found15 must be exactly 1) is what
+  # actually catches this case, as a real assertion instead of a crash.
+  section=$(get_section_between "$1" '^## Summary table')
+  flatten_acceptance_section "$section" | grep 'of 19 criteria' || true
+}
+
+extract_criteria_numbers() {
+  # extract_criteria_numbers <text> - every integer immediately introduced
+  # by the word "criterion" or "criteria" (case-insensitive on the leading
+  # letter only, so a sentence-initial "Criterion 7 is `manual`..." is
+  # matched the same as a mid-sentence "criteria 3, 6, ..." — duplicates
+  # from the two forms mentioning the same number are harmless, since every
+  # caller below runs this through sorted_unique_set), including a natural-
+  # English list joined by commas and/or "and" ("criteria 3, 6, 7, 8, 9,
+  # and 13", "criteria 10 and 12"), one number per output line, in the
+  # order they appear. A bare number with no "criterion"/"criteria"
+  # immediately before it — the "19" inside "of 19 criteria", a turn
+  # count, an S-cycle number like "S10" — is never matched, because the
+  # introducing word must come first, immediately adjacent to the number,
+  # and the numbers grabbed out of the match are only the ones the list-
+  # continuation group actually consumed (never a stray digit run the
+  # surrounding prose happens to contain right after the match, e.g. an
+  # "S10" immediately following one of these clauses in real prose).
+  printf '%s' "$1" \
+    | grep -oE '[Cc]riteri(on|a) [0-9]+([, ]+(and )?[0-9]+)*' \
+    | grep -oE '[0-9]+'
+}
+
+sorted_unique_set() {
+  # sorted_unique_set <comma/space-separated numbers, or "-"> - the same
+  # numbers, sorted numerically, deduplicated, space-joined — the
+  # canonical form both "the real set of criteria holding a status" (from
+  # compute_status_and_counts's own comma-joined list fields) and "the set
+  # the tally paragraph's prose enumerates" (from extract_criteria_numbers)
+  # are put in before either a plain string-equality comparison (the
+  # `observed` parenthetical) or a per-element containment check (the
+  # `manual` span, see set_subset_violations() below), so neither order
+  # nor an incidental repeated mention (e.g. "criterion 10" named both in
+  # the main manual list and again inside its own parenthetical aside)
+  # changes the result. "-" (this file's own empty-list sentinel,
+  # elsewhere turned into "" by csv_to_display) is treated as empty here
+  # too, so a genuinely empty set on either side of a comparison reads as
+  # "" on both sides, never as the literal string "-".
+  val=$1
+  if [ "$val" = "-" ]; then
+    val=""
+  fi
+  # Two SEPARATE single-character `tr` calls (comma -> newline, then
+  # space -> newline), not one `tr ', ' '\n\n'` call — shellcheck's SC2020
+  # correctly flags a single `tr` invocation whose second character set
+  # repeats a character as likely not doing what it looks like it does;
+  # two single-char-to-single-char calls says the same thing unambiguously
+  # and needs no override.
+  printf '%s' "$val" | tr ',' '\n' | tr ' ' '\n' | grep -v '^$' | sort -n | uniq | tr '\n' ' ' | sed 's/ *$//'
+}
+
+set_subset_violations() {
+  # set_subset_violations <candidate-set> <superset> - FIX 2 (cycle 3).
+  # Both arguments are sorted_unique_set()'s own output shape (numbers,
+  # sorted, deduplicated, space-joined, "" if empty). Returns every number
+  # in <candidate-set> that does NOT appear in <superset>, same shape, ""
+  # if there are none - i.e. "" means <candidate-set> is fully CONTAINED
+  # in <superset>. Deliberately NOT set equality: the caller (the
+  # `manual`-span check, below) needs "every number the tally paragraph's
+  # manual prose enumerates is genuinely `manual`," not "the tally
+  # paragraph's prose enumerates every `manual` criterion" - see
+  # extract_manual_number_set()'s own header comment for why the second
+  # half of that would reject legitimate reworded prose. An empty
+  # <candidate-set> vacuously returns "" (nothing to violate), which is
+  # exactly right for a rewording that legitimately extracts fewer numbers
+  # than the true full set, e.g. "6 through 9" collapsing four numbers
+  # into a range no regex here expands - see the FAILURE PROOF and
+  # LEGITIMATE REWORDING assertions below for the empirical proof of both
+  # directions.
+  candidate=$1
+  superset=$2
+  bad=""
+  for n in $candidate; do
+    found=no
+    for m in $superset; do
+      if [ "$n" = "$m" ]; then
+        found=yes
+        break
+      fi
+    done
+    if [ "$found" = no ]; then
+      if [ -z "$bad" ]; then
+        bad=$n
+      else
+        bad="$bad $n"
+      fi
+    fi
+  done
+  printf '%s' "$bad"
+}
+
+extract_observed_number_set() {
+  # extract_observed_number_set <flattened-tally-text> - FIX 2. The set of
+  # criterion numbers enumerated inside the "(criteria ...)" parenthetical
+  # of the tally paragraph's own "N (criteria ...) are `observed`" clause —
+  # a clean, machine-shaped list, isolated by reusing the EXACT anchor
+  # regex the leading-count extraction (tally_observed15, above) already
+  # relies on, so the two never drift out of lock-step with each other.
+  # Narrowed to just the parenthetical's own contents (via the second
+  # grep, on "(...)") before running extract_criteria_numbers, so the
+  # leading count digit itself (e.g. the "4" in "4 (criteria 4, 5, 11,
+  # 14)") is never swept in as if it were one more enumerated criterion.
+  # [FIX 3] `|| true` on the assignment: unlike every other extraction in
+  # this invariant, the LAST stage of this pipeline is itself a `grep`
+  # (the "(...)" one) - if the anchor phrase ahead of it does not match at
+  # all, that final grep receives empty input and exits 1 as the whole
+  # pipeline's own exit status. Under `set -eu`, an unguarded failure
+  # inside a `var=$(...)` assignment aborts the ENTIRE script right here,
+  # skipping every remaining assertion in this file, not just this one
+  # check - the identical hazard get_tally_paragraph() and
+  # count_status_lines() (both above) already guard against with the same
+  # `|| true`. Without this, "sanity (invariant 15, Fix 2): the tally
+  # paragraph's `observed` parenthetical must actually yield at least one
+  # criterion number" (below) would never even get the chance to fail by
+  # name - the run would already be dead.
+  # shellcheck disable=SC2016 # single-quoted deliberately: literal
+  # backtick-quoted status word, not substitution.
+  paren=$(printf '%s\n' "$1" | grep -oE '[0-9]+ \(criteria[^)]*\) are `observed`' | head -n 1 | grep -oE '\([^)]*\)' || true)
+  sorted_unique_set "$(extract_criteria_numbers "$paren")"
+}
+
+extract_manual_number_set() {
+  # extract_manual_number_set <flattened-tally-text> - FIX 2. The set of
+  # criterion numbers enumerated in the tally paragraph's "manual" span:
+  # from (and including) the FIRST match of "N remain `manual`" through
+  # the end of this SAME text. Because get_tally_paragraph flattens per
+  # PARAGRAPH (never joining two different paragraphs — see
+  # flatten_acceptance_section's own header), "end of this text" is "end
+  # of the tally paragraph," never spilling into an unrelated paragraph
+  # elsewhere in the document.
+  #
+  # Deliberately NOT bounded to one sentence. The real manual discussion
+  # spans several sentences — a main list, a per-branch aside for
+  # criterion 10, a cross-reference to "criterion 10's own section," the
+  # history of criterion 12's two moves, a closing note on criterion 7 —
+  # and bounding to one sentence would reject a legitimate future
+  # re-sentencing of the identical true facts (splitting the semicolon-
+  # joined list into several short sentences, for instance) purely because
+  # it changed shape, not because any number became wrong. That is exactly
+  # the "guard that blocks correct work" trap named in this build's own
+  # history.
+  #
+  # CYCLE 3 CORRECTION: the caller no longer compares this function's
+  # output against the real `manual` set for EQUALITY. It checks
+  # CONTAINMENT instead, via set_subset_violations() (above): every number
+  # this function extracts must genuinely be `manual`; the real `manual`
+  # set is no longer required to appear here IN FULL. Cycle 2 shipped
+  # equality, which the review reproduced as rejecting two legitimate
+  # rewordings ("criteria 3 and 6 through 9, plus 13, in full" and a
+  # semicolon restructure) that state the identical true facts but cause
+  # this function's own regex to extract fewer numbers than the full set —
+  # a guard that blocks correct work. Containment tolerates that
+  # under-extraction on purpose: see set_subset_violations()'s own header
+  # comment, and the FAILURE PROOF / LEGITIMATE REWORDING assertions below,
+  # for the mutation-proved boundary.
+  #
+  # THE RESIDUAL RISK THIS ACCEPTS, STATED PLAINLY, UNCHANGED BY THAT
+  # CORRECTION: an incidental mention of a NON-manual criterion appearing
+  # anywhere after the anchor, still inside this same paragraph, would be
+  # swept into the set too and would then legitimately fail the
+  # containment check in compute_status_and_counts's caller — a loud
+  # false positive that NAMES the offending number directly (via
+  # set_subset_violations()'s own return value), not a silent miss, and
+  # not the same "compare two whole strings and spot the diff yourself"
+  # experience equality gave. Today's real text has no such stray mention
+  # after the anchor (verified: every number named after "N remain
+  # `manual`" — 3, 6, 7, 8, 9, 13, 10, 12 — is a criterion that is
+  # genuinely `manual`), so this does not fire against the shipped
+  # document; a future edit that introduces one would need to either fix
+  # the wrong reference or move the anchor/comment deliberately, exactly
+  # the same remedy this file's header already prescribes for the
+  # narrower anchor-phrase-rewording case.
+  # shellcheck disable=SC2016 # single-quoted deliberately: literal
+  # backtick-quoted status word, not substitution.
+  span=$(printf '%s\n' "$1" | grep -oE '[0-9]+ remain `manual`.*$' | head -n 1)
+  sorted_unique_set "$(extract_criteria_numbers "$span")"
+}
+
+mutate_criterion_status_line() {
+  # mutate_criterion_status_line <content> <n> <new-status-line> -
+  # <content> with criterion <n>'s own FIRST "**Status:**" line replaced,
+  # verbatim, by <new-status-line>. Scoped by POSITION (inside criterion
+  # <n>'s own "## <n>. " ... "## " boundary), never by matching the old
+  # line's text — several criteria below share the byte-identical status
+  # line "**Status:** `met`.", so a text-content-based replace would hit
+  # every one of them instead of just the intended criterion.
+  content=$1
+  n=$2
+  new_line=$3
+  printf '%s\n' "$content" | awk -v want="$n" -v newline="$new_line" '
+    BEGIN { insec = 0; done = 0 }
+    $0 ~ ("^## " want "\\. ") { insec = 1; print; next }
+    insec && /^## / { insec = 0 }
+    insec && /^\*\*Status:\*\*/ && !done { print newline; done = 1; next }
+    { print }
+  '
+}
+
+duplicate_status_line_after() {
+  # duplicate_status_line_after <content> <n> <extra-status-line> -
+  # <content> with a SECOND "**Status:**" line (<extra-status-line>)
+  # inserted immediately AFTER criterion <n>'s own real, first one, still
+  # inside that criterion's own section. Scoped by POSITION exactly like
+  # mutate_criterion_status_line above, for the same reason (shared status
+  # line text across criteria). Models Fix 1's exact defect class: a
+  # duplicate placed AFTER the canonical line is invisible to
+  # extract_status_word()'s `head -n 1`, which still returns the correct,
+  # first line — so the criterion's own Status line and its summary-table
+  # row still agree, and 15a's cross-check does not fire. Only
+  # count_status_lines() (now 2, not 1) can see this.
+  content=$1
+  n=$2
+  extra_line=$3
+  printf '%s\n' "$content" | awk -v want="$n" -v extra="$extra_line" '
+    BEGIN { insec = 0; done = 0 }
+    $0 ~ ("^## " want "\\. ") { insec = 1; print; next }
+    insec && /^## / { insec = 0 }
+    insec && /^\*\*Status:\*\*/ && !done { print; print extra; done = 1; next }
+    { print }
+  '
+}
+
+mutate_first_literal() {
+  # mutate_first_literal <content> <old> <new> - <content> with the FIRST
+  # occurrence of the literal string <old> replaced by <new>. Uses awk's
+  # index()/substr() rather than sed, so <old>/<new> need no regex-
+  # special-character escaping — the phrases this invariant mutates
+  # contain backticks and parentheses verbatim.
+  content=$1
+  old=$2
+  new=$3
+  printf '%s' "$content" | awk -v old="$old" -v new="$new" '
+    BEGIN { done = 0 }
+    {
+      if (!done) {
+        i = index($0, old)
+        if (i > 0) {
+          $0 = substr($0, 1, i - 1) new substr($0, i + length(old))
+          done = 1
+        }
+      }
+      print
+    }
+  '
+}
+
+compute_status_and_counts() {
+  # compute_status_and_counts <content> - runs the full per-criterion scan
+  # (own Status line vs. summary-table row, tallying each status word, and
+  # counting how many "**Status:**" lines each criterion's section actually
+  # has) over <content> and prints exactly ONE line of 10 space-separated
+  # fields:
+  #   mismatched-criteria(comma-joined, or "-" if none) met observed
+  #   manual not-met status-lines-found table-rows-found
+  #   bad-status-line-count-criteria(comma-joined, or "-" if none)
+  #   observed-criteria(comma-joined, or "-" if none)
+  #   manual-criteria(comma-joined, or "-" if none)
+  # A single-line, fixed-field-count output — rather than one shell
+  # variable per call site — is what lets the FAILURE PROOFS below re-run
+  # this exact logic against an in-memory MUTATED copy of the document
+  # without duplicating the scan. Every comma-joined list uses "-" (never
+  # empty string) when it has no members, specifically so the fixed-field
+  # IFS-space split at every call site below never silently collapses a
+  # missing field into its neighbour.
+  #
+  # FIX 1 (bad-status-line-count-criteria): a criterion whose section
+  # contains anything other than exactly one "**Status:**" line is flagged
+  # here regardless of what extract_status_word() returns for it - this is
+  # the check that can see a duplicated, AFTER-the-real-one contradicting
+  # Status line, which extract_status_word()'s first-match-only design and
+  # the mismatch check built on it (15a, below) structurally cannot.
+  #
+  # FIX 2 (observed-criteria / manual-criteria): the actual set of
+  # criterion numbers holding each status, derived the same way the counts
+  # already were - so a call site can compare this REAL set against the
+  # set the tally paragraph's own prose ENUMERATES, not just compare counts.
+  content=$1
+  c_met=0
+  c_observed=0
+  c_manual=0
+  c_notmet=0
+  c_status_found=0
+  c_table_found=0
+  c_mismatched=""
+  c_badcount=""
+  c_observed_list=""
+  c_manual_list=""
+  cn=1
+  while [ "$cn" -le 19 ]; do
+    csec=$(get_acceptance_section "$content" "$cn")
+    cstatus=$(extract_status_word "$csec")
+    cstatus_lines=$(count_status_lines "$csec")
+    if [ -n "$cstatus" ]; then
+      c_status_found=$((c_status_found + 1))
+    fi
+    case "$cstatus" in
+      met) c_met=$((c_met + 1)) ;;
+      observed)
+        c_observed=$((c_observed + 1))
+        if [ -z "$c_observed_list" ]; then
+          c_observed_list=$cn
+        else
+          c_observed_list="$c_observed_list,$cn"
+        fi
+        ;;
+      manual)
+        c_manual=$((c_manual + 1))
+        if [ -z "$c_manual_list" ]; then
+          c_manual_list=$cn
+        else
+          c_manual_list="$c_manual_list,$cn"
+        fi
+        ;;
+      "not met") c_notmet=$((c_notmet + 1)) ;;
+    esac
+
+    ctable_line=$(get_summary_table_line "$content" "$cn")
+    ctable_status=$(extract_table_status "$ctable_line")
+    if [ -n "$ctable_status" ]; then
+      c_table_found=$((c_table_found + 1))
+    fi
+
+    if [ "$cstatus" != "$ctable_status" ]; then
+      if [ -z "$c_mismatched" ]; then
+        c_mismatched=$cn
+      else
+        c_mismatched="$c_mismatched,$cn"
+      fi
+    fi
+
+    if [ "$cstatus_lines" -ne 1 ]; then
+      if [ -z "$c_badcount" ]; then
+        c_badcount=$cn
+      else
+        c_badcount="$c_badcount,$cn"
+      fi
+    fi
+
+    cn=$((cn + 1))
+  done
+  if [ -z "$c_mismatched" ]; then
+    c_mismatched="-"
+  fi
+  if [ -z "$c_badcount" ]; then
+    c_badcount="-"
+  fi
+  if [ -z "$c_observed_list" ]; then
+    c_observed_list="-"
+  fi
+  if [ -z "$c_manual_list" ]; then
+    c_manual_list="-"
+  fi
+  printf '%s %s %s %s %s %s %s %s %s %s\n' "$c_mismatched" "$c_met" "$c_observed" "$c_manual" "$c_notmet" "$c_status_found" "$c_table_found" "$c_badcount" "$c_observed_list" "$c_manual_list"
+}
+
+csv_to_display() {
+  # csv_to_display <csv-or-dash> - "-" becomes "" (no mismatches); any
+  # other value has its commas turned into spaces, matching the "" ==
+  # empty / "N M ..." == a list convention assert_eq is used with
+  # elsewhere in this file.
+  if [ "$1" = "-" ]; then
+    printf ''
+  else
+    printf '%s' "$1" | tr ',' ' '
+  fi
+}
+
+# --- The real-repo run -----------------------------------------------
+result15=$(compute_status_and_counts "$acceptance_content")
+old_ifs=$IFS
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting: $result15 is
+# compute_status_and_counts's own fixed-format, single-line, 10-field
+# output with no embedded IFS characters (every comma-joined list field
+# uses "-" for "no members" rather than an empty string, precisely so this
+# splits into exactly 10 words every time, never fewer).
+set -- $result15
+IFS=$old_ifs
+s15_mismatched=$1
+s15_met=$2
+s15_observed=$3
+s15_manual=$4
+s15_notmet=$5
+s15_status_found=$6
+s15_table_found=$7
+s15_badcount=$8
+s15_observed_list=$9
+s15_manual_list=${10}
+
+assert_eq "" "$(csv_to_display "$s15_mismatched")" "every docs/ACCEPTANCE.md criterion's own **Status:** line must state the same status word as its row in the ## Summary table (invariant 15a)"
+
+# FIX 1. Every criterion's section must have EXACTLY ONE "**Status:**"
+# line - zero (missing) and two-or-more (duplicated, whether or not the
+# duplicate contradicts the real one) are both defects. This is a
+# DIFFERENT check from 15a immediately above: 15a compares the FIRST status
+# line extract_status_word() finds against the summary-table row, so a
+# duplicate placed AFTER the real, correct line is invisible to it (the
+# first-found word is still the correct one, so 15a's own comparison still
+# agrees) - see the FAILURE PROOF below for the live demonstration.
+assert_eq "" "$(csv_to_display "$s15_badcount")" "every docs/ACCEPTANCE.md criterion's section must contain exactly one \`**Status:**\` line - neither zero nor two-or-more (invariant 15, Fix 1)"
+
+# Sanity, per the tech lead's own instruction: prove the parser actually
+# found all 19 criteria and all 19 table rows, so a regex matching nothing
+# could not make the assertion above pass trivially.
+assert_eq "19" "$s15_status_found" "sanity (invariant 15): a **Status:** line must be found for all 19 criteria, or the agreement check above would be vacuous"
+assert_eq "19" "$s15_table_found" "sanity (invariant 15): a ## Summary table row must be found for all 19 criterion numbers, or the agreement check above would be vacuous"
+assert_eq "19" "$((s15_met + s15_observed + s15_manual + s15_notmet))" "sanity (invariant 15): every one of the 19 criteria's own Status line must resolve to exactly one of met/observed/manual/not met, with none left unrecognized"
+
+tally_flat15=$(get_tally_paragraph "$acceptance_content")
+tally_paragraphs_found15=$(printf '%s\n' "$tally_flat15" | grep -c '.' || true)
+assert_eq "1" "$tally_paragraphs_found15" "sanity (invariant 15): exactly one paragraph containing 'of 19 criteria' must be found inside the ## Summary table section, or the tally-count extraction below is not testing anything real"
+
+# shellcheck disable=SC2016 # single-quoted deliberately, all three below:
+# literal backtick-quoted status words in the -E patterns, never substitution.
+tally_met15=$(printf '%s\n' "$tally_flat15" | grep -oE '[0-9]+ of 19 criteria are `met`' | head -n 1 | awk '{print $1}')
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
+tally_observed15=$(printf '%s\n' "$tally_flat15" | grep -oE '[0-9]+ \(criteria[^)]*\) are `observed`' | head -n 1 | awk '{print $1}')
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
+tally_manual15=$(printf '%s\n' "$tally_flat15" | grep -oE '[0-9]+ remain `manual`' | head -n 1 | awk '{print $1}')
+
+assert_eq "$s15_met" "$tally_met15" "the tally paragraph's met-count must equal the actual number of criteria whose own Status line says \`met\` (invariant 15b)"
+assert_eq "$s15_observed" "$tally_observed15" "the tally paragraph's observed-count must equal the actual number of criteria whose own Status line says \`observed\` (invariant 15b)"
+assert_eq "$s15_manual" "$tally_manual15" "the tally paragraph's manual-count must equal the actual number of criteria whose own Status line says \`manual\` (invariant 15b)"
+
+# FIX 2. 15b above only ever compared COUNTS. It cannot see a false
+# ENUMERATION that keeps the count correct — the tech lead's own
+# reproduction: rewriting the observed clause to name criterion 16 (which
+# is `met`) instead of 14, while leaving the leading count at "4", passes
+# 15b outright. Compare the actual SET of criterion numbers holding each
+# status against the SET the tally paragraph's own prose enumerates for
+# it, not just how many — but the TWO spans are checked with DIFFERENT
+# comparisons, deliberately (cycle 3 correction; cycle 2 shipped equality
+# for both):
+#   - `observed` (below): SET EQUALITY. The parenthetical is a clean,
+#     machine-shaped list ("N (criteria a, b, c, d) are `observed`") and
+#     equality costs nothing there.
+#   - `manual` (below): CONTAINMENT, via set_subset_violations() (defined
+#     above, near sorted_unique_set()). The real manual discussion is
+#     free-form prose spread across several sentences, and a review-
+#     reproduced defect showed equality rejects legitimate rewordings of
+#     it ("6 through 9" instead of spelling out every number; a semicolon
+#     restructure) purely because they extract a SUBSET of the true set,
+#     not because any number is wrong. Containment only requires that
+#     whatever IS extracted be genuinely `manual` — see
+#     extract_manual_number_set()'s and set_subset_violations()'s own
+#     header comments for the full reasoning, and the FAILURE PROOF /
+#     LEGITIMATE REWORDING assertions below for the mutation-proved
+#     boundary of what this still catches and what it, by design, does
+#     not.
+s15_observed_set=$(sorted_unique_set "$s15_observed_list")
+s15_manual_set=$(sorted_unique_set "$s15_manual_list")
+tally_observed_set15=$(extract_observed_number_set "$tally_flat15")
+tally_manual_set15=$(extract_manual_number_set "$tally_flat15")
+
+# Sanity: neither extraction above may be vacuous, or a broken anchor
+# comparing "" == "" would pass the enumeration checks below without
+# testing anything real (the identical hazard get_tally_paragraph's own
+# comment already names for the count extraction, applying here too).
+assert_eq "yes" "$([ -n "$tally_observed_set15" ] && echo yes || echo no)" "sanity (invariant 15, Fix 2): the tally paragraph's \`observed\` parenthetical must actually yield at least one criterion number"
+assert_eq "yes" "$([ -n "$tally_manual_set15" ] && echo yes || echo no)" "sanity (invariant 15, Fix 2): the tally paragraph's \`manual\` span must actually yield at least one criterion number"
+
+assert_eq "$s15_observed_set" "$tally_observed_set15" "the tally paragraph's \`observed\` parenthetical must enumerate EXACTLY the criteria whose own Status line says \`observed\` — the same set, not merely the same count (invariant 15, Fix 2)"
+
+tally_manual_violations15=$(set_subset_violations "$tally_manual_set15" "$s15_manual_set")
+assert_eq "" "$tally_manual_violations15" "every criterion number the tally paragraph's \`manual\` span enumerates must genuinely hold \`manual\` status — CONTAINMENT, not set equality (invariant 15, Fix 2 cycle 3): the manual span is not required to name every \`manual\` criterion, only to never misname one that is not"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, mutation 1) — flip ONE summary-table cell to
+# a DIFFERENT status, leaving that criterion's own Status line untouched.
+# Criterion 4's real row ends "| observed |"; mutated to "| manual |" here,
+# in-memory only, never touching the tracked file.
+# ==========================================================================
+row15_4=$(get_summary_table_line "$acceptance_content" "4")
+assert_eq "yes" "$([ -n "$row15_4" ] && echo yes || echo no)" "sanity (invariant 15, mutation 1): criterion 4's real summary-table row must actually be found, or this mutation proof is not well-defined"
+
+mutated_row15_4=$(mutate_table_status "$row15_4" "manual")
+mutant15_table=$(printf '%s\n' "$acceptance_content" | awk -v old="$row15_4" -v new="$mutated_row15_4" '{ if ($0 == old) { print new } else { print } }')
+
+
+# `case`, not a `printf ... | grep -qF` pipe: the same pipe-race the
+# invariant-13 anchor check above avoids (a grep that can exit the instant
+# it finds a match can race a still-writing printf on a several-thousand-
+# line variable into a harmless but noisy SIGPIPE/"Broken pipe" message —
+# a pure shell `case` test has no subprocess pipe to race at all).
+mutant15_old_row_present=no
+case "$mutant15_table" in
+  *"$row15_4"*) mutant15_old_row_present=yes ;;
+esac
+mutant15_new_row_present=no
+case "$mutant15_table" in
+  *"$mutated_row15_4"*) mutant15_new_row_present=yes ;;
+esac
+if [ "$mutant15_old_row_present" = no ] && [ "$mutant15_new_row_present" = yes ]; then
+  mutant15_table_changed=yes
+else
+  mutant15_table_changed=no
+fi
+assert_eq "yes" "$mutant15_table_changed" "sanity (invariant 15, mutation 1): the table-cell mutation must actually replace criterion 4's real row with a genuinely different one"
+
+result15_p1=$(compute_status_and_counts "$mutant15_table")
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting, see the real-run comment above.
+set -- $result15_p1
+IFS=$old_ifs
+p1_mismatched=$1
+assert_eq "4" "$(csv_to_display "$p1_mismatched")" "FAILURE PROOF (invariant 15, mutation 1): flipping ONLY criterion 4's summary-table Status cell from \`observed\` to \`manual\` (its own Status line left at \`observed\`) must be caught, naming criterion 4 and nothing else"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, mutation 2) — flip ONE criterion's own
+# **Status:** line to a DIFFERENT status, leaving its summary-table row
+# untouched. Targets criterion 15 (`met`, mutated to `manual`) specifically
+# BECAUSE several other criteria (1, 2, 16, 17, 18, 19) share the
+# byte-identical status line "**Status:** `met`." — proving the mutation
+# is scoped by SECTION POSITION, not by matching that shared text, is part
+# of this proof, not an assumption.
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status line text, not substitution.
+mutant15_section=$(mutate_criterion_status_line "$acceptance_content" "15" '**Status:** `manual`.')
+
+sanity_sec15=$(get_acceptance_section "$mutant15_section" "15")
+sanity_status15=$(extract_status_word "$sanity_sec15")
+assert_eq "manual" "$sanity_status15" "sanity (invariant 15, mutation 2): the section-status mutation must actually change criterion 15's own Status line to \`manual\`"
+
+siblings_ok15=yes
+for sib15 in 1 2 16 17 18 19; do
+  sib_sec15=$(get_acceptance_section "$mutant15_section" "$sib15")
+  sib_status15=$(extract_status_word "$sib_sec15")
+  if [ "$sib_status15" != "met" ]; then
+    siblings_ok15=no
+  fi
+done
+assert_eq "yes" "$siblings_ok15" "sanity (invariant 15, mutation 2): mutating ONLY criterion 15's status line must leave every sibling \`met\` criterion (1, 2, 16, 17, 18, 19) untouched — proving the mutation is scoped by section position, not by matching text content those criteria happen to share"
+
+result15_p2=$(compute_status_and_counts "$mutant15_section")
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting, see the real-run comment above.
+set -- $result15_p2
+IFS=$old_ifs
+p2_mismatched=$1
+assert_eq "15" "$(csv_to_display "$p2_mismatched")" "FAILURE PROOF (invariant 15, mutation 2): flipping ONLY criterion 15's own **Status:** line from \`met\` to \`manual\` (its summary-table row left at \`met\`) must be caught, naming criterion 15 and nothing else"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, mutation 3) — change ONE number in the
+# tally paragraph, leaving every criterion's actual status untouched.
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately, both below: literal backtick-quoted phrases, not substitution.
+tally_old_met_phrase='7 of 19 criteria are `met`'
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
+tally_new_met_phrase='6 of 19 criteria are `met`'
+
+tally_anchor_hits15=$(printf '%s' "$acceptance_content" | grep -oF -- "$tally_old_met_phrase" | wc -l | tr -d ' ')
+assert_eq "1" "$tally_anchor_hits15" "sanity (invariant 15, mutation 3): the tally paragraph's met-count phrase must appear exactly once in the real file, or this mutation proof is not well-defined"
+
+mutant15_tally=$(mutate_first_literal "$acceptance_content" "$tally_old_met_phrase" "$tally_new_met_phrase")
+
+mutant15_tally_flat=$(get_tally_paragraph "$mutant15_tally")
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
+mutant15_tally_met=$(printf '%s\n' "$mutant15_tally_flat" | grep -oE '[0-9]+ of 19 criteria are `met`' | head -n 1 | awk '{print $1}')
+assert_eq "6" "$mutant15_tally_met" "sanity (invariant 15, mutation 3): the mutated tally paragraph must now read a met-count of 6, or the mutation did not apply"
+
+result15_p3=$(compute_status_and_counts "$mutant15_tally")
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting, see the real-run comment above.
+set -- $result15_p3
+IFS=$old_ifs
+p3_met=$2
+p3_mismatch_yesno=$([ "$p3_met" = "$mutant15_tally_met" ] && echo yes || echo no)
+assert_eq "no" "$p3_mismatch_yesno" "FAILURE PROOF (invariant 15, mutation 3): changing ONLY the tally paragraph's met-count number (every criterion's actual status left untouched) must be caught — the real met-count must no longer equal the mutated tally's stated met-count"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, sanity) — the "found all 19" guards above
+# are not vacuous always-19 assertions: deleting a table row, or deleting a
+# Status line, actually drops the corresponding found-count below 19.
+# ==========================================================================
+mutant15_missing_row=$(printf '%s\n' "$acceptance_content" | awk -v old="$row15_4" 'BEGIN { skipped = 0 } { if (!skipped && $0 == old) { skipped = 1; next } print }')
+result15_p4=$(compute_status_and_counts "$mutant15_missing_row")
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting, see the real-run comment above.
+set -- $result15_p4
+IFS=$old_ifs
+p4_table_found=$7
+assert_eq "18" "$p4_table_found" "FAILURE PROOF (invariant 15, sanity): deleting criterion 4's summary-table row entirely must drop the found-row count to 18, proving the 'found all 19 table rows' sanity check is not a vacuous always-19 assertion"
+
+mutant15_missing_status=$(printf '%s\n' "$acceptance_content" | awk '
+  BEGIN { insec = 0; removed = 0 }
+  $0 ~ "^## 15\\. " { insec = 1; print; next }
+  insec && /^## / { insec = 0 }
+  insec && /^\*\*Status:\*\*/ && !removed { removed = 1; next }
+  { print }
+')
+result15_p5=$(compute_status_and_counts "$mutant15_missing_status")
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting, see the real-run comment above.
+set -- $result15_p5
+IFS=$old_ifs
+p5_status_found=$6
+assert_eq "18" "$p5_status_found" "FAILURE PROOF (invariant 15, sanity): deleting criterion 15's own **Status:** line entirely must drop the found-status-lines count to 18, proving the 'found all 19 criteria' sanity check is not a vacuous always-19 assertion"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, Fix 1, AFTER-duplicate direction) — insert a
+# SECOND, CONTRADICTING "**Status:**" line immediately AFTER criterion 6's
+# own real one, leaving the real line itself untouched. The BEFORE-duplicate
+# direction (a contradicting duplicate placed BEFORE the real line) is
+# already implicitly covered by 15a above: extract_status_word()'s
+# `head -n 1` would then return the duplicate's (wrong) word first, which
+# disagrees with the summary-table row and trips 15a on its own — proving
+# only that direction would be exactly the "guard that could not fail for
+# its own target" trap this build has hit repeatedly. This proof targets
+# the direction 15a structurally cannot see.
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately: literal
+# backtick-quoted status line text, not substitution.
+mutant15_dup=$(duplicate_status_line_after "$acceptance_content" "6" '**Status:** `met`.')
+
+sanity_dupsec15=$(get_acceptance_section "$mutant15_dup" "6")
+sanity_dupcount15=$(count_status_lines "$sanity_dupsec15")
+assert_eq "2" "$sanity_dupcount15" "sanity (invariant 15, Fix 1 proof): the after-duplicate mutation must actually leave criterion 6's section with TWO \`**Status:**\` lines, or this proof is not well-defined"
+
+sanity_dupword15=$(extract_status_word "$sanity_dupsec15")
+assert_eq "manual" "$sanity_dupword15" "sanity (invariant 15, Fix 1 proof): extract_status_word()'s head -n 1 must still return criterion 6's REAL, first word (\`manual\`) unchanged, not the appended duplicate's (\`met\`) — this is exactly why 15a's own mismatch check cannot see this direction at all"
+
+result15_dup=$(compute_status_and_counts "$mutant15_dup")
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting, see the real-run comment above.
+set -- $result15_dup
+IFS=$old_ifs
+dup_mismatched=$1
+dup_badcount=$8
+assert_eq "" "$(csv_to_display "$dup_mismatched")" "DEMONSTRATION (invariant 15, Fix 1 proof): 15a's own mismatch check (unchanged) must stay CLEAN against the after-duplicate mutation — proving this specific defect class was invisible to it before Fix 1 existed"
+assert_eq "6" "$(csv_to_display "$dup_badcount")" "FAILURE PROOF (invariant 15, Fix 1): a SECOND, contradicting \`**Status:**\` line placed AFTER criterion 6's real one must be caught by the new status-line-count check, naming criterion 6 and nothing else, even though 15a's mismatch check (immediately above) sees nothing wrong at all"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, Fix 1, leading-whitespace duplicate) — the
+# review's exact reproduction: a duplicate, contradicting "**Status:**"
+# line indented by a SINGLE LEADING SPACE, placed AFTER criterion 9's own
+# real one. Before this fix, the literal anchor "^\*\*Status:\*\*" would
+# not match the indented line at all - invisible to count_status_lines()
+# too, not just to extract_status_word() - unlike the flush-left duplicate
+# proof immediately above (which was already visible to
+# count_status_lines() even before Fix 1; that proof exists to demonstrate
+# 15a's blind spot, not this one). Targets criterion 9, distinct from
+# criterion 6 above, so this cannot be mistaken for re-running the same
+# case.
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately: literal
+# backtick-quoted status line text, not substitution.
+mutant15_wsdup=$(duplicate_status_line_after "$acceptance_content" "9" ' **Status:** `met`.')
+
+sanity_wsdupsec15=$(get_acceptance_section "$mutant15_wsdup" "9")
+sanity_wsdupcount15=$(count_status_lines "$sanity_wsdupsec15")
+assert_eq "2" "$sanity_wsdupcount15" "sanity (invariant 15, Fix 1 leading-whitespace proof): the indented-duplicate mutation must actually leave criterion 9's section with TWO \`**Status:**\` lines (one flush-left, one indented by one space), or this proof is not well-defined"
+
+result15_wsdup=$(compute_status_and_counts "$mutant15_wsdup")
+IFS=' '
+# shellcheck disable=SC2086 # deliberate word-splitting, see the real-run comment above.
+set -- $result15_wsdup
+IFS=$old_ifs
+wsdup_badcount=$8
+assert_eq "9" "$(csv_to_display "$wsdup_badcount")" "FAILURE PROOF (invariant 15, Fix 1, leading whitespace): a SECOND, contradicting \`**Status:**\` line indented by ONE LEADING SPACE, placed after criterion 9's real one, must be caught by the status-line-count check, naming criterion 9 and nothing else - before this fix, the literal \`^\*\*Status:\*\*\` anchor would not match the indented line at all, and this exact mutation would have passed silently"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, extract_status_word()'s OWN leading-
+# whitespace tolerance, isolated from count_status_lines()) — every proof
+# above this line that exercises [FIX 1]'s leading-whitespace tolerance
+# does so through a DUPLICATE line, and a duplicate changes the section's
+# "**Status:**"-line COUNT before it changes what gets EXTRACTED, so every
+# one of those proofs is, structurally, a count_status_lines() proof:
+# extract_status_word()'s own copy of the identical tolerant anchor
+# (both its grep AND its sed pattern) never has to fire to make any of
+# them go red. This proof targets criterion 17's SOLE, real "**Status:**"
+# line instead — indented by ONE LEADING SPACE, nothing else changed, no
+# duplicate introduced. The line count stays exactly 1 either way, so
+# count_status_lines() has nothing to report; only extract_status_word()
+# decides whether the status word is still read at all.
+# A/B-verified in a scratch copy (never the tracked file): with
+# extract_status_word()'s anchors as shipped (tolerant), the second
+# assertion below is green, reading `met`; reverting BOTH its grep and its
+# sed pattern to the literal, unindented `^\*\*Status:\*\*` turns that same
+# assertion red (empty, not `met`) while every other assertion in this
+# file — including count_status_lines()'s own leading-whitespace proof
+# immediately above — stays green.
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately: literal
+# backtick-quoted status line text, not substitution.
+mutant15_indented=$(mutate_criterion_status_line "$acceptance_content" "17" ' **Status:** `met`.')
+
+sanity_indsec15=$(get_acceptance_section "$mutant15_indented" "17")
+sanity_indcount15=$(count_status_lines "$sanity_indsec15")
+assert_eq "1" "$sanity_indcount15" "sanity (invariant 15, extract_status_word FAILURE PROOF): indenting criterion 17's SOLE **Status:** line by one leading space, changing nothing else, must leave count_status_lines() reporting exactly 1 - proving this proof is invisible to Fix 1's line-count check and isolates extract_status_word() as the only function whose own anchor can decide the outcome below"
+
+sanity_indword15=$(extract_status_word "$sanity_indsec15")
+assert_eq "met" "$sanity_indword15" "FAILURE PROOF (invariant 15, extract_status_word()'s own leading-whitespace tolerance): criterion 17's real, sole \`**Status:**\` line, indented by ONE LEADING SPACE and otherwise byte-identical, must still be read as \`met\` by extract_status_word() itself - unlike every leading-whitespace proof above it, this one depends on extract_status_word()'s OWN anchor tolerance, not count_status_lines()'s (see this block's own header comment for the A/B: reverting extract_status_word()'s grep and sed anchors to the literal, unindented form in a scratch copy turns this exact assertion red)"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, Fix 2, `observed`) — the tech lead's exact
+# reproduction: rewrite the parenthetical to name a WRONG criterion (16,
+# which is `met`) in place of a real one (14), leaving the leading count
+# "4" untouched so 15b's count-only check stays green. All four mutations
+# below run against $tally_flat15 (the ALREADY-FLATTENED tally text, the
+# exact input extract_observed_number_set()/extract_manual_number_set()
+# themselves consume) rather than against the raw, multi-line
+# $acceptance_content — the real document happens to hard-wrap the manual
+# clause's number list mid-phrase (see docs/ACCEPTANCE.md around line
+# 1167-1168), and pinning a literal string to that incidental wrap point
+# would make this proof brittle to the next unrelated re-wrap, exactly the
+# fragility this build's own history warns against. Testing at the
+# flattened-text level still exercises the real functions under test
+# end-to-end; get_tally_paragraph()/flatten_acceptance_section()'s own
+# line-join behavior is separately proved elsewhere (invariant 13's
+# mutation proofs, and this invariant's own mutation 3 above).
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately, both below:
+# literal backtick-quoted phrases, not substitution.
+tally_old_observed_phrase='4 (criteria 4, 5, 11, 14) are `observed`'
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
+tally_falseenum_observed_phrase='4 (criteria 4, 5, 11, 16) are `observed`'
+
+tally_observed_anchor_hits15=$(printf '%s' "$tally_flat15" | grep -oF -- "$tally_old_observed_phrase" | wc -l | tr -d ' ')
+assert_eq "1" "$tally_observed_anchor_hits15" "sanity (invariant 15, Fix 2 proof, observed): the tally paragraph's observed clause must appear exactly once in the flattened tally text, or this mutation proof is not well-defined"
+
+mutant15_falseenum_observed_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_observed_phrase" "$tally_falseenum_observed_phrase")
+mutant15_falseenum_observed_changed=$([ "$mutant15_falseenum_observed_flat" != "$tally_flat15" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_falseenum_observed_changed" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must actually change the flattened tally text, or this proof is not well-defined"
+
+# 15b (count-only) must NOT catch this — the count is still "4" — proving
+# the gap Fix 2 exists to close, not merely re-demonstrating 15b.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
+mutant15_falseenum_observed_count=$(printf '%s\n' "$mutant15_falseenum_observed_flat" | grep -oE '[0-9]+ \(criteria[^)]*\) are `observed`' | head -n 1 | awk '{print $1}')
+assert_eq "4" "$mutant15_falseenum_observed_count" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must leave the leading count at 4, or this is not the count-preserving defeat it claims to be"
+
+mutant15_falseenum_observed_set=$(extract_observed_number_set "$mutant15_falseenum_observed_flat")
+falseenum_observed_caught=$([ "$mutant15_falseenum_observed_set" != "$s15_observed_set" ] && echo yes || echo no)
+assert_eq "yes" "$falseenum_observed_caught" "FAILURE PROOF (invariant 15, Fix 2): renaming ONE number inside the \`observed\` parenthetical (14 -> 16, count left at 4) must be caught — the mutated tally's enumerated set must no longer equal the real \`observed\` set"
+
+# LEGITIMATE REWORDING, same true facts, must still pass. Reorders the
+# parenthetical's numbers and drops the serial "and" — a plausible future
+# copy-edit that changes nothing about which criteria are `observed`.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
+tally_reworded_observed_phrase='4 (criteria 14, 11, 5, 4) are `observed`'
+mutant15_reword_observed_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_observed_phrase" "$tally_reworded_observed_phrase")
+mutant15_reword_observed_changed=$([ "$mutant15_reword_observed_flat" != "$tally_flat15" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_reword_observed_changed" "sanity (invariant 15, Fix 2 proof, observed): the legitimate-rewording mutation must actually change the flattened tally text, or this proof is not well-defined"
+mutant15_reword_observed_set=$(extract_observed_number_set "$mutant15_reword_observed_flat")
+assert_eq "$s15_observed_set" "$mutant15_reword_observed_set" "LEGITIMATE REWORDING (invariant 15, Fix 2, observed): reordering the SAME four numbers in the parenthetical, and dropping the serial \"and\", must still be recognized as the identical \`observed\` set — a guard that rejects this is a guard that blocks correct work"
+
+# ==========================================================================
+# FAILURE PROOF (invariant 15, Fix 2, `manual`) — the tech lead's exact
+# reproduction applied to the manual span: swap ONE real manual criterion
+# number (13) for a criterion that is NOT manual (11, which is `observed`),
+# leaving the leading count "8" and every other number untouched. Same
+# flattened-text scoping rationale as the `observed` block above.
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately, both below:
+# literal backtick-quoted phrases, not substitution.
+tally_old_manual_phrase='criteria 3, 6, 7, 8, 9, and 13 in full'
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
+tally_falseenum_manual_phrase='criteria 3, 6, 7, 8, 9, and 11 in full'
+
+tally_manual_anchor_hits15=$(printf '%s' "$tally_flat15" | grep -oF -- "$tally_old_manual_phrase" | wc -l | tr -d ' ')
+assert_eq "1" "$tally_manual_anchor_hits15" "sanity (invariant 15, Fix 2 proof, manual): the tally paragraph's manual list phrase must appear exactly once in the flattened tally text, or this mutation proof is not well-defined"
+
+mutant15_falseenum_manual_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_manual_phrase" "$tally_falseenum_manual_phrase")
+mutant15_falseenum_manual_changed=$([ "$mutant15_falseenum_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_falseenum_manual_changed" "sanity (invariant 15, Fix 2 proof, manual): the false-enumeration mutation must actually change the flattened tally text, or this proof is not well-defined"
+
+# 15b (count-only) must NOT catch this — still 6 numbers in the clause and
+# the leading "8 remain `manual`" count is untouched — proving the gap Fix
+# 2 closes, not merely re-demonstrating 15b.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
+mutant15_falseenum_manual_count=$(printf '%s\n' "$mutant15_falseenum_manual_flat" | grep -oE '[0-9]+ remain `manual`' | head -n 1 | awk '{print $1}')
+assert_eq "8" "$mutant15_falseenum_manual_count" "sanity (invariant 15, Fix 2 proof, manual): the false-enumeration mutation must leave the leading count at 8, or this is not the count-preserving defeat it claims to be"
+
+mutant15_falseenum_manual_set=$(extract_manual_number_set "$mutant15_falseenum_manual_flat")
+mutant15_falseenum_manual_violations=$(set_subset_violations "$mutant15_falseenum_manual_set" "$s15_manual_set")
+assert_eq "11" "$mutant15_falseenum_manual_violations" "FAILURE PROOF (invariant 15, Fix 2, manual containment): renaming ONE number inside the \`manual\` list (13 -> 11, count left at 8) must be caught and NAMED - 11 is genuinely \`observed\`, not \`manual\`, so the containment check names 11 directly, rather than reporting two whole sets and leaving a human to diff them"
+
+# LEGITIMATE REWORDING 1/4 (reordering), same true facts, must still pass
+# CLEAN under containment. Reorders the same six numbers in the main
+# manual list (13 moved to the front) — a plausible future copy-edit that
+# changes nothing about which criteria are `manual`; the rest of the span
+# (the criterion-10 aside, the criterion-12 history, the closing
+# criterion-7 note) is untouched. This one would also have passed under
+# cycle 2's set EQUALITY — it is re-run here so all four legitimate cases
+# are proved together, against the SAME comparison the shipped code uses.
+tally_reworded_manual_phrase='criteria 13, 3, 6, 7, 8, and 9 in full'
+mutant15_reword_manual_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_manual_phrase" "$tally_reworded_manual_phrase")
+mutant15_reword_manual_changed=$([ "$mutant15_reword_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_reword_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, reordering): the legitimate-rewording mutation must actually change the flattened tally text, or this proof is not well-defined"
+mutant15_reword_manual_set=$(extract_manual_number_set "$mutant15_reword_manual_flat")
+mutant15_reword_manual_violations=$(set_subset_violations "$mutant15_reword_manual_set" "$s15_manual_set")
+assert_eq "" "$mutant15_reword_manual_violations" "LEGITIMATE REWORDING 1/4 (invariant 15, Fix 2, manual, reordering): reordering the SAME six numbers in the main manual list (13 moved to the front), leaving the rest of the span alone, must pass CLEAN under containment — a guard that rejects this is a guard that blocks correct work"
+
+# LEGITIMATE REWORDING 2/4 (elliptical range) — the review's own
+# reproduction. "6 through 9" collapses FOUR literal numbers (6, 7, 8, 9)
+# into a phrase extract_criteria_numbers() cannot expand — its regex only
+# ever consumes digits it can literally see, joined by ", "/" and "; the
+# word "through" is not a joiner it recognizes — so the extracted set
+# legitimately SHRINKS to a proper subset of the true set (verified below,
+# not assumed). Set EQUALITY (cycle 2) rejected this outright; CONTAINMENT
+# (cycle 3) does not, because every number the under-extraction DOES find
+# is still genuinely `manual`.
+tally_reworded2_manual_phrase='criteria 3 and 6 through 9, plus 13, in full'
+mutant15_reword2_manual_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_manual_phrase" "$tally_reworded2_manual_phrase")
+mutant15_reword2_manual_changed=$([ "$mutant15_reword2_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_reword2_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, range wording): the '6 through 9' rewording must actually change the flattened tally text, or this proof is not well-defined"
+mutant15_reword2_manual_set=$(extract_manual_number_set "$mutant15_reword2_manual_flat")
+mutant15_reword2_manual_underextracts=$([ "$mutant15_reword2_manual_set" != "$s15_manual_set" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_reword2_manual_underextracts" "sanity (invariant 15, Fix 2 proof, manual, range wording): '6 through 9' must genuinely extract a PROPER SUBSET of the real set (not the full set) — otherwise this proof is not exercising containment's own reason to exist, since set equality would already pass a full-set match trivially"
+mutant15_reword2_manual_violations=$(set_subset_violations "$mutant15_reword2_manual_set" "$s15_manual_set")
+assert_eq "" "$mutant15_reword2_manual_violations" "LEGITIMATE REWORDING 2/4 (invariant 15, Fix 2, manual, range wording): 'criteria 3 and 6 through 9, plus 13, in full' — a legitimate rewording set EQUALITY would have rejected because it under-extracts — must pass CLEAN under containment, since every number it DOES find is genuinely \`manual\`"
+
+# LEGITIMATE REWORDING 3/4 (semicolon restructure) — extract_criteria_numbers()'s
+# continuation grammar only recognizes ", "/" and " as joiners, never ";",
+# so this under-extracts even harder than the range wording above (down to
+# a single number, "3" — verified below, not assumed). Same containment
+# argument, taken further.
+tally_reworded3_manual_phrase='criteria 3; 6; 7; 8; 9; and 13'
+mutant15_reword3_manual_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_manual_phrase" "$tally_reworded3_manual_phrase")
+mutant15_reword3_manual_changed=$([ "$mutant15_reword3_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_reword3_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, semicolon restructure): the semicolon rewording must actually change the flattened tally text, or this proof is not well-defined"
+mutant15_reword3_manual_set=$(extract_manual_number_set "$mutant15_reword3_manual_flat")
+assert_eq "yes" "$([ -n "$mutant15_reword3_manual_set" ] && echo yes || echo no)" "sanity (invariant 15, Fix 2 proof, manual, semicolon restructure): the semicolon rewording must still yield at least one criterion number, or this proof is not well-defined"
+mutant15_reword3_manual_violations=$(set_subset_violations "$mutant15_reword3_manual_set" "$s15_manual_set")
+assert_eq "" "$mutant15_reword3_manual_violations" "LEGITIMATE REWORDING 3/4 (invariant 15, Fix 2, manual, semicolon restructure): 'criteria 3; 6; 7; 8; 9; and 13' — semicolons instead of commas, states the same true facts — must pass CLEAN under containment even though this under-extracts far more severely than the range wording above"
+
+# LEGITIMATE REWORDING 4/4 (added explanatory sentence) — appended at the
+# end of the same paragraph, mentioning ANOTHER criterion by number (8) —
+# already genuinely `manual`, just re-mentioned by a new sentence. Models
+# a realistic future copy edit (an added cross-reference), not a pure
+# reordering of the same six numbers like 1/4 above. This is the
+# genuinely-manual counterpart to the disclosed residue in
+# extract_manual_number_set()'s own header comment (mentioning a
+# NON-manual criterion this way WOULD legitimately fail; this sentence
+# deliberately mentions a criterion that IS manual, so it must not).
+mutant15_addsentence_manual_flat="$tally_flat15 This same shape of gap recurs in criterion 8's own section as well."
+mutant15_addsentence_manual_changed=$([ "$mutant15_addsentence_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_addsentence_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, added sentence): appending the explanatory sentence must actually change the flattened tally text, or this proof is not well-defined"
+mutant15_addsentence_manual_set=$(extract_manual_number_set "$mutant15_addsentence_manual_flat")
+mutant15_addsentence_manual_violations=$(set_subset_violations "$mutant15_addsentence_manual_set" "$s15_manual_set")
+assert_eq "" "$mutant15_addsentence_manual_violations" "LEGITIMATE REWORDING 4/4 (invariant 15, Fix 2, manual, added sentence): an added explanatory sentence mentioning criterion 8 (already genuinely \`manual\`) by number must pass CLEAN — mentioning a criterion that genuinely holds the status being checked is not a defect"
+
 assert_report

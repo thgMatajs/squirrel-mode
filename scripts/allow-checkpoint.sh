@@ -50,7 +50,7 @@
 #
 # THIS SCRIPT IS A SECURITY BOUNDARY. `allow` must only ever come back
 # for a path that genuinely, after normalisation, resolves inside
-# $HOME/.claude/squirrel/checkpoints/. Two layers enforce that:
+# $HOME/.squirrel/checkpoints/. Two layers enforce that:
 #
 #   Layer 1 (always active, pure POSIX sh, no external tool required):
 #   normalize_path() lexically resolves "." and ".." segments in the
@@ -89,7 +89,7 @@
 # appending each component of the relative remainder - so `base` itself
 # (checkpoints_dir) was never tested. A symlink planted AT
 # checkpoints_dir - `ln -s $HOME/outside-secret
-# $HOME/.claude/squirrel/checkpoints` - walked straight past that check
+# $HOME/.squirrel/checkpoints` - walked straight past that check
 # and into a since-removed Layer 3 that compared
 # `best_effort_realpath(dirname of file_path)` against
 # `best_effort_realpath(checkpoints_dir)`: with the symlink AT
@@ -105,17 +105,22 @@
 # checkpoints_dir and never inspects anything above it. `checkpoints/`
 # is created by this plugin itself (on first checkpoint write or
 # `/squirrel:init`), so a symlink AT or BELOW it is never legitimate -
-# every one of those must defer. `$HOME/.claude` and
-# `$HOME/.claude/squirrel`, by contrast, are ordinary user configuration
-# that this plugin did not create: dotfile managers (chezmoi, stow,
-# yadm) routinely make `~/.claude` itself a symlink into a dotfiles
-# repo, and that is a legitimate, common setup, not an attack. Walking
-# the whole ancestry back to $HOME and rejecting every symlink in it -
-# the reviewer's original suggestion - was REJECTED by the tech lead for
-# exactly this reason: it would defer every checkpoint write for any
-# user running one of those tools, which is a regression, not a fix.
+# every one of those must defer. `$HOME/.squirrel` itself, by contrast,
+# is ordinary user configuration that this plugin did not create once it
+# exists: dotfile managers (chezmoi, stow, yadm) routinely symlink a
+# whole config directory like this one into a dotfiles repo, and that is
+# a legitimate, common setup, not an attack - the identical trust this
+# script gave its old parent directory before the S11 move (see
+# docs/adr/0003's Amendment (S11) for that history and why the data
+# moved); moving it did not change which ancestor directory is trusted,
+# only its name and depth - one level instead of two. Walking the whole
+# ancestry back to $HOME and rejecting
+# every symlink in it - the reviewer's original suggestion - was
+# REJECTED by the tech lead for exactly this reason: it would defer
+# every checkpoint write for any user running one of those tools, which
+# is a regression, not a fix.
 # See scenario 29/30 (attack: symlink AT checkpoints_dir defers) and
-# scenario 31 (regression guard: symlink AT ~/.claude still allows) in
+# scenario 31 (regression guard: symlink AT ~/.squirrel still allows) in
 # tests/test_hooks.sh.
 #
 # LAYER 3 WAS REMOVED, NOT RELABELLED. The version this replaces had a
@@ -132,7 +137,7 @@
 # only ever rewrite its SHARED ancestor prefix (whatever lies above
 # checkpoints_dir, symlinked or not) - both sides of Layer 3's comparison
 # share that exact same prefix, because both are built from the same
-# `$home_dir/.claude/squirrel/checkpoints` string - so resolving it never
+# `$home_dir/.squirrel/checkpoints` string - so resolving it never
 # changes whether one is a prefix of the other. Layer 3 therefore could
 # never turn Layer 2's "no symlink found" into a rejection, in any
 # configuration, with or without `realpath`/`readlink` on PATH: it was
@@ -315,7 +320,7 @@ extract_tool_input_field() {
   # after "tool_input":{) and then key-searching inside that capture.
   # That isolation regex cannot parse nested JSON: given
   #   {"tool_name":"Write","tool_input":{"file_path":"/etc/passwd",
-  #    "decoy":{"file_path":"$HOME/.claude/squirrel/checkpoints/legit.md"}}}
+  #    "decoy":{"file_path":"$HOME/.squirrel/checkpoints/legit.md"}}}
   # the FIRST "}" in tool_input's text closes the NESTED decoy object,
   # not tool_input's own - so the capture became
   # `"file_path":"/etc/passwd","decoy":{"file_path":".../legit.md"`, and
@@ -504,7 +509,7 @@ decide() {
   # producing a false "defer" for an otherwise legitimate write - a
   # safe failure mode (never a false "allow"), but still a correctness
   # bug worth closing rather than shipping.
-  checkpoints_dir=$(normalize_path "$home_dir/.claude/squirrel/checkpoints") || checkpoints_dir="$home_dir/.claude/squirrel/checkpoints"
+  checkpoints_dir=$(normalize_path "$home_dir/.squirrel/checkpoints") || checkpoints_dir="$home_dir/.squirrel/checkpoints"
 
   normalized=$(normalize_path "$file_path") || { printf 'defer'; return 0; }
 

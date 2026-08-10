@@ -14,7 +14,7 @@ These are the squirrel-mode base rules. They govern response *shape* only - neve
 
 A squirrel-mode profile may be present elsewhere in your context. When it is, its field values override the defaults in the table below, field by field. When no profile is present, or a field is not set by it, use the default for that field exactly as written below.
 
-The profile, when it exists, lives at ~/.claude/squirrel/profile.md.
+The profile, when it exists, lives at ~/.squirrel/profile.md.
 
 ## Defaults
 
@@ -112,7 +112,7 @@ This rule takes precedence over rules 1 through 12 and rule 16 wherever they con
 
 ### 14. Checkpoint maintenance
 
-When a meaningful unit of work completes, update `~/.claude/squirrel/checkpoints/<project-slug>.md` with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
+When a meaningful unit of work completes, update `~/.squirrel/checkpoints/<project-slug>.md` with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
 
 Tool calls are always visible in the transcript; this rule promises no prose about the write in the response, not invisibility.
 

@@ -10,7 +10,7 @@ description: "Run the squirrel-mode calibration interview: seven one-at-a-time m
 
 This skill builds the user's personal squirrel-mode profile through a seven-question interview. Follow this procedure exactly, in every session it runs in.
 
-This writes to `~/.claude/squirrel/profile.md`. Claude Code and this skill both read that file automatically. Cursor cannot read it at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
+This writes to `~/.squirrel/profile.md`. Claude Code and this skill both read that file automatically. Cursor cannot read it at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
 
 ## Rules for the whole interview
 
@@ -101,7 +101,7 @@ Sets: `progress_recap` and `confirm_topic_switch` together (`yes`/`yes` for A, `
 1. Assemble all 11 fields: `language`, `answer_position`, `step_style`, `max_list_items`, `code_style`, `explanation_budget`, `options_per_answer`, `confirm_topic_switch`, `progress_recap`, `extras_section`, `tone`.
 2. Show the resulting profile as one compact fenced code block, one field per line, in the exact shape used in step 4 below.
 3. Ask a single confirm question: "Save this? y/n" (or the equivalent in the language just chosen). Wait for the reply before doing anything else.
-4. On yes, create `~/.claude/squirrel/` if it does not exist, then write `~/.claude/squirrel/profile.md` with exactly this shape:
+4. On yes, create `~/.squirrel/` if it does not exist, then write `~/.squirrel/profile.md` with exactly this shape:
 
 ```markdown
 # squirrel-mode profile

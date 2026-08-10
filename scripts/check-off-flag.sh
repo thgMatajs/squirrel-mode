@@ -333,7 +333,7 @@ decide() {
   home_dir="${HOME:-}"
   [ -n "$home_dir" ] || { printf ''; return 0; }
 
-  off_dir="$home_dir/.claude/squirrel/off"
+  off_dir="$home_dir/.squirrel/off"
 
   # CYCLE-3 MAJOR FIX: before claiming anything, decide - ONCE, so the
   # answer cannot depend on which of steps 3/4 happens to run first -

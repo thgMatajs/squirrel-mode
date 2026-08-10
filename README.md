@@ -78,7 +78,7 @@ All seven exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`.
 Codex and Cursor have no lifecycle hooks, so neither gets automatic checkpoints, and neither has
 a harness-level guarantee against the model starting `/squirrel:init` on its own the way Claude
 Code's `disable-model-invocation: true` does. All three targets read the same
-`~/.claude/squirrel/profile.md`, so running `/squirrel:init` once, in Claude Code or Codex,
+`~/.squirrel/profile.md`, so running `/squirrel:init` once, in Claude Code or Codex,
 calibrates every target on that machine. Full breakdown — which commands port and why, what each
 target loses — in [docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md).
 
@@ -112,8 +112,10 @@ docs/RESEARCH.md's "Corrections" section for what got cut when a citation didn't
 
 No network calls. No telemetry. Every script squirrel-mode ships is plain POSIX `sh` or Markdown.
 
-The Claude Code plugin's runtime writes to exactly one place: `~/.claude/squirrel/` — your
-`profile.md`, and one checkpoint file per project under `checkpoints/`.
+The Claude Code plugin's runtime writes to exactly one place: `~/.squirrel/` — your `profile.md`,
+and one checkpoint file per project under `checkpoints/`. Installs from before this location moved
+have their data at an older path instead — see the note at the end of this section; squirrel-mode
+detects that and tells you, once per session, rather than moving it for you.
 
 The Codex and Cursor installers are a separate, one-time step: they write to the per-target
 directories already listed above (`~/.codex/AGENTS.md`, `~/.agents/skills/`, `~/.cursor/rules/`).
@@ -121,12 +123,12 @@ Nothing, on any target, is ever written inside a project repository.
 
 `/plugin uninstall squirrel@squirrel-mode` removes the Claude Code plugin.
 
-Uninstalling — or reinstalling — leaves `~/.claude/squirrel/` alone: your profile and checkpoints
+Uninstalling — or reinstalling — leaves `~/.squirrel/` alone: your profile and checkpoints
 survive independently of the plugin's install state
 ([ADR-0003](./docs/adr/0003-profile-outside-plugin-data.md)).
 
 One exception to the normal permission flow: a `PreToolUse` hook auto-approves the plugin's own
-reads and writes inside `~/.claude/squirrel/checkpoints/` — both the read a checkpoint interaction
+reads and writes inside `~/.squirrel/checkpoints/` — both the read a checkpoint interaction
 starts with (`/squirrel:pickup`, and rule 14's own update path checking what is already logged) and
 the write that follows it — so neither one is meant to interrupt the task to ask for permission.
 Each is still a tool call like any other and shows up in the transcript the same way every other
@@ -166,6 +168,17 @@ sentinel — and that can be the *other* session, not the one that ran the comma
 by the wrong session is consumed — deleted — without effect on the other one, so if a different
 session is the one actually suppressed, it stays suppressed until its own next prompt claims a
 fresh `/squirrel:on`, or until the flag ages out after 7 days.
+
+**On the data directory having moved.** Versions before this one kept this data inside Claude
+Code's own config directory, on the theory that a plugin hook could auto-approve writes there the
+same way it does anywhere else. It cannot: Claude Code treats that directory as a protected path,
+and that check runs before any hook's `allow` is even considered, so the exact promise this section
+makes — a checkpoint update that never stops to ask — could never actually hold at the old location.
+`~/.squirrel/` sits outside it, and the same auto-approval mechanism works there for real; see
+[ADR-0002](./docs/adr/0002-checkpoint-auto-allow.md)'s and
+[ADR-0003](./docs/adr/0003-profile-outside-plugin-data.md)'s S11 amendments for the exact old path,
+the experiment that found the problem, and the reasoning behind the move. If your old data is still
+there, squirrel-mode notices and tells you once per session; it never moves it for you.
 
 ## Related, and out of scope
 

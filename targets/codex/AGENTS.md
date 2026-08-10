@@ -3,7 +3,7 @@
 
 # squirrel-mode base rules (Codex)
 
-This block was generated from squirrel-mode defaults. If ~/.claude/squirrel/profile.md exists, read it and let its values override the defaults below, field by field. There is no lifecycle hook on Codex to guarantee this read happens - treat it as best-effort.
+This block was generated from squirrel-mode defaults. If ~/.squirrel/profile.md exists, read it and let its values override the defaults below, field by field. There is no lifecycle hook on Codex to guarantee this read happens - treat it as best-effort.
 
 ## Defaults
 

@@ -992,7 +992,7 @@ ported_skill_description() {
 # body by literal substitution (see the section header above). init
 # and tune additionally gain one boilerplate paragraph, inserted
 # immediately after their own opening sentence, stating explicitly that
-# they write/edit the exact ~/.claude/squirrel/profile.md path Claude
+# they write/edit the exact ~/.squirrel/profile.md path Claude
 # Code and Cursor also read (task requirement: "say so"). This applies
 # unconditionally, with no per-host branch, because init/tune are never
 # composed into a Cursor artifact in the first place (Cursor gets only
@@ -1035,7 +1035,7 @@ ported_skill_body() {
       # Claude Code and this skill both read the profile automatically;
       # Cursor does not read it, period, and has to be hand-tuned
       # separately.
-      body=$(insert_paragraph_after "$body" "This skill builds the user's personal squirrel-mode profile through a seven-question interview. Follow this procedure exactly, in every session it runs in." "This writes to \`~/.claude/squirrel/profile.md\`. Claude Code and this skill both read that file automatically. Cursor cannot read it at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.")
+      body=$(insert_paragraph_after "$body" "This skill builds the user's personal squirrel-mode profile through a seven-question interview. Follow this procedure exactly, in every session it runs in." "This writes to \`~/.squirrel/profile.md\`. Claude Code and this skill both read that file automatically. Cursor cannot read it at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.")
       # B7 (S7 review): rules/base-rules.md is a repo-relative path that
       # does not exist on a Codex install - substituted for the
       # host-appropriate equivalent, the defaults table Codex actually
@@ -1047,10 +1047,10 @@ ported_skill_body() {
       body=$(literal_replace "$body" "The demonstration is part of \`/squirrel:init\` itself, not a separate step the user has to ask for." "The demonstration is part of this skill itself, not a separate step the user has to ask for.")
       ;;
     tune)
-      body=$(literal_replace "$body" "/squirrel:tune edits one field of the existing profile at \`~/.claude/squirrel/profile.md\`." "This skill edits one field of the existing profile at \`~/.claude/squirrel/profile.md\`.")
+      body=$(literal_replace "$body" "/squirrel:tune edits one field of the existing profile at \`~/.squirrel/profile.md\`." "This skill edits one field of the existing profile at \`~/.squirrel/profile.md\`.")
       # B6, same rationale as the init branch above: state the truth
       # without hedging instead of an unqualified "Cursor included".
-      body=$(insert_paragraph_after "$body" "This skill edits one field of the existing profile at \`~/.claude/squirrel/profile.md\`. It never re-runs the seven-question interview." "Claude Code and this skill both read \`~/.claude/squirrel/profile.md\` automatically, so a change made here takes effect there right away. Cursor cannot read this file at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.")
+      body=$(insert_paragraph_after "$body" "This skill edits one field of the existing profile at \`~/.squirrel/profile.md\`. It never re-runs the seven-question interview." "Claude Code and this skill both read \`~/.squirrel/profile.md\` automatically, so a change made here takes effect there right away. Cursor cannot read this file at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository.")
       body=$(literal_replace "$body" "\`/squirrel:init\`" "the squirrel-mode \`init\` skill")
       body=$(literal_replace "$body" "Any list \`/squirrel:tune\` shows," "Any list this skill shows,")
       # B7, same rationale as the init branch above.
@@ -1147,7 +1147,7 @@ These are the squirrel-mode base rules. They govern response *shape* only - neve
 
 A squirrel-mode profile may be present elsewhere in your context. When it is, its field values override the defaults in the table below, field by field. When no profile is present, or a field is not set by it, use the default for that field exactly as written below.
 
-The profile, when it exists, lives at ~/.claude/squirrel/profile.md.
+The profile, when it exists, lives at ~/.squirrel/profile.md.
 BODY
   printf '\n'
   print_defaults_section
@@ -1173,7 +1173,7 @@ These are the squirrel-mode base rules: response-formatting constraints that app
 
 A squirrel-mode profile may be present elsewhere in your context. When it is, its field values override the defaults in the table below, field by field. When no profile is present, or a field is not set by it, use the default for that field exactly as written below.
 
-The profile, when it exists, lives at ~/.claude/squirrel/profile.md.
+The profile, when it exists, lives at ~/.squirrel/profile.md.
 BODY
   printf '\n'
   print_defaults_section
@@ -1188,7 +1188,7 @@ write_codex_agents() {
   cat <<'BODY'
 # squirrel-mode base rules (Codex)
 
-This block was generated from squirrel-mode defaults. If ~/.claude/squirrel/profile.md exists, read it and let its values override the defaults below, field by field. There is no lifecycle hook on Codex to guarantee this read happens - treat it as best-effort.
+This block was generated from squirrel-mode defaults. If ~/.squirrel/profile.md exists, read it and let its values override the defaults below, field by field. There is no lifecycle hook on Codex to guarantee this read happens - treat it as best-effort.
 BODY
   printf '\n'
   print_defaults_section

@@ -463,7 +463,7 @@ fi
 assert_eq "ascending" "$order_status" "pickup's fixed-output template must present its sections in byte order: Recent wins, then You were doing, then Next action, then Open decisions"
 
 # ==========================================================================
-# 12. off and on both reference ~/.claude/squirrel/off/ and both mention
+# 12. off and on both reference ~/.squirrel/off/ and both mention
 #     /plugin disable.
 # ==========================================================================
 off_body=$(read_file "$(skill_file_for "off")")
@@ -473,9 +473,9 @@ on_body=$(read_file "$(skill_file_for "on")")
 # literal needle assert_contains searches the file's TEXT for (the
 # documented path as written in prose), never a path this shell opens or
 # expands - a leading "~" here is not tilde-expansion gone wrong.
-assert_contains "$off_body" '~/.claude/squirrel/off/' "off must reference ~/.claude/squirrel/off/"
+assert_contains "$off_body" '~/.squirrel/off/' "off must reference ~/.squirrel/off/"
 # shellcheck disable=SC2088 # same reasoning as the line above.
-assert_contains "$on_body" '~/.claude/squirrel/off/' "on must reference ~/.claude/squirrel/off/"
+assert_contains "$on_body" '~/.squirrel/off/' "on must reference ~/.squirrel/off/"
 assert_contains "$off_body" "/plugin disable" "off must mention /plugin disable as the hard off"
 assert_contains "$on_body" "/plugin disable" "on must mention /plugin disable as the hard off"
 

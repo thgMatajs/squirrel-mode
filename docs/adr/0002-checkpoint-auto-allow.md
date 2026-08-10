@@ -154,3 +154,66 @@ an external command that never returns — a real, if narrower, instance of the 
 here rather than fixed: it is a different script, out of this fix's scope, and `load-profile.sh`'s own
 `jq` usage is explicitly PREFERRED-not-REQUIRED with an `awk` fallback for every call, which changes
 the analysis enough that it deserves its own look rather than a drive-by edit.
+
+## Amendment (S11) — the mechanism was sound; it was pointed at a location where it structurally could not work
+
+Every amendment above (S10-1, AB1, AC1, AD1) fixed a real defect in *this script's own logic* — the
+matcher, the field extraction, the JSON parsing, the exit-code claim. All four fixes held. None of
+them could have fixed what this amendment records, because the problem was never in this script at
+all: it was one layer up, in Claude Code itself, and no amount of correctness inside
+`scripts/allow-checkpoint.sh` could reach it.
+
+**The experiment (S10-2).** Criterion 12 ("checkpoints are written... with no permission prompt")
+stayed `manual` after every fix above, and probe F (S10) reported, unprompted, that a checkpoint
+write was denied and needed the user's approval — the opposite of what this ADR promises. Resolving
+that doubt meant instrumenting the actual runtime, not reading the script again:
+
+1. A wrapper around the shipped, unmodified hook script logged every invocation. The `PreToolUse`
+   hook **is** invoked for both `Read` and `Write` on the checkpoint path, with the real payload
+   shape (`tool_input.file_path`), exactly as the amendments above assumed.
+
+2. The wrapper's logged decision **is** `permissionDecision: "allow"`, exit 0, well-formed JSON — for
+   both tool names. The script was doing its job correctly.
+
+3. **The write was still denied** — creating `~/.claude/squirrel/checkpoints/` (this ADR's location
+   before the fix below moved everything to `~/.squirrel/checkpoints/`) by hand first did not help.
+
+4. A hook rewritten to `allow` **everything**, tested with the working directory set to a scratch
+   directory, against three target shapes:
+
+   | target | result |
+   | :-- | :-- |
+   | inside the cwd | **wrote** |
+   | outside the cwd, outside `.claude` | **wrote** |
+   | inside `~/.claude/` | **denied** |
+
+A hook's `allow` **is** honoured, and it **does** cross the working-directory boundary — rows 1 and 2
+prove the mechanism this whole ADR describes is real and works exactly as designed, for the large
+majority of the filesystem. Row 3 is the only failure, and it isolates the cause completely: `.claude`
+itself. Claude Code treats it as a **protected path**, with a safety check that runs *before* any
+hook's `allow` is even consulted, matching the documented rule that hooks "can tighten restrictions
+but not loosen them past what permission rules allow." No hook script, however correct, can make a
+write inside `.claude` skip a permission prompt — the auto-approval this ADR designs is categorically
+inapplicable there, not merely buggy there.
+
+**Why this survived four rounds of fixes and every static test.** Every automated scenario in
+`tests/test_hooks.sh` checks what THIS SCRIPT returns for a given input, run directly — `sh
+scripts/allow-checkpoint.sh < payload.json` — never through the actual Claude Code permission
+pipeline the real hook runs inside. That is the correct way to test a security boundary this script
+owns (fast, deterministic, no dependency on a live harness), and it is also structurally blind to a
+safety check that lives entirely *above* this script, in code this repository does not contain and
+cannot invoke from a test. Four rounds of review made the script's own decision logic provably
+correct. None of them could have found this, because the script was never where the problem was.
+
+**Consequence.** ADR-0003 chose `~/.claude/squirrel/` (now `~/.squirrel/`, per that ADR's own S11
+amendment) so this data would survive plugin uninstall. This ADR then designed the auto-approval
+mechanism around writing there without a prompt. Those two decisions were incompatible from the
+start, and nothing in either ADR's own reasoning, read on its own, revealed that — each was locally
+sound. **The fix is ADR-0003's, not this one's**: move the data to `~/.squirrel/`, outside `.claude`
+entirely, the exact shape row 2 above proves works. This ADR's
+mechanism is unchanged by that move — the matcher, the field extraction, the path validation, the
+symlink defence, the `jq` requirement all stay exactly as amended above — because the fix was never
+"make this script smarter." It was already correct. The fix was making sure it gets asked about a
+path that Claude Code allows a hook to decide on at all. See
+[ADR-0003](./0003-profile-outside-plugin-data.md)'s own Amendment (S11) for the new location, the
+symlink trust boundary re-derived for it, and the migration notice for anyone still on the old path.

@@ -3,9 +3,12 @@
 #
 # Fires on session startup/resume/clear/compact (matcher in hooks.json).
 # Emits hookSpecificOutput.additionalContext containing:
-#   - the user's ~/.claude/squirrel/profile.md, if it exists, with a
+#   - the user's ~/.squirrel/profile.md, if it exists, with a
 #     line stating its fields override the output style's defaults; or
 #     a single short line suggesting /squirrel:init if it does not.
+#   - a one-line migration notice if data from an install that predates
+#     S11 still exists on disk - see "S11 migration notice" below for
+#     the exact path checked.
 #   - the literal `cwd` this hook was invoked with, as
 #     "Session working directory: <cwd>" (ADR-0005, amended, cycle 3
 #     BLOCKER fix: /squirrel:off and /squirrel:on need this exact string
@@ -25,13 +28,35 @@
 #   - "Resume available - run /squirrel:pickup" if a checkpoint already
 #     exists for this project - never the checkpoint's own body text
 #     (PLAN.md is explicit that the contents are not dumped into chat).
-# It also prunes stale ~/.claude/squirrel/off/<session_id> flag files
+# It also prunes stale ~/.squirrel/off/<session_id> flag files
 # (see check-off-flag.sh) so they do not accumulate forever.
+#
+# S11 MIGRATION NOTICE: squirrel-mode's data directory migrated from
+# ~/.claude/squirrel/ to ~/.squirrel/ (docs/adr/0003's Amendment (S11) -
+# ~/.claude is a protected path Claude Code will not let a hook `allow`
+# write into, which made ADR-0002's whole auto-approval mechanism
+# impossible at the old location; see docs/adr/0002's Amendment (S11)
+# for the experiment that established this). Anyone still on the old
+# layout (a v0.1.x install) has a profile and checkpoints sitting at the
+# old path this build no longer reads or writes. detect_old_data_dir
+# below only DETECTS that and asks the model to TELL the user, once per
+# session, in one line - it never moves, copies, or deletes anything
+# itself. Silently `mv`-ing a user's own data at session start is
+# exactly the kind of automatic action that goes wrong badly and cannot
+# be undone (a partial move racing a concurrent session, a destination
+# that already has its own newer profile.md and would be clobbered), so
+# this hook only ever reports what it finds and leaves the decision, and
+# the move itself, to the user. The notice re-appears every session for
+# as long as the old directory exists - identical in spirit to how the
+# "no profile found" line below re-appears every session until
+# /squirrel:init actually creates one - and stops the moment the old
+# directory is gone, with no separate "already told them" state to
+# track or get out of sync.
 #
 # Contract: this hook runs on every session start. It must NEVER exit
 # non-zero and must always print valid JSON on stdout, no matter how
-# broken its input or how bare/missing ~/.claude/squirrel/ is - a
-# fresh install (nothing under ~/.claude/squirrel/ at all) is the
+# broken its input or how bare/missing ~/.squirrel/ is - a
+# fresh install (nothing under ~/.squirrel/ at all) is the
 # common case on turn one, not an edge case.
 #
 # `set -e` vs. "never exit non-zero": `set -e` stays ON for the whole
@@ -133,7 +158,7 @@ project_slug() {
 
 # --- Stale off-flag pruning ------------------------------------------
 #
-# ADR-0005: `/squirrel:off` writes ~/.claude/squirrel/off/<session_id>
+# ADR-0005: `/squirrel:off` writes ~/.squirrel/off/<session_id>
 # and flags accumulate over time (sessions end without ever running
 # `/squirrel:on`). "Stale" here means older than 7 days - a
 # deliberately generous cushion so no realistically long-lived session
@@ -146,6 +171,34 @@ prune_stale_off_flags() {
   [ -d "$off_dir" ] || return 0
   find "$off_dir" -type f -mtime +7 -exec rm -f -- {} + >/dev/null 2>&1 || true
   return 0
+}
+
+# --- S11 migration notice --------------------------------------------
+#
+# detect_old_data_dir <home_dir> <new_squirrel_dir>: the migration check -
+# prints ONE line addressed to the model (the same idiom as the "no
+# profile found" line above - text the model is meant to relay, briefly,
+# not raw data) if and only if the migration source directory,
+# ~/.claude/squirrel/ (the pre-S11 location), still exists on disk.
+# Prints nothing and is a no-op when home_dir is empty
+# or the old directory is absent, so a fresh, always-been-on-S11-or-later
+# install never sees this line at all.
+#
+# DETECTION ONLY, DELIBERATELY. This function never creates, moves,
+# copies, or deletes a single byte - see the "S11 MIGRATION NOTICE"
+# paragraph in this file's own header for why an automatic `mv` at
+# session start is exactly the wrong kind of automation here (it cannot
+# be undone, and a destination that already has its own newer data would
+# be silently clobbered by a naive move). The user decides what to move
+# and when; this only makes sure they are told, every session, for as
+# long as the old directory keeps existing.
+detect_old_data_dir() {
+  home_dir=$1
+  new_dir=$2
+  [ -n "$home_dir" ] || return 0
+  old_dir="$home_dir/.claude/squirrel"
+  [ -d "$old_dir" ] || return 0
+  printf 'squirrel-mode: found data from an older install at %s - squirrel-mode now uses %s instead. Tell the user once, briefly: move whatever they want to keep (profile.md, the checkpoints/ directory) from the old location into the new one, then remove the old directory. This message will keep appearing every session until the old directory is gone; nothing here moves or deletes anything automatically.' "$old_dir" "$new_dir"
 }
 
 # --- JSON escaping for the manual (no-jq) emission path ---------------
@@ -366,7 +419,7 @@ build_context() {
   cwd=$(extract_field "$input" "cwd")
 
   home_dir="${HOME:-}"
-  squirrel_dir="$home_dir/.claude/squirrel"
+  squirrel_dir="$home_dir/.squirrel"
   profile_file="$squirrel_dir/profile.md"
   checkpoints_dir="$squirrel_dir/checkpoints"
   off_dir="$squirrel_dir/off"
@@ -384,6 +437,13 @@ build_context() {
 $profile_body"
   else
     context="squirrel-mode: no profile found yet. Suggest /squirrel:init once, briefly."
+  fi
+
+  migration_notice=$(detect_old_data_dir "$home_dir" "$squirrel_dir")
+  if [ -n "$migration_notice" ]; then
+    context="$context
+
+$migration_notice"
   fi
 
   context="$context

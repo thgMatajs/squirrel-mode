@@ -19,7 +19,7 @@ If that line is missing entirely, or present but empty after the colon, tell the
 
 ## Turning back on
 
-1. Create `~/.claude/squirrel/off/` if it does not exist yet.
+1. Create `~/.squirrel/off/` if it does not exist yet.
 2. Inside it, create one new sentinel file named `CLEAR.` followed by a fresh random or otherwise unique suffix that you generate right now - the same reasoning as `/squirrel:off`'s `PENDING.` sentinel: a fixed name would let a second request in a different project silently overwrite the first.
 3. Write the exact value from the injected `Session working directory:` line, and nothing else, as that file's entire contents, verbatim - not a re-typed copy, not a normalized form, the exact string. A single trailing newline in the write is fine; anything else in the file's contents is not.
 4. Confirm in exactly one line that the change starts with the user's next message - for example: "squirrel-mode will turn back on starting with your next message." Say this whether or not the session was actually off; the end state is identical either way. Do not say it is already back on: the clear only takes effect once a `UserPromptSubmit` hook claims this sentinel on the next prompt, and this skill cannot confirm that happened.
