@@ -209,17 +209,58 @@
 # buys.
 #
 # The honest, correctable claim: this script's "always exits 0, always
-# exactly one well-formed JSON decision" contract holds for EVERY input
-# and for every command FAILURE it depends on - `jq` exiting non-zero,
-# `jq` exiting 0 with no output, and `jq` printing the literal string
-# `null` are all reproduced (this fix) to defer correctly in well under a
-# second (112-272ms, measured on the author's machine - stated as
-# machine-specific data, not a portable performance guarantee). It does
-# NOT hold for an invoked command that is never given the chance to fail
-# or succeed because it never returns at all. That one gap is bounded
-# only by the harness's own hook timeout (Claude Code kills a hook
-# process that overruns its configured or default timeout), never by
-# anything in this script.
+# exactly one well-formed JSON decision" contract holds for every command
+# FAILURE it depends on - `jq` exiting non-zero, `jq` exiting 0 with no
+# output, and `jq` printing the literal string `null` are all reproduced
+# (this fix) to defer correctly in well under a second (112-272ms,
+# measured on the author's machine - stated as machine-specific data, not
+# a portable performance guarantee). It does NOT hold for an invoked
+# command that is never given the chance to fail or succeed because it
+# never returns at all. That gap is bounded only by the harness's own
+# hook timeout (Claude Code kills a hook process that overruns its
+# configured or default timeout), never by anything in this script.
+#
+# NARROWED AGAIN (P4 item 1, audit). The paragraph above used to open
+# "holds for EVERY input and for every command FAILURE". The "EVERY
+# input" half was itself an overstatement, and the word is removed above
+# rather than left standing: there is a SECOND way to reach the same
+# never-returns state, and it is reached through this hook's INPUT, with
+# every binary on the machine perfectly healthy.
+#
+# If fd 0 is CLOSED when this hook is exec'd - not empty, not
+# /dev/null, genuinely not an open descriptor - then `input=$(cat)` in
+# decide() hangs forever instead of reading nothing. `$(...)` builds its
+# capture pipe on the lowest free file descriptor, which with fd 0 closed
+# IS fd 0, so the pipe's READ end lands on stdin and `cat` reads the very
+# pipe the substitution's own subshell is writing to. The write end never
+# closes, EOF never arrives. Reproduced against this script: zero bytes
+# of stdout, still running when killed externally. Confirmed by
+# inspecting /dev/fd inside the substitution, where fd 0 is a pipe read
+# end ("pr--r-----") rather than the caller's stdin. load-profile.sh and
+# check-off-flag.sh share the identical construction and the identical
+# hang; this is a property of `input=$(cat)` under a closed fd 0, not of
+# anything specific to this file.
+#
+# The two causes are NOT equally closable, and that difference is the
+# whole reason one is reaffirmed and the other only documented here:
+#   - A WEDGED `jq` cannot be bounded from inside POSIX `sh` at all
+#     (the paragraph above; `timeout(1)` is not portable). Permanent.
+#   - A CLOSED fd 0 CAN be: `if ! ( exec 3<&0 ) 2>/dev/null; then exec
+#     0</dev/null; fi` before the first command substitution, which needs
+#     no external command. The probe runs in a SUBSHELL deliberately - a
+#     failed `exec` redirection exits a non-interactive shell, so running
+#     it here would exit this hook non-zero, the one thing it must never
+#     do. (`[ -r /dev/fd/0 ]` was tried and rejected: where /dev/fd is
+#     not mounted it reads false for a perfectly good stdin and would
+#     discard the hook's real input - a guard that bars correct work.)
+# That guard is deliberately NOT applied in this change: it is a
+# behaviour change to the entry path of a security hook, it belongs in
+# ONE coordinated change across all three hooks rather than in a
+# comment-only correction to one of them, and this file's own history
+# (Layer 3) is the standing argument against adding protection to this
+# script without reviewing it as new surface. Documented here so the
+# limit is recorded honestly and the remedy is not rediscovered from
+# scratch.
 #
 # jq: REQUIRED for an "allow" decision (S10 review cycle 2, AC1). Without
 # it on PATH, extract_tool_input_field below returns nothing, file_path

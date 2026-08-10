@@ -3516,6 +3516,162 @@ fi
 assert_eq "no" "$fp62_still_fires" "FAILURE PROOF (invariant S11, scenario 62): stubbing out detect_old_data_dir entirely must make a genuine pre-S11 directory WRONGLY show no migration notice - proving scenario 62's presence assertion is not vacuous"
 
 # ==========================================================================
+# 64. load-profile.sh - P4 item 2: a jq on PATH that exits 0 but prints
+#     the literal `null` must NOT become this hook's stdout. emit_json
+#     must fall through to the awk emitter and still produce a
+#     SessionStart object (exit 0). `jq empty` alone is not a sufficient
+#     oracle here - it accepts both empty input and the value `null` -
+#     so the assertions pin hookEventName explicitly.
+# ==========================================================================
+home64=$(new_home)
+mkdir -p "$home64/.squirrel"
+printf 'tone: p4-item2-null\n' >"$home64/.squirrel/profile.md"
+stdin64=$(printf '{"session_id":"s64","cwd":"%s/project-a"}' "$home64")
+path64=$(make_tool_path "jq")
+printf '%s\n' '#!/bin/sh' 'echo null' >"$path64/jq"
+chmod +x "$path64/jq"
+
+exit64=$(capture_exit_with_path "$load_profile_script" "$home64" "$path64" "$stdin64")
+assert_eq "0" "$exit64" "P4 item 2: load-profile.sh must exit 0 when jq prints the literal null"
+
+out64=$(capture_stdout_with_path "$load_profile_script" "$home64" "$path64" "$stdin64")
+event64=$(printf '%s' "$out64" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event64="<jq error>"
+assert_eq "SessionStart" "$event64" "P4 item 2: jq-prints-null must still emit a SessionStart object, not the literal null"
+ctx64=$(extract_ctx "$out64")
+assert_contains "$ctx64" "p4-item2-null" "P4 item 2: jq-prints-null fallback must still carry the real profile body through the awk emitter"
+
+# ==========================================================================
+# 65. load-profile.sh - P4 item 2: a jq on PATH that exits 0 with no
+#     output must likewise fall through; stdout must be a SessionStart
+#     object, never empty / a lone newline.
+# ==========================================================================
+home65=$(new_home)
+mkdir -p "$home65/.squirrel"
+printf 'tone: p4-item2-empty\n' >"$home65/.squirrel/profile.md"
+stdin65=$(printf '{"session_id":"s65","cwd":"%s/project-a"}' "$home65")
+path65=$(make_tool_path "jq")
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$path65/jq"
+chmod +x "$path65/jq"
+
+exit65=$(capture_exit_with_path "$load_profile_script" "$home65" "$path65" "$stdin65")
+assert_eq "0" "$exit65" "P4 item 2: load-profile.sh must exit 0 when jq prints nothing"
+
+out65=$(capture_stdout_with_path "$load_profile_script" "$home65" "$path65" "$stdin65")
+bytes65=$(printf '%s' "$out65" | wc -c | awk '{print $1}')
+if [ "$bytes65" -gt 0 ]; then
+  bytes65_ok=yes
+else
+  bytes65_ok=no
+fi
+assert_eq "yes" "$bytes65_ok" "P4 item 2: jq-prints-nothing must still produce non-empty stdout"
+event65=$(printf '%s' "$out65" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event65="<jq error>"
+assert_eq "SessionStart" "$event65" "P4 item 2: jq-prints-nothing must still emit a SessionStart object"
+ctx65=$(extract_ctx "$out65")
+assert_contains "$ctx65" "p4-item2-empty" "P4 item 2: jq-prints-nothing fallback must still carry the real profile body"
+
+# --- fp64: strip emit_json's non-empty / non-null / object-shape guards
+# so a jq that prints `null` is trusted again. Proves scenarios 64 and 65
+# are not vacuous: the mutant emits the literal `null` under the same
+# shim scenario 64 uses against the real script.
+fp64_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fp64_start=$(line_of "$fp64_script" '    # jq exiting 0 is not enough: a wedged-but-still-callable shim that')
+[ -n "$fp64_start" ] || fp64_start=0
+# shellcheck disable=SC2016
+fp64_end=$(line_of_after "$fp64_script" "$fp64_start" '    fi')
+[ -n "$fp64_end" ] || fp64_end=0
+# shellcheck disable=SC2016
+replace_block "$fp64_script" "$fp64_start" "$fp64_end" '    if out=$(jq -n --arg ctx "$ctx" '"'"'{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'"'"' 2>/dev/null); then
+      printf '"'"'%s\n'"'"' "$out"
+      return 0
+    fi'
+
+fp64_out=$(capture_stdout_with_path "$fp64_script" "$home64" "$path64" "$stdin64")
+assert_eq "null" "$fp64_out" "FAILURE PROOF (P4 item 2, scenario 64): removing emit_json's null/empty/object guards must make a jq-prints-null shim emit the literal null - proving 64's SessionStart assertion is the new guard's doing"
+
+fp64_empty_out=$(capture_stdout_with_path "$fp64_script" "$home65" "$path65" "$stdin65")
+bytes_fp64_empty=$(printf '%s' "$fp64_empty_out" | wc -c | awk '{print $1}')
+if [ "$bytes_fp64_empty" -eq 0 ]; then
+  fp64_empty_blank=yes
+else
+  fp64_empty_blank=no
+fi
+assert_eq "yes" "$fp64_empty_blank" "FAILURE PROOF (P4 item 2, scenario 65): the same unguarded mutant, under a jq that prints nothing, must emit empty stdout - proving 65's non-empty SessionStart assertion is not vacuous"
+
+# Sanity: the mutant must still behave correctly when real jq is on PATH,
+# so the mutation's effect is isolated to the bad-jq path (same isolation
+# discipline as scenario 60c / 58).
+fp64_sane=$(capture_stdout "$fp64_script" "$home64" "$stdin64")
+event_fp64_sane=$(printf '%s' "$fp64_sane" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event_fp64_sane="<jq error>"
+assert_eq "SessionStart" "$event_fp64_sane" "FAILURE PROOF isolation (P4 item 2): the unguarded emit_json mutant must still emit SessionStart when real jq is present - the mutation only bites the bad-jq path"
+
+# ==========================================================================
+# 66. load-profile.sh - P4 review cycle 1 / M1: a jq on PATH that exits 0
+#     but prints a non-empty object that is NOT a SessionStart payload
+#     (e.g. {"not":"SessionStart"}) must NOT be emitted verbatim.
+#     emit_json must fall through to the awk emitter and still produce a
+#     real SessionStart object. The prefix-only `{` guard alone is not
+#     enough - that is exactly the MAJOR this scenario closes.
+# ==========================================================================
+home66=$(new_home)
+mkdir -p "$home66/.squirrel"
+printf 'tone: p4-m1-wrong-shape\n' >"$home66/.squirrel/profile.md"
+stdin66=$(printf '{"session_id":"s66","cwd":"%s/project-a"}' "$home66")
+path66=$(make_tool_path "jq")
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "{\"not\":\"SessionStart\"}"' >"$path66/jq"
+chmod +x "$path66/jq"
+
+exit66=$(capture_exit_with_path "$load_profile_script" "$home66" "$path66" "$stdin66")
+assert_eq "0" "$exit66" "P4 M1: load-profile.sh must exit 0 when jq prints a non-SessionStart object"
+
+out66=$(capture_stdout_with_path "$load_profile_script" "$home66" "$path66" "$stdin66")
+event66=$(printf '%s' "$out66" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event66="<jq error>"
+assert_eq "SessionStart" "$event66" "P4 M1: jq-prints-non-SessionStart-object must still emit a SessionStart object via the awk fallback, not the shim's JSON verbatim"
+ctx66=$(extract_ctx "$out66")
+assert_contains "$ctx66" "p4-m1-wrong-shape" "P4 M1: wrong-shape jq fallback must still carry the real profile body through the awk emitter"
+# Pin that the shim's payload itself did not leak as stdout.
+if printf '%s' "$out66" | grep -q '"not"'; then
+  leaked66=yes
+else
+  leaked66=no
+fi
+assert_eq "no" "$leaked66" "P4 M1: stdout must not contain the shim's {\"not\":\"SessionStart\"} payload"
+
+# Wrong hookEventName (still a plausible hook object) must likewise fall
+# through - same threat class, different shape.
+path66b=$(make_tool_path "jq")
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"x\"}}"' >"$path66b/jq"
+chmod +x "$path66b/jq"
+out66b=$(capture_stdout_with_path "$load_profile_script" "$home66" "$path66b" "$stdin66")
+event66b=$(printf '%s' "$out66b" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event66b="<jq error>"
+assert_eq "SessionStart" "$event66b" "P4 M1: jq-prints-wrong-hookEventName must still emit SessionStart via fallback, not trust the wrong event name"
+
+# --- fp66: keep null/empty/object-prefix guards, drop ONLY the
+# SessionStart hookEventName check. Proves scenario 66 is not vacuous:
+# under the same {"not":"SessionStart"} shim, the mutant emits that
+# object verbatim - so 66's SessionStart assertion is this check's doing.
+fp66_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fp66_start=$(line_of "$fp66_script" '          # Re-parse with jq (not a regex): missing hookSpecificOutput,')
+[ -n "$fp66_start" ] || fp66_start=0
+# shellcheck disable=SC2016
+fp66_end=$(line_of_after "$fp66_script" "$fp66_start" '          fi')
+[ -n "$fp66_end" ] || fp66_end=0
+# Replace the event-validation block with an unconditional trust of the
+# already-accepted `{...}` object (prefix / null / empty guards remain).
+# shellcheck disable=SC2016
+replace_block "$fp66_script" "$fp66_start" "$fp66_end" '          printf '"'"'%s\n'"'"' "$out"
+          return 0'
+
+fp66_out=$(capture_stdout_with_path "$fp66_script" "$home66" "$path66" "$stdin66")
+assert_eq '{"not":"SessionStart"}' "$fp66_out" "FAILURE PROOF (P4 M1, scenario 66): removing only emit_json's SessionStart hookEventName check must make a jq-prints-{\"not\":\"SessionStart\"} shim emit that object verbatim - proving 66's SessionStart assertion is the new check's doing"
+
+# Isolation: real jq must still produce SessionStart under the same mutant.
+fp66_sane=$(capture_stdout "$fp66_script" "$home66" "$stdin66")
+event_fp66_sane=$(printf '%s' "$fp66_sane" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event_fp66_sane="<jq error>"
+assert_eq "SessionStart" "$event_fp66_sane" "FAILURE PROOF isolation (P4 M1): the SessionStart-check-stripped mutant must still emit SessionStart when real jq is present"
+
+# ==========================================================================
 # P1 FAILURE PROOFS. One mutant per behaviour scenarios 6b-6g and 14d
 # assert, each reintroducing the specific wrong version of that
 # behaviour - the pre-P1 shape where there is one, and the plausible

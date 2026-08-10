@@ -98,10 +98,22 @@
 # be wrong; moving one could be.
 #
 # Contract: this hook runs on every session start. It must NEVER exit
-# non-zero and must always print valid JSON on stdout, no matter how
-# broken its input or how bare/missing ~/.squirrel/ is - a
-# fresh install (nothing under ~/.squirrel/ at all) is the
-# common case on turn one, not an edge case.
+# non-zero and must always print one well-formed SessionStart JSON
+# object on stdout for every command FAILURE it depends on, and for
+# every broken / bare / missing ~/.squirrel/ layout a fresh install can
+# present (nothing under ~/.squirrel/ at all is the common case on turn
+# one, not an edge case). Audited under a scratch HOME (P4 item 2): bad
+# HOME shapes, unreadable or non-file profile.md, malformed / empty /
+# closed-as-/dev/null stdin, jq absent, jq exiting non-zero, jq exiting
+# 0 with the literal `null` or with no output, a non-empty object that
+# is not a SessionStart payload, one-at-a-time absence of
+# cksum/od/cut/wc/tail/basename/tr/find/awk/sed, locales C and
+# pt_BR.UTF-8, and C0 / invalid-UTF-8 profile bodies all return exit 0
+# with a parseable SessionStart object (the jq-null and jq-empty cases
+# used to print `null` / a blank line and are closed in emit_json
+# below; the non-SessionStart-object case used to be emitted verbatim
+# and is closed by the same function's hookEventName check; the rest
+# already held).
 #
 # `set -e` vs. "never exit non-zero": `set -e` stays ON for the whole
 # script, including inside build_context() below, so a bug fails fast
@@ -118,6 +130,31 @@
 # control returns to the `if`, which supplies a safe fallback context
 # instead of ever propagating a non-zero exit out of this script.
 #
+# WHAT THE CONTRACT DOES NOT COVER (P4 item 2, audit) - the same two
+# never-returns gaps allow-checkpoint.sh and check-off-flag.sh already
+# disclose, reproduced against this script too:
+#
+#   1. A `jq` PRESENT on PATH but WEDGED - stopped, deadlocked, never
+#      returns. The `if json_out=$(emit_json ...)` / `if context=$(
+#      build_context ...)` wrappers catch FAILING; they cannot catch
+#      never FINISHING. No POSIX `sh` construct interrupts a command
+#      substitution already in flight, and `timeout(1)` is GNU
+#      coreutils, absent from stock macOS. NOT closable here;
+#      reaffirmed. Bounded only by the harness's own hook timeout.
+#
+#   2. A CLOSED fd 0 - stdin not an open descriptor at all, as distinct
+#      from empty or /dev/null. `input=$(cat)` in build_context() then
+#      hangs forever: `$(...)` builds its capture pipe on the lowest
+#      free file descriptor, which with fd 0 closed IS fd 0, so `cat`
+#      reads the very pipe the substitution's own subshell writes to
+#      and EOF never arrives. Closable with `if ! ( exec 3<&0 )
+#      2>/dev/null; then exec 0</dev/null; fi` ahead of the first
+#      command substitution (probe in a SUBSHELL so a failed `exec`
+#      redirection cannot exit this hook non-zero). Deliberately NOT
+#      applied here: it is a behaviour change to the entry path of all
+#      three hooks and belongs in one coordinated change across them,
+#      not a one-hook patch. Documented so the limit stays honest.
+#
 # jq dependency: PREFERRED, not required. jq is used when present on
 # PATH (correct JSON construction and field extraction, including
 # proper escaping) but every jq call has an awk fallback so a machine
@@ -127,7 +164,12 @@
 # fallback (json_escape) runs entirely under `LC_ALL=C` so the result
 # does not depend on the invoking shell's locale - see json_escape's
 # own comment for why that matters even when jq IS present elsewhere
-# in this file.
+# in this file. emit_json additionally treats a jq that exits 0 but
+# prints nothing, the literal `null`, or a non-empty object that is
+# not a SessionStart payload (wrong/missing hookEventName) as a
+# FAILURE of the jq path and falls through to the awk emitter - the
+# null/empty shapes allow-checkpoint.sh already enumerates for its own
+# jq calls, plus the object-shape check that closes trusting any `{...}`.
 set -eu
 
 # --- JSON field extraction ------------------------------------------
@@ -524,9 +566,33 @@ json_escape() {
 emit_json() {
   ctx=$1
   if command -v jq >/dev/null 2>&1; then
-    if out=$(jq -n --arg ctx "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null); then
-      printf '%s\n' "$out"
-      return 0
+    # jq exiting 0 is not enough: a wedged-but-still-callable shim that
+    # prints the literal `null`, prints nothing at all, or prints some
+    # other JSON value - including a non-empty object that is NOT a
+    # SessionStart payload (e.g. {"not":"SessionStart"}, or a
+    # hookSpecificOutput with the wrong hookEventName) - used to make
+    # this function emit that value verbatim. `jq empty` accepts all of
+    # those while they fail the SessionStart contract. Require a
+    # non-empty object whose hookSpecificOutput.hookEventName is
+    # exactly SessionStart before trusting the jq path; anything else
+    # falls through to json_escape.
+    if out=$(jq -n --arg ctx "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null) \
+      && [ -n "$out" ] \
+      && [ "$out" != "null" ]; then
+      case "$out" in
+        \{*)
+          # Re-parse with jq (not a regex): missing hookSpecificOutput,
+          # a non-object value there, or any hookEventName other than
+          # SessionStart must NOT be trusted. A shim that ignores stdin
+          # and reprints garbage fails this the same way - event will
+          # not equal the literal SessionStart.
+          event=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event=""
+          if [ "$event" = "SessionStart" ]; then
+            printf '%s\n' "$out"
+            return 0
+          fi
+          ;;
+      esac
     fi
   fi
   escaped=$(json_escape "$ctx")

@@ -890,25 +890,60 @@ flatten_acceptance_section() {
   # they are already inside changes nothing about catching them - proven
   # below by re-running both existing failure-proof mutants unchanged.
   # What this does NOT close, disclosed rather than left implicit: a
-  # coincidental match can still occur WITHIN a single paragraph - an
-  # ordinary line-wrap landing between two unrelated sentences that share
-  # one paragraph, or a wrap in the middle of one sentence with no blank
-  # line involved at all. That narrower residual predates this whole
-  # mechanism: a banned phrase already sitting on ONE physical line,
-  # unwrapped, was always a coincidental-match risk this literal-phrase
-  # regex could produce, flattened or not, paragraph-bounded or not - it
-  # is not something flattening introduced and paragraph-bounding cannot
-  # remove it. Closing it fully would need bounding to a SENTENCE instead
-  # of a paragraph, which was considered and rejected: sentence boundaries
-  # are not mechanically detectable the way a blank line is (a
-  # period-based splitter would also fire on abbreviations, decimal
-  # version numbers, and markdown's own "1. " list syntax), and a narrower
-  # heuristic with its own undisclosed holes is the exact anti-pattern
-  # this project has hit and rejected repeatedly elsewhere (Layer 3's
-  # realpath comparison, the sed-based nested-JSON isolation this build
-  # eventually removed rather than narrowed again). A false positive here
-  # blocks a build rather than shipping a defect, so disclosure is the
-  # proportionate response to the residual, not a fourth narrowing.
+  # coincidental match can still occur WITHIN a single paragraph, from an
+  # ordinary line-wrap in the middle of ONE sentence with no blank line
+  # involved at all. That residual predates this whole mechanism: a
+  # banned phrase already sitting on ONE physical line, unwrapped, was
+  # always a coincidental-match risk this literal-phrase regex could
+  # produce, flattened or not, paragraph-bounded or not - it is not
+  # something flattening introduced and paragraph-bounding cannot remove
+  # it. A false positive here blocks a build rather than shipping a
+  # defect, so disclosure is the proportionate response, not a fourth
+  # narrowing.
+  #
+  # TWO CORRECTIONS TO THAT DISCLOSURE (P4 item 6, measured against this
+  # function as shipped, not reasoned about). Both were overstatements in
+  # the paragraph above, and both are removed from it rather than left
+  # standing next to a hedge:
+  #
+  #   (1) It used to also name "an ordinary line-wrap landing between two
+  #   unrelated SENTENCES that share one paragraph" as part of the same
+  #   residual. That shape does NOT match, and cannot: for the flattened
+  #   text to spell a banned phrase, the two fragments have to end up
+  #   ADJACENT, and anything that separates two sentences - the sentence's
+  #   own terminal period, a "- " list marker, a table "|" - survives
+  #   flattening and sits between them. Tried against this function, all
+  #   no-match: "...adoption has not." / "Run into any blockers..." as two
+  #   real sentences; the same words as two abutting list items; as two
+  #   abutting table rows; and as a sentence followed by a list item. The
+  #   ONLY within-paragraph shape that does match is a single sentence
+  #   hard-wrapped mid-phrase - and there the flattened text is that
+  #   sentence's own true reading, so flattening invented no adjacency at
+  #   all. What is left is therefore not a flattening defect: it is
+  #   ACCEPTANCE_NOT_RUN_REGEX being unable to tell "has not run into any
+  #   blockers" from "has not run [the probe]", which is the same
+  #   literal-phrase-versus-meaning limit the AC3 #3 paraphrase
+  #   DEMONSTRATION below already pins from the opposite direction.
+  #
+  #   (2) It used to say "closing it fully would need bounding to a
+  #   SENTENCE instead of a paragraph". It would not - that remedy does
+  #   not work, which is a stronger reason to reject it than the
+  #   detectability argument that used to be given for it. The one shape
+  #   that matches is INSIDE one sentence, so a sentence-bounded flatten
+  #   still joins it and still matches: verified by running a
+  #   sentence-splitting variant over all three constructions, which
+  #   matched every time the shipped version did. The detectability
+  #   objection was true as far as it went (a period-based splitter fires
+  #   on abbreviations, decimal version numbers, and markdown's own "1. "
+  #   list syntax) but it was arguing against a remedy that would not have
+  #   helped anyway, which is exactly the "narrower guard, same bug"
+  #   pattern this project has rejected elsewhere (Layer 3's realpath
+  #   comparison; the sed-based nested-JSON isolation that was removed
+  #   rather than narrowed a fourth time).
+  #
+  # See the "P4 item 6" DEMONSTRATION block after the AD4 proofs below for
+  # the assertions that pin both corrections, so neither can rot back into
+  # a comment nobody re-ran.
   printf '%s\n' "$1" | awk '
     BEGIN { RS = "" }
     {
@@ -1214,6 +1249,72 @@ else
   mutant_falsepos13_merged_onto_one_line=no
 fi
 assert_eq "no" "$mutant_falsepos13_merged_onto_one_line" "sanity (invariant 13, AD4): 'has not' and 'run into' must land on DIFFERENT paragraph-flattened output lines, proving the blank line between them survived section extraction as a real paragraph boundary (not merely that the regex happens not to match for some unrelated reason)"
+
+# ==========================================================================
+# DEMONSTRATION (P4 item 6) - pins the two corrections in
+# flatten_acceptance_section's header. Measured against the shipped
+# function, not reasoned about in a comment alone.
+#
+#   (1) Two unrelated SENTENCES sharing one paragraph, whose words would
+#       abut into a banned phrase only if the sentence terminator were
+#       dropped, do NOT match after flattening - the period survives and
+#       sits between them. This is why "line-wrap between two sentences"
+#       was removed from the residual disclosure.
+#   (2) The ONE within-paragraph shape that DOES match - a single sentence
+#       hard-wrapped mid-phrase - still matches under a sentence-splitting
+#       flatten variant too, so "bound to a sentence instead" is not a
+#       working remedy for that residual.
+# ==========================================================================
+P4I6_TWO_SENTENCES='Feature adoption has not. Run into any blockers so far and the answer is no.'
+acceptance_mutant_p4i6_sent=$(INS="$P4I6_TWO_SENTENCES" awk '
+  { print }
+  /^\*\*Status:\*\* `observed`, on probes E and F\./ && !done { print ENVIRON["INS"]; done = 1 }
+' "$acceptance_file")
+mutant_p4i6_sent_section=$(get_acceptance_section "$acceptance_mutant_p4i6_sent" 14)
+mutant_p4i6_sent_flat=$(flatten_acceptance_section "$mutant_p4i6_sent_section")
+if printf '%s\n' "$mutant_p4i6_sent_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_p4i6_sent_caught=yes
+else
+  mutant_p4i6_sent_caught=no
+fi
+assert_eq "no" "$mutant_p4i6_sent_caught" "DEMONSTRATION (P4 item 6, correction 1): two unrelated sentences in ONE paragraph ('has not.' / 'Run into any blockers...') must NOT match after per-paragraph flatten - the period keeps them from abutting into the banned phrase"
+
+P4I6_MIDPHRASE='Confidence in this feature has not
+run into any blockers of its own yet.'
+acceptance_mutant_p4i6_wrap=$(INS="$P4I6_MIDPHRASE" awk '
+  { print }
+  /^\*\*Status:\*\* `observed`, on probes E and F\./ && !done { print ENVIRON["INS"]; done = 1 }
+' "$acceptance_file")
+mutant_p4i6_wrap_section=$(get_acceptance_section "$acceptance_mutant_p4i6_wrap" 14)
+mutant_p4i6_wrap_flat=$(flatten_acceptance_section "$mutant_p4i6_wrap_section")
+if printf '%s\n' "$mutant_p4i6_wrap_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_p4i6_wrap_caught=yes
+else
+  mutant_p4i6_wrap_caught=no
+fi
+assert_eq "yes" "$mutant_p4i6_wrap_caught" "DEMONSTRATION (P4 item 6, correction 2 setup): a single sentence hard-wrapped mid-phrase ('has not' / 'run into') MUST match under the shipped per-paragraph flatten - that is the residual that remains"
+
+# Sentence-splitting variant of flatten: split on ". " before squeezing.
+# If this still matches the mid-phrase wrap, bounding to a sentence is not
+# a remedy for the residual (correction 2).
+mutant_p4i6_wrap_sentence_flat=$(printf '%s\n' "$mutant_p4i6_wrap_section" | awk '
+  BEGIN { RS = "" }
+  {
+    n = split($0, sentences, /\. /)
+    for (i = 1; i <= n; i++) {
+      line = sentences[i]
+      gsub(/[\n\t]/, " ", line)
+      gsub(/  +/, " ", line)
+      print line
+    }
+  }
+')
+if printf '%s\n' "$mutant_p4i6_wrap_sentence_flat" | grep -qiE "$ACCEPTANCE_NOT_RUN_REGEX"; then
+  mutant_p4i6_wrap_sentence_caught=yes
+else
+  mutant_p4i6_wrap_sentence_caught=no
+fi
+assert_eq "yes" "$mutant_p4i6_wrap_sentence_caught" "DEMONSTRATION (P4 item 6, correction 2): the same mid-phrase wrap must ALSO match under a sentence-splitting flatten - proving 'bound to a sentence' would not close the residual, so disclosure (not a narrower guard) is the right response"
 
 # ==========================================================================
 # DEMONSTRATION, not a defect (invariant 13, AC3 #3) - PARAPHRASE. Stated
@@ -1838,6 +1939,11 @@ assert_eq "no" "$([ -n "$fp6_hits" ] && echo yes || echo no)" "DEMONSTRATION, no
 # what this prose omits, by the section-vs-table check (15a) and the
 # tally's own count check (15b); only this span's self-enumeration
 # COMPLETENESS goes unverified, never any criterion's actual status.
+# P4 item 5 — REAFFIRM: omission of a manual number from this span does
+# not go red by itself (reviewer-confirmed: drop a listed number, leave
+# the count — containment and 15b stay green); 15a/15b still pin that
+# criterion's status. Closing with set equality was already rejected
+# (cycle 3): it bars legitimate rewordings.
 
 get_section_between() {
   # get_section_between <content> <start-heading-regex> - lines from the
@@ -1889,7 +1995,12 @@ extract_status_word() {
   # "__Status:__" duplicate is not; it is a deliberately different
   # spelling, and chasing every Markdown emphasis variant this invariant
   # could imagine buys nothing against the threat model this guard is
-  # actually for. Also out of scope, by design: a status-shaped line
+  # actually for.
+  # P4 item 3 — REAFFIRM: leave "__Status:__" / other emphasis spellings
+  # unmatched. Accidental drift copies neighbouring "**Status:**" shape;
+  # widening to every Markdown emphasis variant buys nothing against that
+  # threat model (PLAN: deliberate decision).
+  # Also out of scope, by design: a status-shaped line
   # sitting OUTSIDE all 19 numbered criterion sections (e.g. loose prose
   # above criterion 1's own heading, or after criterion 19's) is never fed
   # to this function at all - get_acceptance_section (invariant 13) bounds
@@ -1898,6 +2009,9 @@ extract_status_word() {
   # scope boundary, not a gap: this invariant's whole job is comparing the
   # three places a CRITERION records ITS OWN status, and text outside every
   # criterion's section is not any criterion's status record.
+  # P4 item 4 — REAFFIRM: status-format lines outside the 19 sections stay
+  # out of scope. Limit already written above; this invariant compares a
+  # criterion's own three recording places, not free-floating prose.
   # shellcheck disable=SC2016 # single-quoted deliberately: literal
   # backtick-quoted markdown syntax in the sed pattern, never substitution.
   printf '%s\n' "$1" | grep -E '^[[:space:]]*\*\*Status:\*\*' | head -n 1 \

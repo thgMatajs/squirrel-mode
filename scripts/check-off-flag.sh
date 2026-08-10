@@ -59,6 +59,42 @@
 # `mv` or `rm` most likely means a concurrent invocation already claimed
 # that exact sentinel first, which is not an error worth surfacing.
 #
+# WHAT "NEVER exit non-zero" DOES NOT COVER (P4 item 1, audit). Stated
+# here because the two paragraphs above assert it without qualification,
+# and this file - unlike allow-checkpoint.sh, which has carried the
+# disclosure since its cycle-3 review - had none. Both paragraphs are
+# accurate about EXITING: nothing below can make this script exit
+# non-zero. Neither says anything about RETURNING AT ALL, and there are
+# two reproduced ways this hook never returns, on every prompt in the
+# session, with zero bytes of output:
+#
+#   1. A `jq` PRESENT on PATH but WEDGED - stopped, deadlocked, never
+#      returns. `if output=$(decide 2>/dev/null); then` catches decide()
+#      FAILING; it cannot catch decide() never FINISHING, because the
+#      shell must wait for that command substitution's subshell - itself
+#      blocked inside `jq` - before the `if` is even evaluated. No POSIX
+#      `sh` construct interrupts a command substitution already in
+#      flight, and `timeout(1)` is GNU coreutils, absent from stock
+#      macOS. NOT closable here; see allow-checkpoint.sh's own
+#      "CORRECTED CLAIM (cycle-3 review, AD1)" for the full argument.
+#
+#   2. A CLOSED fd 0 - stdin not an open descriptor at all, as distinct
+#      from empty or /dev/null. `input=$(cat)` in decide() then hangs
+#      forever: `$(...)` builds its capture pipe on the lowest free file
+#      descriptor, which with fd 0 closed IS fd 0, so `cat` reads the
+#      very pipe the substitution's own subshell writes to and EOF never
+#      arrives. Reproduced against this script directly. This one IS
+#      closable, with `if ! ( exec 3<&0 ) 2>/dev/null; then exec
+#      0</dev/null; fi` ahead of the first command substitution - the
+#      probe belongs in a SUBSHELL because a failed `exec` redirection
+#      exits a non-interactive shell, which would exit this hook
+#      non-zero. Deliberately not applied in this change: it is a
+#      behaviour change and belongs in one coordinated change across all
+#      three hooks, not a comment-only correction to one of them.
+#
+# Both are bounded only by the harness's own hook timeout, never by
+# anything in this script.
+#
 # `session_id` sanitisation: `session_id` comes from outside this
 # script's control (the hook's stdin JSON). sanitize_session_id below
 # accepts only [A-Za-z0-9_-], rejecting anything containing "/" or "."
