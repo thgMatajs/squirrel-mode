@@ -2532,8 +2532,8 @@ fi
 assert_eq "yes" "$fp34_leaks" "FAILURE PROOF (scenario 34): a cap_profile_body mutant with strip_incomplete_utf8_tail removed must leave the dangling euro lead byte (0xE2) in raw output when the byte cap lands mid-character - proving scenario 34's zero-count assertion is not vacuous"
 
 # ==========================================================================
-# 38. check-off-flag.sh - ADR-0005 (amended): a PENDING.<random> sentinel
-#     whose contents match THIS invocation's cwd is claimed (renamed to
+# 38. check-off-flag.sh - ADR-0005 (amended P2): a PENDING.<session_id>
+#     token sentinel is claimed (renamed to
 #     off/<session_id>), and the counter-instruction fires on the SAME
 #     invocation that does the claiming - not merely on some later
 #     prompt. A single call captures both stdout and the exit code, so
@@ -2544,7 +2544,7 @@ assert_eq "yes" "$fp34_leaks" "FAILURE PROOF (scenario 34): a cap_profile_body m
 home38=$(new_home)
 mkdir -p "$home38/.squirrel/off"
 cwd38="$home38/project-pending-match-38"
-pending38="$home38/.squirrel/off/PENDING.matchtoken38"
+pending38="$home38/.squirrel/off/PENDING.sess-pending-38"
 printf '%s\n' "$cwd38" >"$pending38"
 stdin38=$(printf '{"session_id":"sess-pending-38","cwd":"%s"}' "$cwd38")
 
@@ -2559,7 +2559,8 @@ assert_file_exists "$home38/.squirrel/off/sess-pending-38" "ADR-0005: a matching
 assert_file_absent "$pending38" "ADR-0005: the original PENDING sentinel must no longer exist after being claimed"
 
 # ==========================================================================
-# 39. check-off-flag.sh - ADR-0005: a PENDING sentinel whose recorded cwd
+# 39. check-off-flag.sh - ADR-0005 (legacy tokenless path): a PENDING
+#     sentinel whose suffix is NOT session_id-shaped and whose recorded cwd
 #     does NOT match this invocation's cwd must NOT be claimed - no
 #     rename, no off/<session_id> flag, no counter-instruction.
 # ==========================================================================
@@ -2567,7 +2568,7 @@ home39=$(new_home)
 mkdir -p "$home39/.squirrel/off"
 cwd39_actual="$home39/project-real-39"
 cwd39_pending="$home39/project-different-39"
-pending39="$home39/.squirrel/off/PENDING.mismatch39"
+pending39="$home39/.squirrel/off/PENDING.mis.match39"
 printf '%s\n' "$cwd39_pending" >"$pending39"
 stdin39=$(printf '{"session_id":"sess-mismatch-39","cwd":"%s"}' "$cwd39_actual")
 
@@ -2588,8 +2589,8 @@ home40=$(new_home)
 mkdir -p "$home40/.squirrel/off"
 cwd40_a="$home40/project-a-40"
 cwd40_b="$home40/project-b-40"
-pending40_a="$home40/.squirrel/off/PENDING.dirA40"
-pending40_b="$home40/.squirrel/off/PENDING.dirB40"
+pending40_a="$home40/.squirrel/off/PENDING.dir.A40"
+pending40_b="$home40/.squirrel/off/PENDING.dir.B40"
 printf '%s\n' "$cwd40_a" >"$pending40_a"
 printf '%s\n' "$cwd40_b" >"$pending40_b"
 stdin40=$(printf '{"session_id":"sess-two-pending-40","cwd":"%s"}' "$cwd40_b")
@@ -2611,7 +2612,7 @@ home41=$(new_home)
 mkdir -p "$home41/.squirrel/off"
 touch "$home41/.squirrel/off/sess-clear-41"
 cwd41="$home41/project-clear-41"
-clear41="$home41/.squirrel/off/CLEAR.token41"
+clear41="$home41/.squirrel/off/CLEAR.sess-clear-41"
 printf '%s\n' "$cwd41" >"$clear41"
 stdin41=$(printf '{"session_id":"sess-clear-41","cwd":"%s"}' "$cwd41")
 
@@ -2721,7 +2722,7 @@ fp39_home=$(new_home)
 mkdir -p "$fp39_home/.squirrel/off"
 fp39_cwd_actual="$fp39_home/project-real-fp39"
 fp39_cwd_pending="$fp39_home/project-different-fp39"
-fp39_pending="$fp39_home/.squirrel/off/PENDING.mismatchfp39"
+fp39_pending="$fp39_home/.squirrel/off/PENDING.mis.matchfp39"
 printf '%s\n' "$fp39_cwd_pending" >"$fp39_pending"
 fp39_stdin=$(printf '{"session_id":"sess-mismatch-fp39","cwd":"%s"}' "$fp39_cwd_actual")
 capture_stdout "$fp39_script" "$fp39_home" "$fp39_stdin" >/dev/null
@@ -2749,7 +2750,7 @@ fp41_home=$(new_home)
 mkdir -p "$fp41_home/.squirrel/off"
 touch "$fp41_home/.squirrel/off/sess-clear-fp41"
 fp41_cwd="$fp41_home/project-clear-fp41"
-fp41_clear="$fp41_home/.squirrel/off/CLEAR.tokenfp41"
+fp41_clear="$fp41_home/.squirrel/off/CLEAR.sess-clear-fp41"
 printf '%s\n' "$fp41_cwd" >"$fp41_clear"
 fp41_stdin=$(printf '{"session_id":"sess-clear-fp41","cwd":"%s"}' "$fp41_cwd")
 capture_stdout "$fp41_script" "$fp41_home" "$fp41_stdin" >/dev/null
@@ -2827,7 +2828,7 @@ assert_not_contains "$fp44_ctx" "Session working directory:" "FAILURE PROOF (sce
 home46=$(new_home)
 mkdir -p "$home46/.squirrel/off"
 cwd46="$home46/project-two-trailing-nl-46"
-pending46="$home46/.squirrel/off/PENDING.twonl46"
+pending46="$home46/.squirrel/off/PENDING.two.nl46"
 printf '%s\n\n' "$cwd46" >"$pending46"
 stdin46=$(printf '{"session_id":"sess-twonl-46","cwd":"%s"}' "$cwd46")
 
@@ -2846,7 +2847,7 @@ assert_file_absent "$home46/.squirrel/off/sess-twonl-46" "MAJOR fix: no off/<ses
 home47=$(new_home)
 mkdir -p "$home47/.squirrel/off"
 cwd47="$home47/project-three-trailing-nl-47"
-pending47="$home47/.squirrel/off/PENDING.threenl47"
+pending47="$home47/.squirrel/off/PENDING.three.nl47"
 printf '%s\n\n\n' "$cwd47" >"$pending47"
 stdin47=$(printf '{"session_id":"sess-threenl-47","cwd":"%s"}' "$cwd47")
 
@@ -2865,7 +2866,7 @@ assert_file_exists "$pending47" "MAJOR fix: a PENDING sentinel with three traili
 home48=$(new_home)
 mkdir -p "$home48/.squirrel/off"
 cwd48="$home48/project-one-trailing-nl-48"
-pending48="$home48/.squirrel/off/PENDING.onenl48"
+pending48="$home48/.squirrel/off/PENDING.one.nl48"
 printf '%s\n' "$cwd48" >"$pending48"
 stdin48=$(printf '{"session_id":"sess-onenl-48","cwd":"%s"}' "$cwd48")
 
@@ -2878,22 +2879,22 @@ assert_file_absent "$pending48" "MAJOR fix sanity: the claimed PENDING sentinel 
 # VISIBLE EFFECT - a single unconditional command substitution collapsing
 # ALL trailing newlines, exactly what happened when the old caller wrapped
 # an already-safe read in a second `$(...)` - and confirms it wrongly
-# claims the two-trailing-newline sentinel scenario 46 uses. Patches only
-# claim_pending's own call to read_sentinel_trimmed (the first occurrence
-# in the file), leaving the champion-precompute logic untouched and
-# correct, to isolate the proof to the exact call site the bug lived in.
+# claims the two-trailing-newline sentinel scenario 46 uses. Patches the
+# read_sentinel_trimmed call inside sentinel_matches_this_session (the
+# sole contents-read site on the legacy path after P2), so both the
+# champion precompute and the claim see the collapsed-newline bug.
 # ==========================================================================
 fp46_script=$(make_script_scratch "$check_off_flag_script")
 # shellcheck disable=SC2016
-fp46_line=$(line_of "$fp46_script" '    read_sentinel_trimmed "$f"')
+fp46_line=$(line_of "$fp46_script" '  read_sentinel_trimmed "$path"')
 [ -n "$fp46_line" ] || fp46_line=0
 # shellcheck disable=SC2016
-replace_line "$fp46_script" "$fp46_line" '    SENTINEL_CONTENTS=$(cat "$f" 2>/dev/null)'
+replace_line "$fp46_script" "$fp46_line" '  SENTINEL_CONTENTS=$(cat "$path" 2>/dev/null)'
 
 fp46_home=$(new_home)
 mkdir -p "$fp46_home/.squirrel/off"
 fp46_cwd="$fp46_home/project-two-trailing-nl-fp46"
-fp46_pending="$fp46_home/.squirrel/off/PENDING.twonlfp46"
+fp46_pending="$fp46_home/.squirrel/off/PENDING.two.nlfp46"
 printf '%s\n\n' "$fp46_cwd" >"$fp46_pending"
 fp46_stdin=$(printf '{"session_id":"sess-twonl-fp46","cwd":"%s"}' "$fp46_cwd")
 capture_stdout "$fp46_script" "$fp46_home" "$fp46_stdin" >/dev/null
@@ -2917,8 +2918,8 @@ assert_eq "yes" "$fp46_wrongly_claimed" "FAILURE PROOF (scenario 46): a claim_pe
 home49=$(new_home)
 mkdir -p "$home49/.squirrel/off"
 cwd49="$home49/project-newer-wins-49"
-clear49="$home49/.squirrel/off/CLEAR.older49"
-pending49="$home49/.squirrel/off/PENDING.newer49"
+clear49="$home49/.squirrel/off/CLEAR.sess-newerwins-49"
+pending49="$home49/.squirrel/off/PENDING.sess-newerwins-49"
 printf '%s\n' "$cwd49" >"$clear49"
 touch -t 202001010000 "$clear49" 2>/dev/null || touch -d "30 days ago" "$clear49" 2>/dev/null || true
 printf '%s\n' "$cwd49" >"$pending49"
@@ -2943,8 +2944,8 @@ home50=$(new_home)
 mkdir -p "$home50/.squirrel/off"
 touch "$home50/.squirrel/off/sess-newerwins-50"
 cwd50="$home50/project-newer-wins-50"
-pending50="$home50/.squirrel/off/PENDING.older50"
-clear50="$home50/.squirrel/off/CLEAR.newer50"
+pending50="$home50/.squirrel/off/PENDING.sess-newerwins-50"
+clear50="$home50/.squirrel/off/CLEAR.sess-newerwins-50"
 printf '%s\n' "$cwd50" >"$pending50"
 touch -t 202001010000 "$pending50" 2>/dev/null || touch -d "30 days ago" "$pending50" 2>/dev/null || true
 printf '%s\n' "$cwd50" >"$clear50"
@@ -2969,8 +2970,8 @@ assert_file_absent "$pending50" "MAJOR fix: the losing (older) PENDING sentinel 
 home51=$(new_home)
 mkdir -p "$home51/.squirrel/off"
 cwd51="$home51/project-newer-wins-tie-51"
-pending51="$home51/.squirrel/off/PENDING.tie51"
-clear51="$home51/.squirrel/off/CLEAR.tie51"
+pending51="$home51/.squirrel/off/PENDING.sess-tie-51"
+clear51="$home51/.squirrel/off/CLEAR.sess-tie-51"
 printf '%s\n' "$cwd51" >"$pending51"
 printf '%s\n' "$cwd51" >"$clear51"
 touch -r "$pending51" "$clear51"
@@ -3012,7 +3013,7 @@ assert_eq "yes" "$dirshaped52_survived" "MINOR: a directory-shaped PENDING.* ent
 # ==========================================================================
 home53=$(new_home)
 mkdir -p "$home53/.squirrel/off"
-pending53="$home53/.squirrel/off/PENDING.emptycwd53"
+pending53="$home53/.squirrel/off/PENDING.empty.cwd53"
 printf '\n' >"$pending53"
 stdin53_empty=$(printf '{"session_id":"sess-emptycwd-53","cwd":""}')
 exit53_empty=$(capture_exit "$check_off_flag_script" "$home53" "$stdin53_empty")
@@ -3035,7 +3036,7 @@ assert_eq "" "$out53_absent" "MINOR: an absent cwd must claim nothing"
 home54=$(new_home)
 mkdir -p "$home54/.squirrel/off"
 cwd54="$home54/project-clear-noexisting-54"
-clear54="$home54/.squirrel/off/CLEAR.noexisting54"
+clear54="$home54/.squirrel/off/CLEAR.sess-clearnoexisting-54"
 printf '%s\n' "$cwd54" >"$clear54"
 stdin54=$(printf '{"session_id":"sess-clearnoexisting-54","cwd":"%s"}' "$cwd54")
 
@@ -3081,7 +3082,7 @@ target56="$home56/outside-target-56/real-flag-56"
 touch "$target56"
 ln -s "$target56" "$home56/.squirrel/off/sess-symlinkflag-56"
 cwd56="$home56/project-symlinkflag-56"
-clear56="$home56/.squirrel/off/CLEAR.symlinkflag56"
+clear56="$home56/.squirrel/off/CLEAR.sess-symlinkflag-56"
 printf '%s\n' "$cwd56" >"$clear56"
 stdin56=$(printf '{"session_id":"sess-symlinkflag-56","cwd":"%s"}' "$cwd56")
 
@@ -3130,6 +3131,252 @@ else
   fast57=no
 fi
 assert_eq "yes" "$fast57" "MINOR timing bound: check-off-flag.sh must process 100 stale PENDING/CLEAR sentinels in a stated bound (3s or less; took ${delta57}s) on the hot path of every prompt, so a future change that makes this materially worse is caught"
+
+# ==========================================================================
+# 57p2a. P2 probe 2 (hook-level): session A writes PENDING.<A's token>;
+#     session B's hook fires first with the SAME cwd → B must NOT claim;
+#     A's later hook claims. Deterministic reproduction of the confirmed
+#     same-directory race that cwd-only claiming allowed.
+# ==========================================================================
+home57p2a=$(new_home)
+mkdir -p "$home57p2a/.squirrel/off"
+cwd57p2a="$home57p2a/project-same-cwd-p2"
+pending57p2a="$home57p2a/.squirrel/off/PENDING.sess-A-p2a"
+printf '%s\n' "$cwd57p2a" >"$pending57p2a"
+stdin57p2a_b=$(printf '{"session_id":"sess-B-p2a","cwd":"%s"}' "$cwd57p2a")
+stdin57p2a_a=$(printf '{"session_id":"sess-A-p2a","cwd":"%s"}' "$cwd57p2a")
+
+exit57p2a_b=$(capture_exit "$check_off_flag_script" "$home57p2a" "$stdin57p2a_b")
+assert_eq "0" "$exit57p2a_b" "P2 probe: session B must exit 0 when seeing A's token-named PENDING sentinel"
+out57p2a_b=$(capture_stdout "$check_off_flag_script" "$home57p2a" "$stdin57p2a_b")
+assert_eq "" "$out57p2a_b" "P2 probe: session B must NOT claim PENDING.<A> even with matching cwd - no counter-instruction"
+assert_file_exists "$pending57p2a" "P2 probe: PENDING.<A> must survive session B's hook untouched"
+assert_file_absent "$home57p2a/.squirrel/off/sess-B-p2a" "P2 probe: session B must not create off/<B>"
+assert_file_absent "$home57p2a/.squirrel/off/sess-A-p2a" "P2 probe: session B must not create off/<A> either"
+
+out57p2a_a=$(capture_stdout "$check_off_flag_script" "$home57p2a" "$stdin57p2a_a")
+assert_contains "$out57p2a_a" "squirrel-mode is OFF" "P2 probe: session A's later hook must claim PENDING.<A> and inject the counter-instruction"
+assert_file_exists "$home57p2a/.squirrel/off/sess-A-p2a" "P2 probe: PENDING.<A> must be renamed to off/<A>"
+assert_file_absent "$pending57p2a" "P2 probe: PENDING.<A> must be gone after A claims it"
+
+# --- Failure proof for 57p2a: a cwd-only claim_pending mutant (pre-P2
+# behaviour) must let session B steal PENDING.<A> when cwd matches.
+# ==========================================================================
+fp57p2a_script=$(make_script_scratch "$check_off_flag_script")
+# shellcheck disable=SC2016
+fp57p2a_start=$(line_of "$fp57p2a_script" 'claim_pending() {')
+[ -n "$fp57p2a_start" ] || fp57p2a_start=0
+fp57p2a_end=$(line_of_after "$fp57p2a_script" "$fp57p2a_start" '}')
+[ -n "$fp57p2a_end" ] || fp57p2a_end=0
+# shellcheck disable=SC2016
+fp57p2a_cwd_only='claim_pending() {
+  off_dir=$1
+  session_id=$2
+  cwd=$3
+  [ -n "$cwd" ] || return 0
+  for f in "$off_dir"/PENDING.*; do
+    [ -e "$f" ] || continue
+    is_unclaimable_sentinel "$f" && continue
+    read_sentinel_trimmed "$f"
+    if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
+      mv -- "$f" "$off_dir/$session_id" 2>/dev/null || true
+    fi
+  done
+  return 0
+}'
+replace_block "$fp57p2a_script" "$fp57p2a_start" "$fp57p2a_end" "$fp57p2a_cwd_only"
+
+fp57p2a_home=$(new_home)
+mkdir -p "$fp57p2a_home/.squirrel/off"
+fp57p2a_cwd="$fp57p2a_home/project-same-cwd-fp"
+fp57p2a_pending="$fp57p2a_home/.squirrel/off/PENDING.sess-A-fp57p2a"
+printf '%s\n' "$fp57p2a_cwd" >"$fp57p2a_pending"
+fp57p2a_stdin_b=$(printf '{"session_id":"sess-B-fp57p2a","cwd":"%s"}' "$fp57p2a_cwd")
+capture_stdout "$fp57p2a_script" "$fp57p2a_home" "$fp57p2a_stdin_b" >/dev/null
+
+if [ -f "$fp57p2a_home/.squirrel/off/sess-B-fp57p2a" ]; then
+  fp57p2a_stolen=yes
+else
+  fp57p2a_stolen=no
+fi
+assert_eq "yes" "$fp57p2a_stolen" "FAILURE PROOF (P2 probe 57p2a): a claim_pending mutant that claims by cwd only must let session B steal PENDING.<A> - proving the token-binding assertion is not vacuous"
+
+# ==========================================================================
+# 57p2b. P2: token path ignores cwd mismatch - PENDING.<session_id> with
+#     contents that do NOT equal this invocation's cwd must still be
+#     claimed (contents optional on the token path).
+# ==========================================================================
+home57p2b=$(new_home)
+mkdir -p "$home57p2b/.squirrel/off"
+cwd57p2b_actual="$home57p2b/project-actual-p2b"
+cwd57p2b_other="$home57p2b/project-other-p2b"
+pending57p2b="$home57p2b/.squirrel/off/PENDING.sess-token-cwdignore-p2b"
+printf '%s\n' "$cwd57p2b_other" >"$pending57p2b"
+stdin57p2b=$(printf '{"session_id":"sess-token-cwdignore-p2b","cwd":"%s"}' "$cwd57p2b_actual")
+
+out57p2b=$(capture_stdout "$check_off_flag_script" "$home57p2b" "$stdin57p2b")
+assert_contains "$out57p2b" "squirrel-mode is OFF" "P2: token-named PENDING.<session_id> must be claimed even when contents disagree with cwd"
+assert_file_exists "$home57p2b/.squirrel/off/sess-token-cwdignore-p2b" "P2: token path must rename PENDING.<session_id> despite cwd mismatch in contents"
+assert_file_absent "$pending57p2b" "P2: token-claimed PENDING sentinel must no longer exist"
+
+# --- Failure proof for 57p2b: a mutant that still requires cwd match
+# even for token-named sentinels must leave PENDING.<session_id> with
+# mismatched contents unclaimed.
+# ==========================================================================
+fp57p2b_script=$(make_script_scratch "$check_off_flag_script")
+# shellcheck disable=SC2016
+fp57p2b_start=$(line_of "$fp57p2b_script" 'sentinel_matches_this_session() {')
+[ -n "$fp57p2b_start" ] || fp57p2b_start=0
+fp57p2b_end=$(line_of_after "$fp57p2b_script" "$fp57p2b_start" '}')
+[ -n "$fp57p2b_end" ] || fp57p2b_end=0
+# shellcheck disable=SC2016
+fp57p2b_cwd_required='sentinel_matches_this_session() {
+  path=$1
+  prefix=$2
+  session_id=$3
+  cwd=$4
+  suffix=$(sentinel_basename_suffix "$path" "$prefix")
+  [ -n "$suffix" ] || return 1
+  [ -n "$cwd" ] || return 1
+  read_sentinel_trimmed "$path"
+  if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
+    return 0
+  fi
+  return 1
+}'
+replace_block "$fp57p2b_script" "$fp57p2b_start" "$fp57p2b_end" "$fp57p2b_cwd_required"
+
+fp57p2b_home=$(new_home)
+mkdir -p "$fp57p2b_home/.squirrel/off"
+fp57p2b_cwd_actual="$fp57p2b_home/project-actual-fp57p2b"
+fp57p2b_cwd_other="$fp57p2b_home/project-other-fp57p2b"
+fp57p2b_pending="$fp57p2b_home/.squirrel/off/PENDING.sess-token-cwdignore-fp57p2b"
+printf '%s\n' "$fp57p2b_cwd_other" >"$fp57p2b_pending"
+fp57p2b_stdin=$(printf '{"session_id":"sess-token-cwdignore-fp57p2b","cwd":"%s"}' "$fp57p2b_cwd_actual")
+capture_stdout "$fp57p2b_script" "$fp57p2b_home" "$fp57p2b_stdin" >/dev/null
+
+if [ -f "$fp57p2b_home/.squirrel/off/sess-token-cwdignore-fp57p2b" ]; then
+  fp57p2b_claimed=yes
+else
+  fp57p2b_claimed=no
+fi
+assert_eq "no" "$fp57p2b_claimed" "FAILURE PROOF (P2 57p2b): a sentinel_matches mutant that still requires cwd equality must leave a token-named PENDING with mismatched contents unclaimed - proving contents-optional is not vacuous"
+
+# ==========================================================================
+# 57p2c. P2: different cwd, legacy tokenless path does not regress -
+#     PENDING.leg.acy with matching cwd is still claimed; a second
+#     legacy sentinel for another cwd is left alone.
+# ==========================================================================
+home57p2c=$(new_home)
+mkdir -p "$home57p2c/.squirrel/off"
+cwd57p2c_a="$home57p2c/project-a-p2c"
+cwd57p2c_b="$home57p2c/project-b-p2c"
+pending57p2c_a="$home57p2c/.squirrel/off/PENDING.leg.acyA"
+pending57p2c_b="$home57p2c/.squirrel/off/PENDING.leg.acyB"
+printf '%s\n' "$cwd57p2c_a" >"$pending57p2c_a"
+printf '%s\n' "$cwd57p2c_b" >"$pending57p2c_b"
+stdin57p2c=$(printf '{"session_id":"sess-legacy-p2c","cwd":"%s"}' "$cwd57p2c_b")
+
+out57p2c=$(capture_stdout "$check_off_flag_script" "$home57p2c" "$stdin57p2c")
+assert_contains "$out57p2c" "squirrel-mode is OFF" "P2: legacy tokenless PENDING with matching cwd must still be claimed"
+assert_file_absent "$pending57p2c_b" "P2: matching legacy PENDING must be claimed (removed by rename)"
+assert_file_exists "$pending57p2c_a" "P2: legacy PENDING for a different cwd must be left untouched"
+assert_file_exists "$home57p2c/.squirrel/off/sess-legacy-p2c" "P2: legacy claim must still rename to off/<session_id>"
+
+# --- Failure proof for 57p2c: removing the legacy cwd branch (sanitize
+# failure path returns 1 unconditionally) must leave a matching legacy
+# PENDING unclaimed.
+# ==========================================================================
+fp57p2c_script=$(make_script_scratch "$check_off_flag_script")
+# shellcheck disable=SC2016
+fp57p2c_start=$(line_of "$fp57p2c_script" 'sentinel_matches_this_session() {')
+[ -n "$fp57p2c_start" ] || fp57p2c_start=0
+fp57p2c_end=$(line_of_after "$fp57p2c_script" "$fp57p2c_start" '}')
+[ -n "$fp57p2c_end" ] || fp57p2c_end=0
+# shellcheck disable=SC2016
+fp57p2c_token_only='sentinel_matches_this_session() {
+  path=$1
+  prefix=$2
+  session_id=$3
+  cwd=$4
+  suffix=$(sentinel_basename_suffix "$path" "$prefix")
+  [ -n "$suffix" ] || return 1
+  if tok=$(sanitize_session_id "$suffix"); then
+    if [ "$tok" = "$session_id" ]; then
+      return 0
+    fi
+    return 1
+  fi
+  return 1
+}'
+replace_block "$fp57p2c_script" "$fp57p2c_start" "$fp57p2c_end" "$fp57p2c_token_only"
+
+fp57p2c_home=$(new_home)
+mkdir -p "$fp57p2c_home/.squirrel/off"
+fp57p2c_cwd="$fp57p2c_home/project-legacy-fp57p2c"
+fp57p2c_pending="$fp57p2c_home/.squirrel/off/PENDING.leg.acyFP"
+printf '%s\n' "$fp57p2c_cwd" >"$fp57p2c_pending"
+fp57p2c_stdin=$(printf '{"session_id":"sess-legacy-fp57p2c","cwd":"%s"}' "$fp57p2c_cwd")
+capture_stdout "$fp57p2c_script" "$fp57p2c_home" "$fp57p2c_stdin" >/dev/null
+
+if [ -f "$fp57p2c_home/.squirrel/off/sess-legacy-fp57p2c" ]; then
+  fp57p2c_claimed=yes
+else
+  fp57p2c_claimed=no
+fi
+assert_eq "no" "$fp57p2c_claimed" "FAILURE PROOF (P2 57p2c): a sentinel_matches mutant with the legacy cwd branch removed must leave a matching tokenless PENDING unclaimed - proving legacy claim-by-cwd is not vacuous"
+
+# ==========================================================================
+# 57p2d. load-profile.sh P2: Session off-token equals sanitised
+#     session_id when valid, and is always emitted (including anon-
+#     prefix when session_id is missing/invalid).
+# ==========================================================================
+home57p2d=$(new_home)
+cwd57p2d="$home57p2d/project-off-token-p2d"
+stdin57p2d=$(printf '{"session_id":"sess-off-token-p2d","cwd":"%s"}' "$cwd57p2d")
+out57p2d=$(capture_stdout "$load_profile_script" "$home57p2d" "$stdin57p2d")
+ctx57p2d=$(extract_ctx "$out57p2d")
+assert_contains "$ctx57p2d" "Session off-token: sess-off-token-p2d" "P2: SessionStart must inject Session off-token equal to the sanitised session_id"
+assert_contains "$ctx57p2d" "Session working directory: $cwd57p2d" "P2: Session working directory line must still be emitted alongside the off-token"
+
+out57p2d_anon=$(capture_stdout "$load_profile_script" "$home57p2d" '{"cwd":"/tmp"}')
+ctx57p2d_anon=$(extract_ctx "$out57p2d_anon")
+case "$ctx57p2d_anon" in
+  *"Session off-token: anon-"*)
+    anon57p2d=yes
+    ;;
+  *)
+    anon57p2d=no
+    ;;
+esac
+assert_eq "yes" "$anon57p2d" "P2: when session_id is absent, Session off-token must be anon-<suffix>"
+
+out57p2d_bad=$(capture_stdout "$load_profile_script" "$home57p2d" '{"session_id":"../evil","cwd":"/tmp"}')
+ctx57p2d_bad=$(extract_ctx "$out57p2d_bad")
+case "$ctx57p2d_bad" in
+  *"Session off-token: anon-"*)
+    bad57p2d=yes
+    ;;
+  *)
+    bad57p2d=no
+    ;;
+esac
+assert_eq "yes" "$bad57p2d" "P2: when session_id fails sanitisation, Session off-token must be anon-<suffix>"
+
+# --- Failure proof for 57p2d: removing the Session off-token emission
+# line must make it disappear from additionalContext.
+# ==========================================================================
+fp57p2d_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fp57p2d_line=$(line_of "$fp57p2d_script" 'Session off-token: $off_token')
+[ -n "$fp57p2d_line" ] || fp57p2d_line=0
+replace_line "$fp57p2d_script" "$fp57p2d_line" ''
+
+fp57p2d_home=$(new_home)
+fp57p2d_cwd="$fp57p2d_home/project-off-token-fp"
+fp57p2d_stdin=$(printf '{"session_id":"sess-off-token-fp","cwd":"%s"}' "$fp57p2d_cwd")
+fp57p2d_ctx=$(extract_ctx "$(capture_stdout "$fp57p2d_script" "$fp57p2d_home" "$fp57p2d_stdin")")
+assert_not_contains "$fp57p2d_ctx" "Session off-token:" "FAILURE PROOF (P2 57p2d): removing the Session off-token emission line must make it disappear from additionalContext"
 
 # ==========================================================================
 # 58. allow-checkpoint.sh - S10-1 CLASS-LEVEL FAILURE PROOF: reverting

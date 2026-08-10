@@ -160,14 +160,11 @@ next command.)
 `/squirrel:off` and `/squirrel:on` take effect starting with your next message, not the one you
 just sent: both write a sentinel that a hook claims on the next prompt, not immediately.
 
-Running two Claude Code sessions in the exact same project directory narrows this to a
-one-prompt-wide race: whichever session sends the next prompt in that directory claims the
-sentinel — and that can be the *other* session, not the one that ran the command.
+Each sentinel is named with an opaque session token injected at session start, so two Claude Code
+sessions in the same project directory do not steal each other's off/on request. The claiming hook
+matches that token to the session id it receives — not whichever session happens to prompt first.
 
-`/squirrel:on` only clears the claiming session's own suppression flag. A CLEAR sentinel claimed
-by the wrong session is consumed — deleted — without effect on the other one, so if a different
-session is the one actually suppressed, it stays suppressed until its own next prompt claims a
-fresh `/squirrel:on`, or until the flag ages out after 7 days.
+`/squirrel:on` only clears this session's own suppression flag.
 
 **On the data directory having moved.** Versions before this one kept this data inside Claude
 Code's own config directory, on the theory that a plugin hook could auto-approve writes there the

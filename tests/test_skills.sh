@@ -752,18 +752,20 @@ assert_contains "$digest_body" "Cap it at 6 lines" "digest's --for-reply must st
 assert_contains "$digest_body" "one \`## Reply\` per digested item" "digest's --for-reply must produce one reply per digested item when the input had several independent asks"
 
 # ==========================================================================
-# 23. cycle-3 BLOCKER fix, parallel to scenario 10: off and on must both
-#     reference the injected "Session working directory:" context line
-#     and use it verbatim as the sentinel's contents, instead of
-#     determining the session's own working directory themselves -
-#     load-profile.sh's SessionStart hook is the only participant that
-#     can do that reliably (ADR-0005, amended). Neither skill may
-#     contain the substring "pwd" anywhere, in any form - not even
-#     inside a "never run pwd" caveat, since that exact substring is
-#     what a model would otherwise be tempted to run.
+# 23. cycle-3 BLOCKER fix + P2: off and on must both reference the
+#     injected "Session working directory:" and "Session off-token:"
+#     context lines - cwd as sentinel contents, token as the filename
+#     suffix (ADR-0005 Amendment P2). Neither skill may contain the
+#     substring "pwd" anywhere, in any form - not even inside a "never
+#     run pwd" caveat, since that exact substring is what a model would
+#     otherwise be tempted to run.
 # ==========================================================================
 assert_contains "$off_body" "Session working directory:" "off must reference the injected 'Session working directory:' context line"
 assert_contains "$on_body" "Session working directory:" "on must reference the injected 'Session working directory:' context line"
+assert_contains "$off_body" "Session off-token:" "off must reference the injected 'Session off-token:' context line (P2)"
+assert_contains "$on_body" "Session off-token:" "on must reference the injected 'Session off-token:' context line (P2)"
+assert_contains "$off_body" "PENDING." "off must write a PENDING.<token> sentinel"
+assert_contains "$on_body" "CLEAR." "on must write a CLEAR.<token> sentinel"
 
 off_body_lower=$(printf '%s' "$off_body" | tr '[:upper:]' '[:lower:]')
 on_body_lower=$(printf '%s' "$on_body" | tr '[:upper:]' '[:lower:]')

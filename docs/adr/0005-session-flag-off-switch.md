@@ -31,3 +31,32 @@ Nothing depends on Claude Code internals, and the binding is done by the only pa
   is a stray file. Pruning too eagerly, on the other hand, could re-enable squirrel-mode underneath a
   user who is still in the session that disabled it. Pruning never fails the hook.
 - `/plugin disable squirrel@squirrel-mode`, then a new session, remains the hard off, and README documents it as such: it is the only path that truly removes the rules from the system prompt. `/reload-plugins` alone is not enough — its documented reload list (plugins, skills, agents, hooks, plugin MCP servers, plugin LSP servers) never names output styles, so it does not reliably drop a `force-for-plugin` style on its own.
+
+## Amendment (P2) — bind the sentinel by session token, not by cwd alone
+
+**Status:** Accepted
+**Date:** 2026-08-10
+
+The original Consequences bullet that accepted a one-prompt-wide same-directory race is superseded for the token-named path described here. The historical decision text above is preserved deliberately; this section records what changed and why.
+
+### Context
+
+The original design wrote `PENDING.<random>` / `CLEAR.<random>` with cwd as contents, and `UserPromptSubmit` claimed the first sentinel whose contents matched its own cwd. That is correct when two sessions have different directories. It is wrong when they share one: the first session in that cwd to fire `UserPromptSubmit` claims the sentinel — which can silence the session that did not run `/squirrel:off`.
+
+### Decision
+
+1. `SessionStart` (`load-profile.sh`) always injects `Session off-token: <token>`. When `session_id` survives the same `sanitize_session_id` used elsewhere, the token **is** that sanitised value. Otherwise it is `anon-<random>` (exclusive to that SessionStart context, parallel to anonymous checkpoint names).
+2. `/squirrel:off` writes `PENDING.<token>`; `/squirrel:on` writes `CLEAR.<token>`. The token is the filename suffix — the skill copies the injected line verbatim and must not invent a different suffix.
+3. `UserPromptSubmit` (`check-off-flag.sh`) does not receive SessionStart context. It sanitises the `session_id` on its own stdin and claims only `PENDING.<that>` / `CLEAR.<that>`. Same value, two channels.
+4. **Tech-lead D3 — dual path:**
+   - **Token path:** suffix sanitises and equals this session's id → claim by token only; contents/cwd are optional (a cwd mismatch must not block).
+   - **Foreign token-shaped:** suffix sanitises but is not this session's id → leave untouched. Falling back to cwd here would re-open the race.
+   - **Legacy tokenless:** suffix fails sanitise (not a valid session_id shape) → claim-by-cwd as in the original decision, contents still compared byte-for-byte after trimming at most one trailing newline.
+5. Sentinel contents remain the injected cwd string so the legacy path keeps working for any pre-P2 or non-token-shaped file still on disk.
+
+### Consequences
+
+- Two sessions in the same directory no longer steal each other's token-named sentinels. The README race paragraph is retired for this path.
+- Pre-P2 `PENDING.<sanitize-ok-random>` files left on disk become unclaimable (their suffixes look token-shaped but match no live session's id). They stay inert until the existing 7-day prune. Accepted transition residue; new skills always write `PENDING.<token>`.
+- An `anon-*` off-token is still injected when `session_id` is missing, but `UserPromptSubmit` still refuses to touch `off/` when sanitisation fails — so `/squirrel:off` remains non-binding for sessions without a valid session id, as before. The anon token is exclusivity/documentation, not a second claiming channel the hook can recompute.
+- The skill must read both injected lines (`Session off-token:` for the name, `Session working directory:` for the contents). Inventing either value locally remains forbidden.

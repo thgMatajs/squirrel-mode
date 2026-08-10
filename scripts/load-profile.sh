@@ -12,15 +12,26 @@
 #   - the literal `cwd` this hook was invoked with, as
 #     "Session working directory: <cwd>" (ADR-0005, amended, cycle 3
 #     BLOCKER fix: /squirrel:off and /squirrel:on need this exact string
-#     to write a sentinel the check-off-flag.sh hook can later match
-#     against ITS OWN `cwd` - a value the model computes itself, e.g. by
-#     running a shell command, can disagree with that even on a healthy
-#     machine (a symlinked project path, a trailing slash, a different
-#     shell context), and the failure is silent: the sentinel just never
-#     matches. This line is ALWAYS emitted, even when `cwd` is empty, so
-#     the skill has a definite, always-present "missing or empty" case to
-#     branch on - the same discipline `/squirrel:pickup` already applies
-#     to the checkpoint-path line below).
+#     to write as sentinel CONTENTS the check-off-flag.sh hook can later
+#     match against ITS OWN `cwd` on the legacy tokenless path - a value
+#     the model computes itself, e.g. by running a shell command, can
+#     disagree with that even on a healthy machine (a symlinked project
+#     path, a trailing slash, a different shell context), and the failure
+#     is silent: the sentinel just never matches. This line is ALWAYS
+#     emitted, even when `cwd` is empty, so the skill has a definite,
+#     always-present "missing or empty" case to branch on - the same
+#     discipline `/squirrel:pickup` already applies to the
+#     checkpoint-path line below).
+#   - an opaque session off-token, as "Session off-token: <token>"
+#     (ADR-0005 Amendment P2): /squirrel:off and /squirrel:on name their
+#     sentinels PENDING.<token> / CLEAR.<token>. The token is the
+#     sanitised session_id when that value is valid, otherwise
+#     anon-<random> - the same exclusivity rule session_checkpoint_name
+#     uses. The skill copies this exact string into the filename; the
+#     UserPromptSubmit hook recomputes the same value from the
+#     session_id it receives on stdin and claims only PENDING.<that> /
+#     CLEAR.<that>. Same value, two channels - the skill never invents a
+#     token the hook cannot recompute. ALWAYS emitted.
 #   - the RESOLVED, absolute checkpoint DIRECTORY for this project's
 #     `cwd`, as "Project checkpoint directory: <dir>", AND the RESOLVED,
 #     absolute checkpoint file this ONE session owns, as
@@ -318,6 +329,32 @@ session_checkpoint_name() {
   suffix=$(random_suffix) || suffix=""
   [ -n "$suffix" ] || suffix=$$
   printf 'anon-%s.md' "$suffix"
+  return 0
+}
+
+# session_off_token <raw_session_id>: the opaque token /squirrel:off and
+# /squirrel:on embed in PENDING.<token> / CLEAR.<token> filenames
+# (ADR-0005 Amendment P2). Same sanitise-or-anon rule as
+# session_checkpoint_name, without the ".md" suffix: when session_id
+# survives sanitisation the token IS that sanitised value, so
+# check-off-flag.sh - which receives session_id on UserPromptSubmit
+# stdin and sanitises it the same way - recomputes the identical string
+# and claims only PENDING.<that> / CLEAR.<that>. When session_id is
+# missing or fails sanitisation the token is anon-<random>, exclusive
+# to the SessionStart context of this one session; UserPromptSubmit
+# still cannot bind an off flag without a valid session_id (sanitize
+# failure leaves every sentinel untouched, as before), so an anon off
+# token is documentation-and-exclusivity only, not a second claiming
+# channel the hook can recompute.
+session_off_token() {
+  raw=$1
+  if name=$(sanitize_session_id "$raw"); then
+    printf '%s' "$name"
+    return 0
+  fi
+  suffix=$(random_suffix) || suffix=""
+  [ -n "$suffix" ] || suffix=$$
+  printf 'anon-%s' "$suffix"
   return 0
 }
 
@@ -755,6 +792,9 @@ build_context() {
   [ -n "$session_file_name" ] || session_file_name="anon-$$.md"
   checkpoint_file="$session_dir/$session_file_name"
 
+  off_token=$(session_off_token "$raw_session_id") || off_token=""
+  [ -n "$off_token" ] || off_token="anon-$$"
+
   prune_stale_session_checkpoints "$session_dir"
 
   if [ -n "$home_dir" ] && [ -f "$profile_file" ]; then
@@ -777,6 +817,7 @@ $migration_notice"
   context="$context
 
 Session working directory: $cwd
+Session off-token: $off_token
 Project checkpoint directory: $session_dir
 Project checkpoint path: $checkpoint_file"
 

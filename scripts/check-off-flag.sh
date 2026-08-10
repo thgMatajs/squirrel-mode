@@ -1,21 +1,36 @@
 #!/bin/sh
 # check-off-flag.sh - UserPromptSubmit hook.
 #
-# ADR-0005 (as amended): `/squirrel:off` cannot learn its own session_id
-# (Claude Code hands that to hooks, never to a running skill), so it
-# cannot write `off/<session_id>` directly. Instead it writes a sentinel
-# named `off/PENDING.<random>` whose contents are the cwd it ran in.
-# `/squirrel:on` gets the mirror: `off/CLEAR.<random>`, same contents.
+# ADR-0005 (as amended, P2): `/squirrel:off` cannot learn its own
+# session_id (Claude Code hands that to hooks, never to a running
+# skill), so it cannot write `off/<session_id>` directly. Instead
+# SessionStart injects an opaque "Session off-token: <token>" line
+# (token === sanitised session_id when valid) and `/squirrel:off`
+# writes `off/PENDING.<token>` whose contents are still the cwd.
+# `/squirrel:on` gets the mirror: `off/CLEAR.<token>`, same contents.
 # THIS hook - which does receive both `session_id` and `cwd` on every
-# prompt - is the only participant that can legitimately bind a sentinel
-# to a session: it claims a `PENDING.*` sentinel whose recorded cwd
-# matches THIS invocation's own cwd by renaming it to `off/<session_id>`,
-# and claims a matching `CLEAR.*` sentinel by deleting both
-# `off/<session_id>` and the sentinel itself. Only after both kinds of
-# sentinel have been processed does it check whether `off/<session_id>`
-# exists and, if so, inject the counter-instruction - so a session that
-# just ran `/squirrel:off` is suppressed starting with THIS SAME prompt,
-# not the one after it.
+# prompt - recomputes the token by sanitising session_id and claims
+# only `PENDING.<that>` / `CLEAR.<that>` by TOKEN first. Same value,
+# two channels: the skill copies the injected token into the filename;
+# this hook never needs the SessionStart context (UserPromptSubmit
+# does not receive it).
+#
+# Tech-lead D3 / Amendment P2 claiming rules:
+#   - Token path: sentinel suffix sanitises AND equals THIS session's
+#     sanitised session_id → claim by token only (contents/cwd
+#     optional; a cwd mismatch must NOT block the claim).
+#   - Foreign token-shaped: suffix sanitises but is NOT this session's
+#     id → leave untouched. Claiming these by cwd would re-open the
+#     same-directory race P2 closes (session B would steal session A's
+#     PENDING.<A>).
+#   - Legacy tokenless: suffix fails sanitise (pre-P2 random suffixes
+#     that are not a valid session_id shape, e.g. containing ".") →
+#     claim-by-cwd as today.
+#
+# Only after both kinds of sentinel have been processed does it check
+# whether `off/<session_id>` exists and, if so, inject the
+# counter-instruction - so a session that just ran `/squirrel:off` is
+# suppressed starting with THIS SAME prompt, not the one after it.
 #
 # The five steps, in the order ADR-0005 requires (and the order below):
 #   1. Extract session_id and cwd from stdin JSON.
@@ -25,15 +40,15 @@
 #   3. Claim a matching PENDING.* sentinel (rename to off/<session_id>).
 #   4. Claim a matching CLEAR.* sentinel (delete off/<session_id> + it).
 #      CYCLE-3 MAJOR FIX: a matching PENDING and a matching CLEAR
-#      sentinel can both exist for the same cwd at once (already off,
-#      then /squirrel:on followed by /squirrel:off before either reaches
-#      a hook). Claiming steps 3 and 4 in a fixed order always let
-#      whichever one is checked last win, regardless of which one the
-#      user actually issued more recently. ADR-0005 now requires the
-#      NEWER sentinel to win, resolved with `find -newer` (the only
+#      sentinel can both exist for the same session at once (already
+#      off, then /squirrel:on followed by /squirrel:off before either
+#      reaches a hook). Claiming steps 3 and 4 in a fixed order always
+#      let whichever one is checked last win, regardless of which one
+#      the user actually issued more recently. ADR-0005 now requires
+#      the NEWER sentinel to win, resolved with `find -newer` (the only
 #      portable way to compare two files' mtimes in POSIX sh - there is
-#      no portable `stat`), with PENDING winning an exact mtime tie. This
-#      is computed ONCE, before either claiming step runs (see
+#      no portable `stat`), with PENDING winning an exact mtime tie.
+#      This is computed ONCE, before either claiming step runs (see
 #      newest_matching_pending/newest_matching_clear and the
 #      SENTINEL_WINNER computation in decide() below), so the decision
 #      never depends on execution order, and the LOSING sentinel(s) are
@@ -105,7 +120,8 @@
 #
 # Sentinel contents are read as OPAQUE TEXT and compared byte-for-byte
 # against `cwd`, never interpreted, executed, or path-resolved - the
-# same posture allow-checkpoint.sh takes toward `file_path`.
+# same posture allow-checkpoint.sh takes toward `file_path`. Contents
+# matter only on the legacy tokenless path; the token path ignores them.
 #
 # jq: preferred, not required - see extract_field's sed fallback.
 set -eu
@@ -222,7 +238,7 @@ is_unclaimable_sentinel() {
 }
 
 # SENTINEL_WINNER: which sentinel TYPE wins when a matching PENDING and
-# a matching CLEAR sentinel both exist for the same cwd - "pending",
+# a matching CLEAR sentinel both exist for this session - "pending",
 # "clear", or "none" (no competition, i.e. at most one type matched at
 # all). Computed once in decide(), before either claim_pending or
 # claim_clear runs (see the SENTINEL_WINNER computation there and
@@ -234,31 +250,75 @@ is_unclaimable_sentinel() {
 # tie-break winner.
 SENTINEL_WINNER=pending
 
+# sentinel_basename_suffix <path> <prefix>:
+#   PENDING.foo -> foo, CLEAR.foo.bar -> foo.bar. Empty if <path>'s
+#   basename does not start with <prefix>.
+sentinel_basename_suffix() {
+  path=$1
+  prefix=$2
+  base=$(basename "$path")
+  case "$base" in
+    "$prefix"*)
+      printf '%s' "${base#"$prefix"}"
+      ;;
+    *)
+      printf ''
+      ;;
+  esac
+}
+
+# sentinel_matches_this_session <path> <prefix> <session_id> <cwd>:
+# returns 0 iff <path> is claimable by THIS session under Amendment P2:
+#   - token path: suffix sanitises AND equals <session_id> (contents
+#     ignored; cwd may be empty)
+#   - foreign token-shaped: suffix sanitises but differs → not claimable
+#   - legacy tokenless: suffix fails sanitise → claimable only when
+#     trimmed contents equal <cwd> and <cwd> is non-empty
+sentinel_matches_this_session() {
+  path=$1
+  prefix=$2
+  session_id=$3
+  cwd=$4
+  suffix=$(sentinel_basename_suffix "$path" "$prefix")
+  [ -n "$suffix" ] || return 1
+  if tok=$(sanitize_session_id "$suffix"); then
+    if [ "$tok" = "$session_id" ]; then
+      return 0
+    fi
+    return 1
+  fi
+  [ -n "$cwd" ] || return 1
+  read_sentinel_trimmed "$path"
+  if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
+    return 0
+  fi
+  return 1
+}
+
 # claim_pending <off_dir> <session_id> <cwd>: globs off/PENDING.*, and
-# for each one that is a genuine regular file (not a symlink) whose
-# trimmed contents equal <cwd> byte-for-byte, renames it to
-# off/<session_id> - the binding ADR-0005 describes. A non-matching or
-# unclaimable sentinel is left exactly as it was found. Every fallible
-# step is `|| continue`/`|| true`-guarded: a `mv` failing most likely
-# means a concurrent invocation (in a different session, same cwd)
-# already claimed this exact sentinel first.
+# for each one that is a genuine regular file (not a symlink) claimable
+# by THIS session (token path or legacy cwd path - see
+# sentinel_matches_this_session), renames it to off/<session_id> - the
+# binding ADR-0005 describes. A non-matching or unclaimable sentinel is
+# left exactly as it was found. Every fallible step is
+# `|| continue`/`|| true`-guarded: a `mv` failing most likely means a
+# concurrent invocation already claimed this exact sentinel first.
 #
 # CYCLE-3 MAJOR FIX: when SENTINEL_WINNER is "clear" - a matching CLEAR
-# sentinel for this same cwd is newer - a matching PENDING sentinel is
-# superseded and must NOT be claimed. It is discarded outright instead
-# of being left in place: leaving it would let it linger and flip the
-# flag back off on some later prompt, once the winning CLEAR sentinel
-# has already been consumed and can no longer out-vote it again.
+# sentinel for this same session is newer - a matching PENDING sentinel
+# is superseded and must NOT be claimed. It is discarded outright
+# instead of being left in place: leaving it would let it linger and
+# flip the flag back off on some later prompt, once the winning CLEAR
+# sentinel has already been consumed and can no longer out-vote it
+# again.
 claim_pending() {
   off_dir=$1
   session_id=$2
   cwd=$3
-  [ -n "$cwd" ] || return 0
   for f in "$off_dir"/PENDING.*; do
     [ -e "$f" ] || continue
     is_unclaimable_sentinel "$f" && continue
-    read_sentinel_trimmed "$f"
-    if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
+    if sentinel_matches_this_session "$f" "PENDING." "$session_id" "$cwd"; then
       if [ "$SENTINEL_WINNER" = "clear" ]; then
         rm -f -- "$f" 2>/dev/null || true
       else
@@ -270,27 +330,25 @@ claim_pending() {
 }
 
 # claim_clear <off_dir> <session_id> <cwd>: the mirror of claim_pending
-# for off/CLEAR.* - on a cwd match, deletes off/<session_id> (if it
-# exists) and then the sentinel itself.
+# for off/CLEAR.* - on a match, deletes off/<session_id> (if it exists)
+# and then the sentinel itself.
 #
 # CYCLE-3 MAJOR FIX: when SENTINEL_WINNER is "pending" - a matching
-# PENDING sentinel for this same cwd is at least as new (a tie favours
-# PENDING, per ADR-0005) - a matching CLEAR sentinel is superseded and
-# must NOT delete the flag. It is discarded outright instead, for the
-# same reason claim_pending discards a superseded PENDING sentinel
-# above: left in place, it would delete the flag again on some later
-# prompt once the winning PENDING sentinel is gone and can no longer
-# out-vote it.
+# PENDING sentinel for this same session is at least as new (a tie
+# favours PENDING, per ADR-0005) - a matching CLEAR sentinel is
+# superseded and must NOT delete the flag. It is discarded outright
+# instead, for the same reason claim_pending discards a superseded
+# PENDING sentinel above: left in place, it would delete the flag again
+# on some later prompt once the winning PENDING sentinel is gone and
+# can no longer out-vote it.
 claim_clear() {
   off_dir=$1
   session_id=$2
   cwd=$3
-  [ -n "$cwd" ] || return 0
   for f in "$off_dir"/CLEAR.*; do
     [ -e "$f" ] || continue
     is_unclaimable_sentinel "$f" && continue
-    read_sentinel_trimmed "$f"
-    if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
+    if sentinel_matches_this_session "$f" "CLEAR." "$session_id" "$cwd"; then
       if [ "$SENTINEL_WINNER" = "pending" ]; then
         rm -f -- "$f" 2>/dev/null || true
       else
@@ -302,25 +360,24 @@ claim_clear() {
   return 0
 }
 
-# newest_matching_pending <off_dir> <cwd>: sets the global CHAMPION_PATH
-# to the path of the most-recently-modified off/PENDING.* sentinel whose
-# trimmed contents equal <cwd> exactly, or "" if none match. Skips
+# newest_matching_pending <off_dir> <session_id> <cwd>: sets the global
+# CHAMPION_PATH to the path of the most-recently-modified off/PENDING.*
+# sentinel claimable by THIS session, or "" if none match. Skips
 # anything is_unclaimable_sentinel rejects, the same as claim_pending
-# itself. Recency is compared with `find -newer` - the only portable way
-# to compare two files' mtimes in POSIX sh, there being no portable
+# itself. Recency is compared with `find -newer` - the only portable
+# way to compare two files' mtimes in POSIX sh, there being no portable
 # `stat`. Read-only: never claims, renames, or deletes anything, so it
 # is safe to call before deciding what claim_pending/claim_clear should
 # actually do.
 newest_matching_pending() {
   off_dir=$1
-  cwd=$2
+  session_id=$2
+  cwd=$3
   CHAMPION_PATH=""
-  [ -n "$cwd" ] || return 0
   for f in "$off_dir"/PENDING.*; do
     [ -e "$f" ] || continue
     is_unclaimable_sentinel "$f" && continue
-    read_sentinel_trimmed "$f"
-    if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
+    if sentinel_matches_this_session "$f" "PENDING." "$session_id" "$cwd"; then
       if [ -z "$CHAMPION_PATH" ] || [ -n "$(find "$f" -newer "$CHAMPION_PATH" 2>/dev/null)" ]; then
         CHAMPION_PATH=$f
       fi
@@ -329,18 +386,17 @@ newest_matching_pending() {
   return 0
 }
 
-# newest_matching_clear <off_dir> <cwd>: the mirror of
+# newest_matching_clear <off_dir> <session_id> <cwd>: the mirror of
 # newest_matching_pending for off/CLEAR.*.
 newest_matching_clear() {
   off_dir=$1
-  cwd=$2
+  session_id=$2
+  cwd=$3
   CHAMPION_PATH=""
-  [ -n "$cwd" ] || return 0
   for f in "$off_dir"/CLEAR.*; do
     [ -e "$f" ] || continue
     is_unclaimable_sentinel "$f" && continue
-    read_sentinel_trimmed "$f"
-    if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
+    if sentinel_matches_this_session "$f" "CLEAR." "$session_id" "$cwd"; then
       if [ -z "$CHAMPION_PATH" ] || [ -n "$(find "$f" -newer "$CHAMPION_PATH" 2>/dev/null)" ]; then
         CHAMPION_PATH=$f
       fi
@@ -374,13 +430,14 @@ decide() {
   # CYCLE-3 MAJOR FIX: before claiming anything, decide - ONCE, so the
   # answer cannot depend on which of steps 3/4 happens to run first -
   # which sentinel type wins when a matching PENDING and a matching
-  # CLEAR both exist for this same cwd. Read-only: neither
-  # newest_matching_pending nor newest_matching_clear claims, renames,
-  # or deletes anything, so computing this cannot itself race with the
-  # claiming steps that follow.
-  newest_matching_pending "$off_dir" "$cwd"
+  # CLEAR both exist for this same session (token path or legacy cwd
+  # path). Read-only: neither newest_matching_pending nor
+  # newest_matching_clear claims, renames, or deletes anything, so
+  # computing this cannot itself race with the claiming steps that
+  # follow.
+  newest_matching_pending "$off_dir" "$session_id" "$cwd"
   pending_champion=$CHAMPION_PATH
-  newest_matching_clear "$off_dir" "$cwd"
+  newest_matching_clear "$off_dir" "$session_id" "$cwd"
   clear_champion=$CHAMPION_PATH
 
   if [ -n "$pending_champion" ] && [ -n "$clear_champion" ]; then
