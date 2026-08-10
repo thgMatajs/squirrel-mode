@@ -75,8 +75,12 @@ All seven exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`.
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
 | Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
 
-Codex and Cursor have no lifecycle hooks, so neither gets automatic checkpoints, and neither has
-a harness-level guarantee against the model starting `/squirrel:init` on its own the way Claude
+Codex and Cursor have no lifecycle hooks, so neither gets automatic checkpoints, session-scoped
+off/on, or profile reinjection after a tune — a change elsewhere can leave their view stale until
+their own cadence re-reads the file. Claude Code isolates concurrent sessions (one checkpoint file
+per session, token-bound off/on) and reinjects an updated profile on the next prompt; see
+[ADR-0006](./docs/adr/0006-session-isolation-concurrency.md). Neither Codex nor Cursor has a
+harness-level guarantee against the model starting `/squirrel:init` on its own the way Claude
 Code's `disable-model-invocation: true` does. All three targets read the same
 `~/.squirrel/profile.md`, so running `/squirrel:init` once, in Claude Code or Codex,
 calibrates every target on that machine. Full breakdown — which commands port and why, what each
@@ -113,7 +117,8 @@ docs/RESEARCH.md's "Corrections" section for what got cut when a citation didn't
 No network calls. No telemetry. Every script squirrel-mode ships is plain POSIX `sh` or Markdown.
 
 The Claude Code plugin's runtime writes to exactly one place: `~/.squirrel/` — your `profile.md`,
-and one checkpoint file per session under `checkpoints/<slug>/`. Installs from before this location
+and one checkpoint file per session under `checkpoints/<slug>/<session-id>.md`
+([ADR-0006](./docs/adr/0006-session-isolation-concurrency.md)). Installs from before this location
 moved have their data at an older path instead — see the note at the end of this section;
 squirrel-mode detects that and tells you, once per session, rather than moving it for you.
 
@@ -162,9 +167,13 @@ just sent: both write a sentinel that a hook claims on the next prompt, not imme
 
 Each sentinel is named with an opaque session token injected at session start, so two Claude Code
 sessions in the same project directory do not steal each other's off/on request. The claiming hook
-matches that token to the session id it receives — not whichever session happens to prompt first.
+matches that token to the session id it receives — not whichever session happens to prompt first
+([ADR-0005 Amendment P2](./docs/adr/0005-session-flag-off-switch.md),
+[ADR-0006](./docs/adr/0006-session-isolation-concurrency.md)).
 
-`/squirrel:on` only clears this session's own suppression flag.
+`/squirrel:on` only clears this session's own suppression flag. After `/squirrel:tune`, Claude Code
+reinjects the updated profile into other open Claude sessions on their next prompt; Codex and Cursor
+do not get that reinjection ([docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md)).
 
 **On the data directory having moved.** Versions before this one kept this data inside Claude
 Code's own config directory, on the theory that a plugin hook could auto-approve writes there the
