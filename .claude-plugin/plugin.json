@@ -1,7 +1,7 @@
 {
   "name": "squirrel",
   "displayName": "squirrel-mode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ADHD-friendly AI responses: answer first, zero fluff. 🐿️",
   "author": {
     "name": "Thiago Matajs"
