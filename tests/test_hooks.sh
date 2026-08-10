@@ -715,6 +715,179 @@ survivors6g3=$(find "$dir6g3" -type f | wc -l | awk '{print $1}')
 assert_eq "14" "$survivors6g3" "P1 pruning: 14 checkpoints all written today must ALL survive even though 4 of them fall outside the 10 most recent - the 30-day floor is a conjunct, not a tiebreaker, and without it a busy day silently deletes this morning's work"
 
 # ==========================================================================
+# 6g4. [P1, M1] Depth-1 ranking only: ten fresh files under junk/deep/
+#     must NOT outrank a lone >30-day direct-child session file.
+#     Recursive find would see newer_count=10 and delete it; depth-1
+#     sees newer_count=0 and keeps it. allow-checkpoint.sh still
+#     auto-allows the deep writes (scenario 14deep), so this shape is
+#     reachable without a permission prompt.
+# ==========================================================================
+home6g4=$(new_home)
+stdin6g4=$(printf '{"session_id":"sess-6g4","cwd":"%s/deep-junk-project"}' "$home6g4")
+ctx6g4_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g4" "$stdin6g4")")
+dir6g4=$(extract_checkpoint_dir_line "$ctx6g4_pre")
+mkdir -p "$dir6g4/junk/deep"
+printf 'x\n' >"$dir6g4/ancient-alone.md"
+touch -t "200101021200" "$dir6g4/ancient-alone.md"
+i6g4=1
+while [ "$i6g4" -le 10 ]; do
+  printf 'x\n' >"$dir6g4/junk/deep/fresh-$i6g4.md"
+  i6g4=$((i6g4 + 1))
+done
+
+capture_stdout "$load_profile_script" "$home6g4" "$stdin6g4" >/dev/null
+if [ -f "$dir6g4/ancient-alone.md" ]; then
+  ancient6g4_kept=yes
+else
+  ancient6g4_kept=no
+fi
+assert_eq "yes" "$ancient6g4_kept" "P1 pruning (M1): a lone >30-day depth-1 session file must SURVIVE when the only newer files live under junk/deep/ - recursive find would count those 10 deep files and delete it; depth-1 ranking sees newer_count=0"
+
+# Depth-1 peers must still prune (6g must not regress). Re-run the 6g
+# shape here so a mutant that "fixes" M1 by disabling prune entirely
+# cannot hide behind 6g4's keep-assertion alone.
+home6g4b=$(new_home)
+stdin6g4b=$(printf '{"session_id":"sess-6g4b","cwd":"%s/prune-still-works"}' "$home6g4b")
+ctx6g4b_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g4b" "$stdin6g4b")")
+dir6g4b=$(extract_checkpoint_dir_line "$ctx6g4b_pre")
+mkdir -p "$dir6g4b"
+i6g4b=1
+while [ "$i6g4b" -le 15 ]; do
+  printf 'x\n' >"$dir6g4b/old-$i6g4b.md"
+  touch -t "2401$(printf '%02d' "$i6g4b")1200" "$dir6g4b/old-$i6g4b.md"
+  i6g4b=$((i6g4b + 1))
+done
+printf 'x\n' >"$dir6g4b/fresh.md"
+capture_stdout "$load_profile_script" "$home6g4b" "$stdin6g4b" >/dev/null
+survivors6g4b=$(find "$dir6g4b" -type f | wc -l | awk '{print $1}')
+assert_eq "10" "$survivors6g4b" "P1 pruning (M1 isolation): depth-1 peer ranking must still cut 16 depth-1 files down to 10 - proving the M1 fix did not disable the pruner"
+
+# ==========================================================================
+# 6g5. [P1, Resume symlink MINOR] checkpoint_dir_has_any must ignore
+#     symlinks: a symlink to a regular file is not resume data.
+# ==========================================================================
+home6g5=$(new_home)
+stdin6g5=$(printf '{"session_id":"sess-6g5","cwd":"%s/symlink-only-project"}' "$home6g5")
+ctx6g5_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g5" "$stdin6g5")")
+dir6g5=$(extract_checkpoint_dir_line "$ctx6g5_pre")
+mkdir -p "$dir6g5"
+printf 'x\n' >"$home6g5/outside-real.md"
+ln -s "$home6g5/outside-real.md" "$dir6g5/link-only.md"
+ctx6g5=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g5" "$stdin6g5")")
+assert_not_contains "$ctx6g5" "Resume available" "P1 Resume: a slug directory whose only entry is a symlink to a regular file must NOT report 'Resume available' - [ -f ] alone follows the symlink and would falsely claim resume data"
+
+# Real regular files must still drive Resume (do not break 6e).
+printf 'x\n' >"$dir6g5/real-session.md"
+ctx6g5_real=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g5" "$stdin6g5")")
+assert_contains "$ctx6g5_real" "Resume available" "P1 Resume isolation: a real regular file in the slug directory must still report 'Resume available' after the symlink rejection"
+
+# ==========================================================================
+# 6g6. [P1, MAJOR - prune symlink peers] Depth-1 symlinks must not
+#     inflate newer_count. [ -f ] alone follows a symlink-to-file, so
+#     ten fresh depth-1 symlinks would look like KEEP_NEWEST=10 peers
+#     and delete a lone >30-day regular session file. Require
+#     [ -f ] && [ ! -L ] in both candidate and peer loops (same posture
+#     as checkpoint_dir_has_any / 6g5).
+# ==========================================================================
+home6g6=$(new_home)
+stdin6g6=$(printf '{"session_id":"sess-6g6","cwd":"%s/symlink-peers-project"}' "$home6g6")
+ctx6g6_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g6" "$stdin6g6")")
+dir6g6=$(extract_checkpoint_dir_line "$ctx6g6_pre")
+mkdir -p "$dir6g6" "$home6g6/outside-targets"
+printf 'x\n' >"$dir6g6/ancient-alone.md"
+touch -t "200101021200" "$dir6g6/ancient-alone.md"
+i6g6=1
+while [ "$i6g6" -le 10 ]; do
+  printf 'x\n' >"$home6g6/outside-targets/fresh-$i6g6.md"
+  ln -s "$home6g6/outside-targets/fresh-$i6g6.md" "$dir6g6/link-$i6g6.md"
+  i6g6=$((i6g6 + 1))
+done
+
+capture_stdout "$load_profile_script" "$home6g6" "$stdin6g6" >/dev/null
+if [ -f "$dir6g6/ancient-alone.md" ] && [ ! -L "$dir6g6/ancient-alone.md" ]; then
+  ancient6g6_kept=yes
+else
+  ancient6g6_kept=no
+fi
+assert_eq "yes" "$ancient6g6_kept" "P1 pruning (symlink peers): a lone >30-day regular session file must SURVIVE when the only newer depth-1 entries are 10 fresh symlinks - [ -f ] alone would count those links and delete it"
+
+# Tip-over shape: 9 real fresh peers + 1 fresh symlink. With the fix
+# newer_count=9 (< KEEP=10) so the ancient file survives; with the bug
+# newer_count=10 and it dies. This is the load-bearing boundary case.
+home6g6b=$(new_home)
+stdin6g6b=$(printf '{"session_id":"sess-6g6b","cwd":"%s/nine-real-one-link"}' "$home6g6b")
+ctx6g6b_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g6b" "$stdin6g6b")")
+dir6g6b=$(extract_checkpoint_dir_line "$ctx6g6b_pre")
+mkdir -p "$dir6g6b" "$home6g6b/outside-targets"
+printf 'x\n' >"$dir6g6b/ancient-alone.md"
+touch -t "200101021200" "$dir6g6b/ancient-alone.md"
+i6g6b=1
+while [ "$i6g6b" -le 9 ]; do
+  printf 'x\n' >"$dir6g6b/fresh-$i6g6b.md"
+  i6g6b=$((i6g6b + 1))
+done
+printf 'x\n' >"$home6g6b/outside-targets/fresh-link-target.md"
+ln -s "$home6g6b/outside-targets/fresh-link-target.md" "$dir6g6b/link-10.md"
+
+capture_stdout "$load_profile_script" "$home6g6b" "$stdin6g6b" >/dev/null
+if [ -f "$dir6g6b/ancient-alone.md" ] && [ ! -L "$dir6g6b/ancient-alone.md" ]; then
+  ancient6g6b_kept=yes
+else
+  ancient6g6b_kept=no
+fi
+assert_eq "yes" "$ancient6g6b_kept" "P1 pruning (symlink tip-over): 9 real fresh peers + 1 fresh symlink must NOT tip KEEP=10 - newer_count must be 9 (symlink ignored), so the >30-day regular file survives; [ -f ] alone would count 10 and delete it"
+
+# Isolation: M1 deep-junk keep (6g4), depth-1 peer prune (6g4b), and
+# Resume symlink guard (6g5) must still hold - a mutant that "fixes"
+# symlink inflation by disabling prune or by dropping Resume's [ ! -L ]
+# must not hide behind 6g6 alone. Re-assert the three shipped shapes.
+home6g6c=$(new_home)
+stdin6g6c=$(printf '{"session_id":"sess-6g6c","cwd":"%s/deep-junk-still"}' "$home6g6c")
+ctx6g6c_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g6c" "$stdin6g6c")")
+dir6g6c=$(extract_checkpoint_dir_line "$ctx6g6c_pre")
+mkdir -p "$dir6g6c/junk/deep"
+printf 'x\n' >"$dir6g6c/ancient-alone.md"
+touch -t "200101021200" "$dir6g6c/ancient-alone.md"
+i6g6c=1
+while [ "$i6g6c" -le 10 ]; do
+  printf 'x\n' >"$dir6g6c/junk/deep/fresh-$i6g6c.md"
+  i6g6c=$((i6g6c + 1))
+done
+capture_stdout "$load_profile_script" "$home6g6c" "$stdin6g6c" >/dev/null
+if [ -f "$dir6g6c/ancient-alone.md" ]; then
+  ancient6g6c_kept=yes
+else
+  ancient6g6c_kept=no
+fi
+assert_eq "yes" "$ancient6g6c_kept" "P1 pruning isolation (6g6 vs M1): deep junk under junk/deep/ must still NOT outrank a lone >30-day depth-1 file after the symlink-peer fix"
+
+home6g6d=$(new_home)
+stdin6g6d=$(printf '{"session_id":"sess-6g6d","cwd":"%s/prune-still-works"}' "$home6g6d")
+ctx6g6d_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g6d" "$stdin6g6d")")
+dir6g6d=$(extract_checkpoint_dir_line "$ctx6g6d_pre")
+mkdir -p "$dir6g6d"
+i6g6d=1
+while [ "$i6g6d" -le 15 ]; do
+  printf 'x\n' >"$dir6g6d/old-$i6g6d.md"
+  touch -t "2401$(printf '%02d' "$i6g6d")1200" "$dir6g6d/old-$i6g6d.md"
+  i6g6d=$((i6g6d + 1))
+done
+printf 'x\n' >"$dir6g6d/fresh.md"
+capture_stdout "$load_profile_script" "$home6g6d" "$stdin6g6d" >/dev/null
+survivors6g6d=$(find "$dir6g6d" -type f | wc -l | awk '{print $1}')
+assert_eq "10" "$survivors6g6d" "P1 pruning isolation (6g6 vs 6g4b): depth-1 peer ranking must still cut 16 files down to 10 after the symlink-peer fix"
+
+home6g6e=$(new_home)
+stdin6g6e=$(printf '{"session_id":"sess-6g6e","cwd":"%s/resume-symlink-still"}' "$home6g6e")
+ctx6g6e_pre=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g6e" "$stdin6g6e")")
+dir6g6e=$(extract_checkpoint_dir_line "$ctx6g6e_pre")
+mkdir -p "$dir6g6e"
+printf 'x\n' >"$home6g6e/outside-real.md"
+ln -s "$home6g6e/outside-real.md" "$dir6g6e/link-only.md"
+ctx6g6e=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g6e" "$stdin6g6e")")
+assert_not_contains "$ctx6g6e" "Resume available" "P1 Resume isolation (6g6 vs 6g5): symlink-only slug directory must still NOT report Resume after the prune symlink-peer fix"
+
+# ==========================================================================
 # 7. load-profile.sh - output is valid JSON in every scenario above
 #    (parsed via jq, not eyeballed).
 # ==========================================================================
@@ -3534,7 +3707,7 @@ assert_not_contains "$fpP1h_ctx" "Legacy checkpoint file:" "FAILURE PROOF (scena
 # 6g's second half.
 fpP1i_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016
-fpP1i_start=$(line_of "$fpP1i_script" '    newer_count=$(find "$slug_dir" -type f -newer "$candidate" 2>/dev/null | wc -l | awk '"'"'{print $1}'"'"') || newer_count=0')
+fpP1i_start=$(line_of "$fpP1i_script" '    newer_count=0')
 [ -n "$fpP1i_start" ] || fpP1i_start=0
 # shellcheck disable=SC2016
 fpP1i_end=$(line_of_after "$fpP1i_script" "$fpP1i_start" '    fi')
@@ -3581,23 +3754,25 @@ fpP1j_survivors=$(find "$fpP1j_dir" -type f | wc -l | awk '{print $1}')
 assert_eq "16" "$fpP1j_survivors" "FAILURE PROOF (scenario 6g): with the pruner disabled all 16 files must survive - proving 6g's deletion assertions measure the pruner and nothing else"
 
 # --- fpP1jj: prune by RANK ALONE, dropping the 30-day floor from the
-# candidate `find`. The mirror image of fpP1i, and the mutant that
+# candidate age gate. The mirror image of fpP1i, and the mutant that
 # exposed a real hole: neither half of scenario 6g can see this one.
 # 6g's outcome is fixed by the rank clause whether or not the floor is
 # consulted, and 6g2 never ranks anything out. Scenario 6g3 - fourteen
 # files all written today - is the only shape where the two clauses
 # disagree, and this proves it says so.
 #
-# Note the mutation removes the `-mtime` predicate outright rather than
+# Note the mutation removes the age-gate continue outright rather than
 # setting CHECKPOINT_PRUNE_MIN_AGE_DAYS to 0: `-mtime +0` still means
 # "at least one full day old", so a zeroed threshold is NOT the same
 # code path as an absent one and leaves today's files unreachable.
 fpP1jj_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016
-fpP1jj_line=$(line_of "$fpP1jj_script" '  candidates=$(find "$slug_dir" -type f -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidates=""')
-[ -n "$fpP1jj_line" ] || fpP1jj_line=0
+fpP1jj_start=$(line_of "$fpP1jj_script" '    candidate_old=$(find "$candidate" -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidate_old=""')
+[ -n "$fpP1jj_start" ] || fpP1jj_start=0
 # shellcheck disable=SC2016
-replace_line "$fpP1jj_script" "$fpP1jj_line" '  candidates=$(find "$slug_dir" -type f 2>/dev/null) || candidates=""'
+fpP1jj_end=$(line_of_after "$fpP1jj_script" "$fpP1jj_start" '    [ -n "$candidate_old" ] || continue')
+[ -n "$fpP1jj_end" ] || fpP1jj_end=0
+replace_block "$fpP1jj_script" "$fpP1jj_start" "$fpP1jj_end" ''
 
 fpP1jj_home=$(new_home)
 fpP1jj_stdin=$(printf '{"session_id":"sess-fpP1jj","cwd":"%s/busy-project"}' "$fpP1jj_home")
@@ -3613,6 +3788,193 @@ done
 capture_stdout "$fpP1jj_script" "$fpP1jj_home" "$fpP1jj_stdin" >/dev/null
 fpP1jj_survivors=$(find "$fpP1jj_dir" -type f | wc -l | awk '{print $1}')
 assert_eq "10" "$fpP1jj_survivors" "FAILURE PROOF (scenario 6g3): pruning by rank alone must delete 4 of today's 14 checkpoints - proving 6g3's 'all 14 survive' assertion measures the 30-day floor and is not simply counting files nothing was ever going to touch"
+
+# --- fpP1o: reintroduce recursive find for candidacy AND newer-count.
+# Proves scenario 6g4 (M1): ten deep fresh files must be able to make
+# the depth-1 keep-assertion go red when the pruner recurses again.
+fpP1o_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1o_start=$(line_of "$fpP1o_script" 'prune_stale_session_checkpoints() {')
+[ -n "$fpP1o_start" ] || fpP1o_start=0
+fpP1o_end=$(line_of_after "$fpP1o_script" "$fpP1o_start" '}')
+[ -n "$fpP1o_end" ] || fpP1o_end=0
+fpP1o_body=$(cat <<'FP1O_MUTANT_EOF'
+prune_stale_session_checkpoints() {
+  slug_dir=$1
+  [ -d "$slug_dir" ] || return 0
+  examined=0
+  find "$slug_dir" -type f -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null | while IFS= read -r candidate; do
+    examined=$((examined + 1))
+    if [ "$examined" -gt "$CHECKPOINT_PRUNE_MAX_CANDIDATES" ]; then
+      break
+    fi
+    [ -f "$candidate" ] || continue
+    newer_count=$(find "$slug_dir" -type f -newer "$candidate" 2>/dev/null | wc -l | awk '{print $1}') || newer_count=0
+    if [ "$newer_count" -ge "$CHECKPOINT_PRUNE_KEEP_NEWEST" ]; then
+      rm -f -- "$candidate" >/dev/null 2>&1 || true
+    fi
+  done
+  return 0
+}
+FP1O_MUTANT_EOF
+)
+replace_block "$fpP1o_script" "$fpP1o_start" "$fpP1o_end" "$fpP1o_body"
+
+fpP1o_home=$(new_home)
+fpP1o_stdin=$(printf '{"session_id":"sess-fpP1o","cwd":"%s/deep-junk-project"}' "$fpP1o_home")
+fpP1o_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1o_script" "$fpP1o_home" "$fpP1o_stdin")")")
+mkdir -p "$fpP1o_dir/junk/deep"
+printf 'x\n' >"$fpP1o_dir/ancient-alone.md"
+touch -t "200101021200" "$fpP1o_dir/ancient-alone.md"
+i_fpP1o=1
+while [ "$i_fpP1o" -le 10 ]; do
+  printf 'x\n' >"$fpP1o_dir/junk/deep/fresh-$i_fpP1o.md"
+  i_fpP1o=$((i_fpP1o + 1))
+done
+capture_stdout "$fpP1o_script" "$fpP1o_home" "$fpP1o_stdin" >/dev/null
+if [ -f "$fpP1o_dir/ancient-alone.md" ]; then
+  fpP1o_kept=yes
+else
+  fpP1o_kept=no
+fi
+assert_eq "no" "$fpP1o_kept" "FAILURE PROOF (scenario 6g4/M1): reintroducing recursive find must DELETE the lone >30-day depth-1 file when 10 fresh files sit under junk/deep/ - proving 6g4's keep-assertion measures depth-1 ranking and is not vacuous"
+
+# Isolation: the same recursive mutant must still prune depth-1 peers
+# (6g4b / 6g shape), so the two assertions stay independent.
+fpP1o_home2=$(new_home)
+fpP1o_stdin2=$(printf '{"session_id":"sess-fpP1o2","cwd":"%s/prune-still-works"}' "$fpP1o_home2")
+fpP1o_dir2=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1o_script" "$fpP1o_home2" "$fpP1o_stdin2")")")
+mkdir -p "$fpP1o_dir2"
+i_fpP1o2=1
+while [ "$i_fpP1o2" -le 15 ]; do
+  printf 'x\n' >"$fpP1o_dir2/old-$i_fpP1o2.md"
+  touch -t "2401$(printf '%02d' "$i_fpP1o2")1200" "$fpP1o_dir2/old-$i_fpP1o2.md"
+  i_fpP1o2=$((i_fpP1o2 + 1))
+done
+printf 'x\n' >"$fpP1o_dir2/fresh.md"
+capture_stdout "$fpP1o_script" "$fpP1o_home2" "$fpP1o_stdin2" >/dev/null
+fpP1o_survivors2=$(find "$fpP1o_dir2" -type f | wc -l | awk '{print $1}')
+assert_eq "10" "$fpP1o_survivors2" "FAILURE PROOF isolation (scenario 6g4b): the recursive-find mutant must still cut 16 depth-1 files to 10 - proving 6g4b is not standing in for 6g4"
+
+# --- fpP1p: drop the [ ! -L ] guard from checkpoint_dir_has_any.
+# Proves scenario 6g5: [ -f ] alone follows a symlink and falsely
+# reports Resume available.
+fpP1p_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1p_line=$(line_of "$fpP1p_script" '    if [ -f "$entry" ] && [ ! -L "$entry" ]; then')
+[ -n "$fpP1p_line" ] || fpP1p_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1p_script" "$fpP1p_line" '    if [ -f "$entry" ]; then'
+
+fpP1p_home=$(new_home)
+fpP1p_stdin=$(printf '{"session_id":"sess-fpP1p","cwd":"%s/symlink-only-project"}' "$fpP1p_home")
+fpP1p_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1p_script" "$fpP1p_home" "$fpP1p_stdin")")")
+mkdir -p "$fpP1p_dir"
+printf 'x\n' >"$fpP1p_home/outside-real.md"
+ln -s "$fpP1p_home/outside-real.md" "$fpP1p_dir/link-only.md"
+fpP1p_ctx=$(extract_ctx "$(capture_stdout "$fpP1p_script" "$fpP1p_home" "$fpP1p_stdin")")
+assert_contains "$fpP1p_ctx" "Resume available" "FAILURE PROOF (scenario 6g5): dropping [ ! -L ] must make a symlink-only slug directory report 'Resume available' - proving 6g5's not-contains assertion measures the symlink rejection"
+
+# Isolation: real files still work either way.
+printf 'x\n' >"$fpP1p_dir/real-session.md"
+fpP1p_ctx_real=$(extract_ctx "$(capture_stdout "$fpP1p_script" "$fpP1p_home" "$fpP1p_stdin")")
+assert_contains "$fpP1p_ctx_real" "Resume available" "FAILURE PROOF isolation (scenario 6g5): the same [ -f ]-only mutant must still report Resume for a real file"
+
+# --- fpP1q: drop [ ! -L ] from prune_stale_session_checkpoints candidate
+# AND peer loops (revert to [ -f ] alone). Proves scenario 6g6: ten
+# fresh depth-1 symlinks inflate newer_count to KEEP and delete the
+# lone ancient regular file; also proves the 9-real+1-symlink tip-over.
+fpP1q_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpP1q_cand_line=$(line_of "$fpP1q_script" '    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue')
+[ -n "$fpP1q_cand_line" ] || fpP1q_cand_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1q_script" "$fpP1q_cand_line" '    [ -f "$candidate" ] || continue'
+# shellcheck disable=SC2016
+fpP1q_peer_line=$(line_of "$fpP1q_script" '      [ -f "$peer" ] && [ ! -L "$peer" ] || continue')
+[ -n "$fpP1q_peer_line" ] || fpP1q_peer_line=0
+# shellcheck disable=SC2016
+replace_line "$fpP1q_script" "$fpP1q_peer_line" '      [ -f "$peer" ] || continue'
+
+fpP1q_home=$(new_home)
+fpP1q_stdin=$(printf '{"session_id":"sess-fpP1q","cwd":"%s/symlink-peers-project"}' "$fpP1q_home")
+fpP1q_dir=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1q_script" "$fpP1q_home" "$fpP1q_stdin")")")
+mkdir -p "$fpP1q_dir" "$fpP1q_home/outside-targets"
+printf 'x\n' >"$fpP1q_dir/ancient-alone.md"
+touch -t "200101021200" "$fpP1q_dir/ancient-alone.md"
+i_fpP1q=1
+while [ "$i_fpP1q" -le 10 ]; do
+  printf 'x\n' >"$fpP1q_home/outside-targets/fresh-$i_fpP1q.md"
+  ln -s "$fpP1q_home/outside-targets/fresh-$i_fpP1q.md" "$fpP1q_dir/link-$i_fpP1q.md"
+  i_fpP1q=$((i_fpP1q + 1))
+done
+capture_stdout "$fpP1q_script" "$fpP1q_home" "$fpP1q_stdin" >/dev/null
+if [ -f "$fpP1q_dir/ancient-alone.md" ]; then
+  fpP1q_kept=yes
+else
+  fpP1q_kept=no
+fi
+assert_eq "no" "$fpP1q_kept" "FAILURE PROOF (scenario 6g6): dropping [ ! -L ] from prune peer/candidate loops must DELETE the lone >30-day regular file when 10 fresh depth-1 symlinks are present - proving 6g6's keep-assertion measures the symlink rejection"
+
+# Tip-over mutant: 9 real + 1 symlink must DELETE under [ -f ] alone
+# (newer_count=10) while the fixed code keeps (newer_count=9).
+fpP1q_home2=$(new_home)
+fpP1q_stdin2=$(printf '{"session_id":"sess-fpP1q2","cwd":"%s/nine-real-one-link"}' "$fpP1q_home2")
+fpP1q_dir2=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1q_script" "$fpP1q_home2" "$fpP1q_stdin2")")")
+mkdir -p "$fpP1q_dir2" "$fpP1q_home2/outside-targets"
+printf 'x\n' >"$fpP1q_dir2/ancient-alone.md"
+touch -t "200101021200" "$fpP1q_dir2/ancient-alone.md"
+i_fpP1q2=1
+while [ "$i_fpP1q2" -le 9 ]; do
+  printf 'x\n' >"$fpP1q_dir2/fresh-$i_fpP1q2.md"
+  i_fpP1q2=$((i_fpP1q2 + 1))
+done
+printf 'x\n' >"$fpP1q_home2/outside-targets/fresh-link-target.md"
+ln -s "$fpP1q_home2/outside-targets/fresh-link-target.md" "$fpP1q_dir2/link-10.md"
+capture_stdout "$fpP1q_script" "$fpP1q_home2" "$fpP1q_stdin2" >/dev/null
+if [ -f "$fpP1q_dir2/ancient-alone.md" ]; then
+  fpP1q_kept2=yes
+else
+  fpP1q_kept2=no
+fi
+assert_eq "no" "$fpP1q_kept2" "FAILURE PROOF (scenario 6g6b tip-over): dropping [ ! -L ] must DELETE the ancient file when 9 real fresh peers + 1 fresh symlink tip newer_count to KEEP=10 - proving 6g6b's keep-assertion is not vacuous"
+
+# Isolation: the same [ -f ]-only mutant must still prune real depth-1
+# peers (6g4b shape) and still keep the M1 deep-junk ancient file
+# (symlinks are the new surface; deep regular files remain depth-1-safe).
+fpP1q_home3=$(new_home)
+fpP1q_stdin3=$(printf '{"session_id":"sess-fpP1q3","cwd":"%s/prune-still-works"}' "$fpP1q_home3")
+fpP1q_dir3=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1q_script" "$fpP1q_home3" "$fpP1q_stdin3")")")
+mkdir -p "$fpP1q_dir3"
+i_fpP1q3=1
+while [ "$i_fpP1q3" -le 15 ]; do
+  printf 'x\n' >"$fpP1q_dir3/old-$i_fpP1q3.md"
+  touch -t "2401$(printf '%02d' "$i_fpP1q3")1200" "$fpP1q_dir3/old-$i_fpP1q3.md"
+  i_fpP1q3=$((i_fpP1q3 + 1))
+done
+printf 'x\n' >"$fpP1q_dir3/fresh.md"
+capture_stdout "$fpP1q_script" "$fpP1q_home3" "$fpP1q_stdin3" >/dev/null
+fpP1q_survivors3=$(find "$fpP1q_dir3" -type f | wc -l | awk '{print $1}')
+assert_eq "10" "$fpP1q_survivors3" "FAILURE PROOF isolation (scenario 6g6 vs 6g4b): the [ -f ]-only prune mutant must still cut 16 depth-1 files to 10"
+
+fpP1q_home4=$(new_home)
+fpP1q_stdin4=$(printf '{"session_id":"sess-fpP1q4","cwd":"%s/deep-junk-still"}' "$fpP1q_home4")
+fpP1q_dir4=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpP1q_script" "$fpP1q_home4" "$fpP1q_stdin4")")")
+mkdir -p "$fpP1q_dir4/junk/deep"
+printf 'x\n' >"$fpP1q_dir4/ancient-alone.md"
+touch -t "200101021200" "$fpP1q_dir4/ancient-alone.md"
+i_fpP1q4=1
+while [ "$i_fpP1q4" -le 10 ]; do
+  printf 'x\n' >"$fpP1q_dir4/junk/deep/fresh-$i_fpP1q4.md"
+  i_fpP1q4=$((i_fpP1q4 + 1))
+done
+capture_stdout "$fpP1q_script" "$fpP1q_home4" "$fpP1q_stdin4" >/dev/null
+if [ -f "$fpP1q_dir4/ancient-alone.md" ]; then
+  fpP1q_kept4=yes
+else
+  fpP1q_kept4=no
+fi
+assert_eq "yes" "$fpP1q_kept4" "FAILURE PROOF isolation (scenario 6g6 vs M1): the [ -f ]-only prune mutant must still KEEP the lone >30-day file when newer files live only under junk/deep/"
 
 # --- fpP1k: delete Layer 1b entirely (the pre-P1 behaviour: the flat
 # path allowed for every tool). Proves scenario 14d's Write/Edit defer

@@ -130,14 +130,6 @@
 # in this file.
 set -eu
 
-# nl: a variable holding exactly one literal newline byte, built the
-# same way scripts/check-off-flag.sh builds one (an actual line break
-# inside single quotes, not an escape sequence some POSIX `sh` builtins
-# would need to interpret). Used as IFS by
-# prune_stale_session_checkpoints below.
-nl='
-'
-
 # --- JSON field extraction ------------------------------------------
 #
 # extract_field <json> <key>: best-effort read of a top-level string
@@ -328,18 +320,28 @@ prune_stale_off_flags() {
 # exists for, and a pure "older than N days" rule deletes precisely
 # that project's memory.
 #
-# The rule, within ONE slug's directory: delete a file only if it is
-# BOTH older than 30 days AND not among the 10 most recently modified
-# files for that slug. The second clause is what makes the first safe:
-# no matter how long a project lies untouched, its ten newest
-# checkpoints always survive, so "resume after a long gap" never comes
-# back empty.
+# The rule, within ONE slug's directory, DEPTH-1 ONLY: delete a file
+# only if it is BOTH older than 30 days AND not among the 10 most
+# recently modified DIRECT CHILDREN of that slug. The second clause is
+# what makes the first safe: no matter how long a project lies
+# untouched, its ten newest checkpoints always survive, so "resume
+# after a long gap" never comes back empty.
 #
-# "Among the 10 most recently modified" is decided with `find -newer`,
-# the only portable way to compare two files' mtimes in POSIX sh (there
-# is no portable `stat`) - the same idiom check-off-flag.sh uses to pick
-# the newer of two sentinels. A file is deleted when at least 10 OTHER
-# files in the directory are strictly newer than it. An exact mtime tie
+# Depth-1 is load-bearing. allow-checkpoint.sh still auto-allows writes
+# nested deeper than the shipped layout (scenario 14deep: the boundary
+# is containment in checkpoints/, not a fixed depth), so a
+# junk/deep/ tree of fresh files can appear under a slug without anyone
+# noticing. A recursive `find "$slug_dir" -type f` would let those deep
+# files outrank a lone >30-day session file sitting as a direct child
+# and delete it - exactly the wrong data. Ranking and candidacy both
+# use `"$slug_dir"/*` only.
+#
+# "Among the 10 most recently modified" is decided with `find -newer`
+# against each peer FILE (a file path never recurses) - the only
+# portable way to compare two files' mtimes in POSIX sh (there is no
+# portable `stat`) - the same idiom check-off-flag.sh uses to pick the
+# newer of two sentinels. A file is deleted when at least 10 OTHER
+# direct-child files are strictly newer than it. An exact mtime tie
 # counts as "not newer", so a tie keeps the file.
 #
 # Deleting inside the same pass only ever makes the count SMALLER for
@@ -365,24 +367,34 @@ prune_stale_session_checkpoints() {
   slug_dir=$1
   [ -d "$slug_dir" ] || return 0
 
-  candidates=$(find "$slug_dir" -type f -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidates=""
-  [ -n "$candidates" ] || return 0
-
   examined=0
-  prune_saved_ifs=$IFS
-  IFS=$nl
-  # Pathname expansion off for the duration of the loop: `$candidates`
-  # is split on newlines deliberately, but a file name containing a "*"
-  # or a "?" must never be re-expanded into some OTHER file's name on
-  # the way to `rm`.
-  set -f
-  for candidate in $candidates; do
+  # Pathname expansion is ON for the for-lists below (portable depth-1).
+  # Session file names are sanitised to [A-Za-z0-9._-]+, so a literal
+  # "*" or "?" cannot appear in a real candidate name and re-expand.
+  for candidate in "$slug_dir"/*; do
+    # Regular file only: [ -f ] follows symlinks, so require [ ! -L ]
+    # too (same trust boundary as checkpoint_dir_has_any). A depth-1
+    # symlink to a regular file must neither be pruned as a candidate
+    # nor inflate newer_count and delete a real ancient session file.
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    # Age gate on this single file: find given a file path does not
+    # recurse. Empty output means "not old enough" (or find failed).
+    candidate_old=$(find "$candidate" -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidate_old=""
+    [ -n "$candidate_old" ] || continue
+
     examined=$((examined + 1))
     if [ "$examined" -gt "$CHECKPOINT_PRUNE_MAX_CANDIDATES" ]; then
       break
     fi
-    [ -f "$candidate" ] || continue
-    newer_count=$(find "$slug_dir" -type f -newer "$candidate" 2>/dev/null | wc -l | awk '{print $1}') || newer_count=0
+
+    newer_count=0
+    for peer in "$slug_dir"/*; do
+      [ -f "$peer" ] && [ ! -L "$peer" ] || continue
+      peer_newer=$(find "$peer" -newer "$candidate" 2>/dev/null) || peer_newer=""
+      if [ -n "$peer_newer" ]; then
+        newer_count=$((newer_count + 1))
+      fi
+    done
     case "$newer_count" in
       '' | *[!0-9]*) newer_count=0 ;;
     esac
@@ -390,20 +402,22 @@ prune_stale_session_checkpoints() {
       rm -f -- "$candidate" >/dev/null 2>&1 || true
     fi
   done
-  set +f
-  IFS=$prune_saved_ifs
   return 0
 }
 
 # checkpoint_dir_has_any <dir>: true when <dir> holds at least one
-# regular file. This is what drives the "Resume available" line now that
-# a project's memory lives in a directory rather than in one file. A
-# dangling symlink is not a regular file and correctly does not count.
+# regular file that is not a symlink. This is what drives the "Resume
+# available" line now that a project's memory lives in a directory
+# rather than in one file. A dangling symlink is not a regular file and
+# correctly does not count; a symlink to a regular file is also
+# rejected - only the plugin writes real checkpoint files here, so a
+# symlink is never legitimate resume data (same trust boundary
+# allow-checkpoint.sh enforces on the write path).
 checkpoint_dir_has_any() {
   dir=$1
   [ -d "$dir" ] || return 1
   for entry in "$dir"/*; do
-    if [ -f "$entry" ]; then
+    if [ -f "$entry" ] && [ ! -L "$entry" ]; then
       return 0
     fi
   done

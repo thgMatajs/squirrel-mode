@@ -113,9 +113,9 @@ docs/RESEARCH.md's "Corrections" section for what got cut when a citation didn't
 No network calls. No telemetry. Every script squirrel-mode ships is plain POSIX `sh` or Markdown.
 
 The Claude Code plugin's runtime writes to exactly one place: `~/.squirrel/` — your `profile.md`,
-and one checkpoint file per project under `checkpoints/`. Installs from before this location moved
-have their data at an older path instead — see the note at the end of this section; squirrel-mode
-detects that and tells you, once per session, rather than moving it for you.
+and one checkpoint file per session under `checkpoints/<slug>/`. Installs from before this location
+moved have their data at an older path instead — see the note at the end of this section;
+squirrel-mode detects that and tells you, once per session, rather than moving it for you.
 
 The Codex and Cursor installers are a separate, one-time step: they write to the per-target
 directories already listed above (`~/.codex/AGENTS.md`, `~/.agents/skills/`, `~/.cursor/rules/`).
