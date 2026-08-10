@@ -667,6 +667,12 @@ generated artifacts into place and is idempotent.
 - [ ] No shipped instruction, skill, output style, or user-facing doc claims that checkpoint writes
       are invisible, unobservable, or hidden from the user. Describing an *error* path as failing
       quietly is a different and legitimate use; promising that our own writes go unseen is not.
+- [ ] Parallel Claude Code sessions in the same project do not lose each other's checkpoint Done-log
+      entries (per-session checkpoint files).
+- [ ] `/squirrel:off` in one session does not suppress a different session sharing the same cwd
+      (token-bound pending claim).
+- [ ] A `/squirrel:tune` that finishes writing `~/.squirrel/profile.md` becomes visible to another
+      already-open Claude Code session on a later UserPromptSubmit without restart.
 
 ## 6. NON-GOALS (v0.1)
 

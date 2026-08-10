@@ -665,7 +665,7 @@ assert_eq "yes" "$acceptance_y4_pin_present" "docs/ACCEPTANCE.md must cite rule 
 # why it deliberately paraphrases rather than quotes verbatim (PLAN.md Section 5's criterion 19 is
 # worded using the exact phrases the checkpoint-visibility scan above forbids, so quoting it verbatim
 # would trip that scan) — this is a stated, reasoned exception, not a narrowing of what "verbatim"
-# means for the other 18.
+# means for the other 21.
 #
 # Neither side is hand-copied: a future edit to either file's wording, without updating the other, is
 # exactly what this assertion is built to catch, INCLUDING silently dropping one emphasis marker
@@ -722,11 +722,11 @@ extract_acceptance_texts() {
 
 plan_criteria=$(extract_plan_criteria "$plan_file")
 plan_criteria_count=$(printf '%s\n' "$plan_criteria" | grep -c '.' || true)
-assert_eq "19" "$plan_criteria_count" "sanity check: PLAN.md Section 5 must itself contain exactly 19 checklist items (protects the derivation, not docs/ACCEPTANCE.md's text)"
+assert_eq "22" "$plan_criteria_count" "sanity check: PLAN.md Section 5 must itself contain exactly 22 checklist items (protects the derivation, not docs/ACCEPTANCE.md's text)"
 
 acceptance_numbers=$(extract_acceptance_numbers "$acceptance_file")
 acceptance_number_sequence=$(printf '%s\n' "$acceptance_numbers" | tr '\n' ' ' | sed 's/ *$//')
-assert_eq "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19" "$acceptance_number_sequence" "docs/ACCEPTANCE.md's criterion headings must be numbered 1..19, in order, no gaps, no duplicates (protects the derivation)"
+assert_eq "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22" "$acceptance_number_sequence" "docs/ACCEPTANCE.md's criterion headings must be numbered 1..22, in order, no gaps, no duplicates (protects the derivation)"
 
 acceptance_texts=$(extract_acceptance_texts "$acceptance_file")
 
@@ -957,7 +957,7 @@ flatten_acceptance_section() {
 acceptance_content=$(cat "$acceptance_file")
 observed_not_run_criteria=""
 n13=1
-while [ "$n13" -le 19 ]; do
+while [ "$n13" -le 22 ]; do
   section13=$(get_acceptance_section "$acceptance_content" "$n13")
   status13_line=$(printf '%s\n' "$section13" | grep '^\*\*Status:\*\*' | head -n 1)
   section13_flat=$(flatten_acceptance_section "$section13")
@@ -978,7 +978,7 @@ assert_eq "" "$observed_not_run_criteria" "no docs/ACCEPTANCE.md criterion marke
 # pattern that matched nothing would make this invariant pass trivially).
 observed_count13=0
 n13=1
-while [ "$n13" -le 19 ]; do
+while [ "$n13" -le 22 ]; do
   section13=$(get_acceptance_section "$acceptance_content" "$n13")
   status13_line=$(printf '%s\n' "$section13" | grep '^\*\*Status:\*\*' | head -n 1)
   # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status value in the case pattern below, not command substitution.
@@ -1045,7 +1045,7 @@ assert_eq "yes" "$mutant13_caught" "FAILURE PROOF (invariant 13): re-inserting c
 # section design must not do.
 mutant13_others=""
 n13m=1
-while [ "$n13m" -le 19 ]; do
+while [ "$n13m" -le 22 ]; do
   if [ "$n13m" != "14" ]; then
     section13m=$(get_acceptance_section "$acceptance_mutant13" "$n13m")
     status13m=$(printf '%s\n' "$section13m" | grep '^\*\*Status:\*\*' | head -n 1)
@@ -1751,14 +1751,14 @@ assert_eq "no" "$([ -n "$fp6_hits" ] && echo yes || echo no)" "DEMONSTRATION, no
 # consistent with each other from here on.
 #
 # WHAT THIS CHECKS, exactly:
-#   (a) for every one of the 19 criteria, the status word on its own
+#   (a) for every one of the 22 criteria, the status word on its own
 #       "**Status:**" line equals the status word in its own row of the
 #       "## Summary table";
 #   (b) the three counts stated in the tally paragraph immediately after
 #       that table (the met-count, the observed-count, the manual-count)
 #       each equal the actual number of criteria whose own "**Status:**"
 #       line says so;
-#   (c) [FIX 1] every one of the 19 criteria's section contains EXACTLY
+#   (c) [FIX 1] every one of the 22 criteria's section contains EXACTLY
 #       ONE "**Status:**" line — neither zero (missing) nor two-or-more
 #       (duplicated, whether or not the duplicate contradicts the real
 #       one). Found by review: a second, CONTRADICTING "**Status:**" line
@@ -1846,7 +1846,7 @@ assert_eq "no" "$([ -n "$fp6_hits" ] && echo yes || echo no)" "DEMONSTRATION, no
 #     above, reused by point (d) for the `observed`/`manual` enumeration
 #     checks) produces a LOUD, NAMED false positive, not a silent pass —
 #     but not all by the SAME mechanism, and stating that precisely is the
-#     Fix 3 correction: the two "found all 19" sanity checks, the "exactly
+#     Fix 3 correction: the two "found all 22" sanity checks, the "exactly
 #     one tally paragraph" check, and the two Fix-2 "must yield at least
 #     one criterion number" checks each have their OWN dedicated
 #     vacuousness assertion, exactly as this paragraph used to claim for
@@ -1870,7 +1870,7 @@ assert_eq "no" "$([ -n "$fp6_hits" ] && echo yes || echo no)" "DEMONSTRATION, no
 #
 # NARROWED TO THE MECHANICAL FACT, DELIBERATELY (per this build's own
 # "guard that blocks correct work" warning). The tally-count extraction
-# below is anchored on the three phrases "N of 19 criteria are `met`", "N
+# below is anchored on the three phrases "N of 22 criteria are `met`", "N
 # (criteria ...) are `observed`", and "N remain `manual`" — not because
 # those exact eleven words are sacred, but because SOME numeral has to sit
 # next to SOME status word for a tally paragraph to state a count at all;
@@ -2001,7 +2001,7 @@ extract_status_word() {
   # widening to every Markdown emphasis variant buys nothing against that
   # threat model (PLAN: deliberate decision).
   # Also out of scope, by design: a status-shaped line
-  # sitting OUTSIDE all 19 numbered criterion sections (e.g. loose prose
+  # sitting OUTSIDE all 22 numbered criterion sections (e.g. loose prose
   # above criterion 1's own heading, or after criterion 19's) is never fed
   # to this function at all - get_acceptance_section (invariant 13) bounds
   # every call site's input to one criterion's own section, so nothing
@@ -2093,9 +2093,9 @@ mutate_table_status() {
 get_tally_paragraph() {
   # get_tally_paragraph <content> - the single, flattened paragraph inside
   # the "## Summary table" section that states the met/observed/manual
-  # counts, identified by containing the literal substring "of 19
+  # counts, identified by containing the literal substring "of 22
   # criteria" (the one phrase any version of this tally has had to use, to
-  # say "out of a fixed total of 19" at all). Flattened per-paragraph via
+  # say "out of a fixed total of 22" at all). Flattened per-paragraph via
   # flatten_acceptance_section (defined above, for invariant 13), so a
   # re-wrap at a different column width never changes which words the
   # regexes below see adjacent to each other.
@@ -2109,7 +2109,7 @@ get_tally_paragraph() {
   # call site below (tally_paragraphs_found15 must be exactly 1) is what
   # actually catches this case, as a real assertion instead of a crash.
   section=$(get_section_between "$1" '^## Summary table')
-  flatten_acceptance_section "$section" | grep 'of 19 criteria' || true
+  flatten_acceptance_section "$section" | grep 'of 22 criteria' || true
 }
 
 extract_criteria_numbers() {
@@ -2122,7 +2122,7 @@ extract_criteria_numbers() {
   # English list joined by commas and/or "and" ("criteria 3, 6, 7, 8, 9,
   # and 13", "criteria 10 and 12"), one number per output line, in the
   # order they appear. A bare number with no "criterion"/"criteria"
-  # immediately before it — the "19" inside "of 19 criteria", a turn
+  # immediately before it — the "22" inside "of 22 criteria", a turn
   # count, an S-cycle number like "S10" — is never matched, because the
   # introducing word must come first, immediately adjacent to the number,
   # and the numbers grabbed out of the match are only the ones the list-
@@ -2399,7 +2399,7 @@ compute_status_and_counts() {
   c_observed_list=""
   c_manual_list=""
   cn=1
-  while [ "$cn" -le 19 ]; do
+  while [ "$cn" -le 22 ]; do
     csec=$(get_acceptance_section "$content" "$cn")
     cstatus=$(extract_status_word "$csec")
     cstatus_lines=$(count_status_lines "$csec")
@@ -2513,19 +2513,19 @@ assert_eq "" "$(csv_to_display "$s15_mismatched")" "every docs/ACCEPTANCE.md cri
 assert_eq "" "$(csv_to_display "$s15_badcount")" "every docs/ACCEPTANCE.md criterion's section must contain exactly one \`**Status:**\` line - neither zero nor two-or-more (invariant 15, Fix 1)"
 
 # Sanity, per the tech lead's own instruction: prove the parser actually
-# found all 19 criteria and all 19 table rows, so a regex matching nothing
+# found all 22 criteria and all 22 table rows, so a regex matching nothing
 # could not make the assertion above pass trivially.
-assert_eq "19" "$s15_status_found" "sanity (invariant 15): a **Status:** line must be found for all 19 criteria, or the agreement check above would be vacuous"
-assert_eq "19" "$s15_table_found" "sanity (invariant 15): a ## Summary table row must be found for all 19 criterion numbers, or the agreement check above would be vacuous"
-assert_eq "19" "$((s15_met + s15_observed + s15_manual + s15_notmet))" "sanity (invariant 15): every one of the 19 criteria's own Status line must resolve to exactly one of met/observed/manual/not met, with none left unrecognized"
+assert_eq "22" "$s15_status_found" "sanity (invariant 15): a **Status:** line must be found for all 22 criteria, or the agreement check above would be vacuous"
+assert_eq "22" "$s15_table_found" "sanity (invariant 15): a ## Summary table row must be found for all 22 criterion numbers, or the agreement check above would be vacuous"
+assert_eq "22" "$((s15_met + s15_observed + s15_manual + s15_notmet))" "sanity (invariant 15): every one of the 22 criteria's own Status line must resolve to exactly one of met/observed/manual/not met, with none left unrecognized"
 
 tally_flat15=$(get_tally_paragraph "$acceptance_content")
 tally_paragraphs_found15=$(printf '%s\n' "$tally_flat15" | grep -c '.' || true)
-assert_eq "1" "$tally_paragraphs_found15" "sanity (invariant 15): exactly one paragraph containing 'of 19 criteria' must be found inside the ## Summary table section, or the tally-count extraction below is not testing anything real"
+assert_eq "1" "$tally_paragraphs_found15" "sanity (invariant 15): exactly one paragraph containing 'of 22 criteria' must be found inside the ## Summary table section, or the tally-count extraction below is not testing anything real"
 
 # shellcheck disable=SC2016 # single-quoted deliberately, all three below:
 # literal backtick-quoted status words in the -E patterns, never substitution.
-tally_met15=$(printf '%s\n' "$tally_flat15" | grep -oE '[0-9]+ of 19 criteria are `met`' | head -n 1 | awk '{print $1}')
+tally_met15=$(printf '%s\n' "$tally_flat15" | grep -oE '[0-9]+ of 22 criteria are `met`' | head -n 1 | awk '{print $1}')
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
 tally_observed15=$(printf '%s\n' "$tally_flat15" | grep -oE '[0-9]+ \(criteria[^)]*\) are `observed`' | head -n 1 | awk '{print $1}')
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
@@ -2657,9 +2657,9 @@ assert_eq "15" "$(csv_to_display "$p2_mismatched")" "FAILURE PROOF (invariant 15
 # tally paragraph, leaving every criterion's actual status untouched.
 # ==========================================================================
 # shellcheck disable=SC2016 # single-quoted deliberately, both below: literal backtick-quoted phrases, not substitution.
-tally_old_met_phrase='7 of 19 criteria are `met`'
+tally_old_met_phrase='7 of 22 criteria are `met`'
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
-tally_new_met_phrase='6 of 19 criteria are `met`'
+tally_new_met_phrase='6 of 22 criteria are `met`'
 
 tally_anchor_hits15=$(printf '%s' "$acceptance_content" | grep -oF -- "$tally_old_met_phrase" | wc -l | tr -d ' ')
 assert_eq "1" "$tally_anchor_hits15" "sanity (invariant 15, mutation 3): the tally paragraph's met-count phrase must appear exactly once in the real file, or this mutation proof is not well-defined"
@@ -2668,7 +2668,7 @@ mutant15_tally=$(mutate_first_literal "$acceptance_content" "$tally_old_met_phra
 
 mutant15_tally_flat=$(get_tally_paragraph "$mutant15_tally")
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
-mutant15_tally_met=$(printf '%s\n' "$mutant15_tally_flat" | grep -oE '[0-9]+ of 19 criteria are `met`' | head -n 1 | awk '{print $1}')
+mutant15_tally_met=$(printf '%s\n' "$mutant15_tally_flat" | grep -oE '[0-9]+ of 22 criteria are `met`' | head -n 1 | awk '{print $1}')
 assert_eq "6" "$mutant15_tally_met" "sanity (invariant 15, mutation 3): the mutated tally paragraph must now read a met-count of 6, or the mutation did not apply"
 
 result15_p3=$(compute_status_and_counts "$mutant15_tally")
@@ -2681,9 +2681,9 @@ p3_mismatch_yesno=$([ "$p3_met" = "$mutant15_tally_met" ] && echo yes || echo no
 assert_eq "no" "$p3_mismatch_yesno" "FAILURE PROOF (invariant 15, mutation 3): changing ONLY the tally paragraph's met-count number (every criterion's actual status left untouched) must be caught — the real met-count must no longer equal the mutated tally's stated met-count"
 
 # ==========================================================================
-# FAILURE PROOF (invariant 15, sanity) — the "found all 19" guards above
-# are not vacuous always-19 assertions: deleting a table row, or deleting a
-# Status line, actually drops the corresponding found-count below 19.
+# FAILURE PROOF (invariant 15, sanity) — the "found all 22" guards above
+# are not vacuous always-22 assertions: deleting a table row, or deleting a
+# Status line, actually drops the corresponding found-count below 22.
 # ==========================================================================
 mutant15_missing_row=$(printf '%s\n' "$acceptance_content" | awk -v old="$row15_4" 'BEGIN { skipped = 0 } { if (!skipped && $0 == old) { skipped = 1; next } print }')
 result15_p4=$(compute_status_and_counts "$mutant15_missing_row")
@@ -2692,7 +2692,7 @@ IFS=' '
 set -- $result15_p4
 IFS=$old_ifs
 p4_table_found=$7
-assert_eq "18" "$p4_table_found" "FAILURE PROOF (invariant 15, sanity): deleting criterion 4's summary-table row entirely must drop the found-row count to 18, proving the 'found all 19 table rows' sanity check is not a vacuous always-19 assertion"
+assert_eq "21" "$p4_table_found" "FAILURE PROOF (invariant 15, sanity): deleting criterion 4's summary-table row entirely must drop the found-row count to 21, proving the 'found all 22 table rows' sanity check is not a vacuous always-22 assertion"
 
 mutant15_missing_status=$(printf '%s\n' "$acceptance_content" | awk '
   BEGIN { insec = 0; removed = 0 }
@@ -2707,7 +2707,7 @@ IFS=' '
 set -- $result15_p5
 IFS=$old_ifs
 p5_status_found=$6
-assert_eq "18" "$p5_status_found" "FAILURE PROOF (invariant 15, sanity): deleting criterion 15's own **Status:** line entirely must drop the found-status-lines count to 18, proving the 'found all 19 criteria' sanity check is not a vacuous always-19 assertion"
+assert_eq "21" "$p5_status_found" "FAILURE PROOF (invariant 15, sanity): deleting criterion 15's own **Status:** line entirely must drop the found-status-lines count to 21, proving the 'found all 22 criteria' sanity check is not a vacuous always-22 assertion"
 
 # ==========================================================================
 # FAILURE PROOF (invariant 15, Fix 1, AFTER-duplicate direction) — insert a
@@ -2824,9 +2824,9 @@ assert_eq "met" "$sanity_indword15" "FAILURE PROOF (invariant 15, extract_status
 # ==========================================================================
 # shellcheck disable=SC2016 # single-quoted deliberately, both below:
 # literal backtick-quoted phrases, not substitution.
-tally_old_observed_phrase='4 (criteria 4, 5, 11, 14) are `observed`'
+tally_old_observed_phrase='7 (criteria 4, 5, 11, 14, 20, 21, 22) are `observed`'
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
-tally_falseenum_observed_phrase='4 (criteria 4, 5, 11, 16) are `observed`'
+tally_falseenum_observed_phrase='7 (criteria 4, 5, 11, 16, 20, 21, 22) are `observed`'
 
 tally_observed_anchor_hits15=$(printf '%s' "$tally_flat15" | grep -oF -- "$tally_old_observed_phrase" | wc -l | tr -d ' ')
 assert_eq "1" "$tally_observed_anchor_hits15" "sanity (invariant 15, Fix 2 proof, observed): the tally paragraph's observed clause must appear exactly once in the flattened tally text, or this mutation proof is not well-defined"
@@ -2835,26 +2835,26 @@ mutant15_falseenum_observed_flat=$(mutate_first_literal "$tally_flat15" "$tally_
 mutant15_falseenum_observed_changed=$([ "$mutant15_falseenum_observed_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_falseenum_observed_changed" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must actually change the flattened tally text, or this proof is not well-defined"
 
-# 15b (count-only) must NOT catch this — the count is still "4" — proving
+# 15b (count-only) must NOT catch this — the count is still "7" — proving
 # the gap Fix 2 exists to close, not merely re-demonstrating 15b.
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
 mutant15_falseenum_observed_count=$(printf '%s\n' "$mutant15_falseenum_observed_flat" | grep -oE '[0-9]+ \(criteria[^)]*\) are `observed`' | head -n 1 | awk '{print $1}')
-assert_eq "4" "$mutant15_falseenum_observed_count" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must leave the leading count at 4, or this is not the count-preserving defeat it claims to be"
+assert_eq "7" "$mutant15_falseenum_observed_count" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must leave the leading count at 7, or this is not the count-preserving defeat it claims to be"
 
 mutant15_falseenum_observed_set=$(extract_observed_number_set "$mutant15_falseenum_observed_flat")
 falseenum_observed_caught=$([ "$mutant15_falseenum_observed_set" != "$s15_observed_set" ] && echo yes || echo no)
-assert_eq "yes" "$falseenum_observed_caught" "FAILURE PROOF (invariant 15, Fix 2): renaming ONE number inside the \`observed\` parenthetical (14 -> 16, count left at 4) must be caught — the mutated tally's enumerated set must no longer equal the real \`observed\` set"
+assert_eq "yes" "$falseenum_observed_caught" "FAILURE PROOF (invariant 15, Fix 2): renaming ONE number inside the \`observed\` parenthetical (14 -> 16, count left at 7) must be caught — the mutated tally's enumerated set must no longer equal the real \`observed\` set"
 
 # LEGITIMATE REWORDING, same true facts, must still pass. Reorders the
 # parenthetical's numbers and drops the serial "and" — a plausible future
 # copy-edit that changes nothing about which criteria are `observed`.
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
-tally_reworded_observed_phrase='4 (criteria 14, 11, 5, 4) are `observed`'
+tally_reworded_observed_phrase='7 (criteria 22, 21, 20, 14, 11, 5, 4) are `observed`'
 mutant15_reword_observed_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_observed_phrase" "$tally_reworded_observed_phrase")
 mutant15_reword_observed_changed=$([ "$mutant15_reword_observed_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_reword_observed_changed" "sanity (invariant 15, Fix 2 proof, observed): the legitimate-rewording mutation must actually change the flattened tally text, or this proof is not well-defined"
 mutant15_reword_observed_set=$(extract_observed_number_set "$mutant15_reword_observed_flat")
-assert_eq "$s15_observed_set" "$mutant15_reword_observed_set" "LEGITIMATE REWORDING (invariant 15, Fix 2, observed): reordering the SAME four numbers in the parenthetical, and dropping the serial \"and\", must still be recognized as the identical \`observed\` set — a guard that rejects this is a guard that blocks correct work"
+assert_eq "$s15_observed_set" "$mutant15_reword_observed_set" "LEGITIMATE REWORDING (invariant 15, Fix 2, observed): reordering the SAME seven numbers in the parenthetical, and dropping the serial \"and\", must still be recognized as the identical \`observed\` set — a guard that rejects this is a guard that blocks correct work"
 
 # ==========================================================================
 # FAILURE PROOF (invariant 15, Fix 2, `manual`) — the tech lead's exact

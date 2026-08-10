@@ -25,9 +25,11 @@ observations imply more than they support.
 - `met` — the criterion describes a filesystem effect, a generated artifact, a build/CI mechanism,
   or a documentation fact. Nothing about it requires watching a model behave in a live turn, and it
   is verified, automated or static, against the current committed text.
-- `observed` — a live, headless probe against the real CLI actually exercised the behavior in this
-  sweep, and it did the right thing, at least once. This is direct behavioral evidence, not an
-  inference from reading the mechanism — but it is **one observation (or, for probe 8, three
+- `observed` — a live probe actually exercised the behavior in this sweep, and it did the right
+  thing, at least once. Valid probe kinds under this one word: (1) a headless run against the real
+  Claude Code CLI, or (2) a hook-level drive of the relevant hook scripts under a scratch `$HOME`
+  (as with criteria 20–22's `tests/test_hooks.sh` scenarios). This is direct behavioral evidence,
+  not an inference from reading the mechanism — but it is **one observation (or, for probe 8, three
   chained observations) of a non-deterministic system, not a guarantee of consistency across every
   future run.** Deliberately a weaker word than `met`, and defined here so the status column never
   implies more than the probes actually support. Where a criterion asks for something across many
@@ -40,8 +42,8 @@ observations imply more than they support.
   but the criterion as a whole still needs a human to run the remaining scenario. (Called
   `unverifiable-by-automation` earlier in this project's history; renamed here to the plainer word
   the S9 tally uses, with the same meaning.)
-- `not met` — reserved for a criterion this sweep found the repository actually fails. None of the
-  19 below are `not met`; four static gaps were found and closed during the static pass (see
+-   `not met` — reserved for a criterion this sweep found the repository actually fails. None of the
+  22 below are `not met`; four static gaps were found and closed during the static pass (see
   "Static gaps found and closed during this sweep" at the end of this document, and the notes under
   criteria 2, 17, and 18), and are reported as closed, not as pre-existing failures papered over.
 - **Multi-branch criteria.** Several criterion headings below name more than one distinct,
@@ -384,7 +386,10 @@ reply, or writes the file with the user's actual choices — only a transcript c
 4. After confirming "y" to save, **observable:** `~/.squirrel/profile.md` exists with exactly
    11 `field: value` lines, matching the `skills/init/SKILL.md` step-4 shape.
 
-**Status:** `manual`.
+**Status:** `manual`. **P5 conversion review:** still `manual`. Static skill-text coverage does not
+exercise a real interview under the least-covered-named-branch convention (one question per message,
+waiting for replies, writing the user's choices). No cheap deterministic probe without auth closes
+that gap; do not invent live skill-interview probes here.
 
 ---
 
@@ -464,7 +469,10 @@ change `tone` to `warm`. **Observable:** exactly one question is asked (which fi
 `~/.squirrel/profile.md` afterward has `tone: warm` and every other field byte-identical to
 before; no interview questions (language, code style, etc.) are asked.
 
-**Status:** `manual`.
+**Status:** `manual`. **P5 conversion review:** still `manual`. Static `skills/tune/SKILL.md`
+coverage and field-list checks do not exercise a live single-field edit (including a bundle-set
+field) without redoing the interview. No cheap deterministic probe without auth closes that gap; do
+not invent live skill-interview probes here.
 
 ---
 
@@ -788,18 +796,21 @@ install/uninstall cycle.
 
 - `hooks/hooks.json` declares exactly three hook events — `SessionStart`, `UserPromptSubmit`,
   `PreToolUse` — and none of Claude Code's plugin lifecycle events includes an "on uninstall" hook
-  that any of these three matchers could fire on. Squirrel-mode ships no code path that runs when a
-  plugin is uninstalled, and none of the three hook scripts contains a delete of `profile.md` or
-  anything under `checkpoints/` (confirmed by reading all three end to end — the only deletions
-  anywhere are `check-off-flag.sh`'s sentinel claiming inside `off/` and
-  `load-profile.sh`'s 7-day stale-flag prune, also inside `off/`).
+  that any of these three matchers could fire on. Across those events the file registers **exactly
+  four hook commands**: SessionStart → `load-profile.sh`; UserPromptSubmit → `check-off-flag.sh` +
+  `load-profile.sh` (P3 reinjection); PreToolUse → `allow-checkpoint.sh`. Squirrel-mode ships no
+  code path that runs when a plugin is uninstalled, and none of the three hook scripts contains a
+  delete of `profile.md` or anything under `checkpoints/` (confirmed by reading all three end to end
+  — the only deletions anywhere are `check-off-flag.sh`'s sentinel claiming inside `off/` and
+  `load-profile.sh`'s 7-day stale-flag prune, also inside `off/`, plus the conservative per-session
+  checkpoint prune under `checkpoints/`).
 - `docs/adr/0003-profile-outside-plugin-data.md` records the design reasoning: `~/.squirrel/`
   is deliberately outside `${CLAUDE_PLUGIN_DATA}` specifically because that path *is* deleted on
   uninstall (unless `--keep-data` is passed), which would destroy the Done log — "the least
   disposable thing the plugin holds."
 - This "no code path exists" argument already has indirect automated backing, not just a one-time
-  read: `tests/test_hooks.sh` scenario 1 asserts `hooks.json` defines **exactly 3 hook commands
-  total** (`assert_eq "3" "$command_count" ...`). A future change that gave squirrel-mode a fourth,
+  read: `tests/test_hooks.sh` scenario 1 asserts `hooks.json` defines **exactly 4 hook commands
+  total** (`assert_eq "4" "$command_count" ...`). A future change that gave squirrel-mode a fifth,
   uninstall-time script — the only way this guarantee could ever regress — would necessarily raise
   that count and fail this existing, unrelated-looking assertion before anyone got as far as writing
   a delete statement into it.
@@ -1136,6 +1147,94 @@ would trip the very check this paragraph documents.
 
 ---
 
+## 20. Parallel Claude Code sessions in the same project do not lose each other's checkpoint Done-log entries (per-session checkpoint files).
+
+**Verified:** automated (hook-level), under scratch `$HOME` — not a live multi-turn `claude -p`
+pair of sessions.
+
+**Honesty standard.** This criterion is about two open Claude Code sessions sharing one project cwd
+not clobbering each other's Done-log entries. The evidence below is the **P1 hook-level** probe
+suite in `tests/test_hooks.sh` (and the matching allow-checkpoint nested-path cases), which
+exercises `load-profile.sh` / `allow-checkpoint.sh` with distinct `session_id` values under a
+temporary `$HOME`. It does **not** open two live Claude Code UIs or run parallel multi-turn
+`claude -p` conversations. Status is therefore `observed` on that hook evidence — never `met`.
+
+- `scripts/load-profile.sh` injects a per-project checkpoint **directory** plus a per-session
+  checkpoint **path** (`<dir>/<session_id>.md`), so two sessions in the same cwd are handed
+  different files under one shared directory (see also ADR-0002's layout and the P1 amendments in
+  the load-profile / allow-checkpoint paths — concurrency ADR later).
+- `tests/test_hooks.sh` scenario **6b** asserts two different `session_id`s with the same cwd get
+  different checkpoint paths and the **same** project directory; scenarios **6c** cover missing /
+  unsanitisable `session_id` → distinct `anon-*` names (so anonymous sessions do not collapse onto
+  one shared file either).
+-   Scenarios **14** / **14e** / **14deep** assert `allow-checkpoint.sh` allows Write/Edit/Read on the
+  nested per-session path (and deeper containment under `checkpoints/`), so the model can write its
+  own per-session checkpoint without a permission prompt on the path the hook handed it.
+- Cross-link: criterion 12 still covers silent writes / pickup order / once-per-turn as a separate,
+  multi-branch claim; this criterion only names the parallel-session isolation of Done-log files.
+
+**Status:** `observed`, on P1 hook-level probes (scenarios 6b/6c and nested allow-checkpoint). Not a
+live multi-session Claude Code observation.
+
+---
+
+## 21. `/squirrel:off` in one session does not suppress a different session sharing the same cwd (token-bound pending claim).
+
+**Verified:** automated (hook-level), under scratch `$HOME` — not a live multi-turn `claude -p`
+pair of sessions.
+
+**Honesty standard.** The criterion is that `/squirrel:off` in session A must not suppress session B
+when both share the same cwd. Evidence is the **P2 hook-level** probes in `tests/test_hooks.sh`
+against `check-off-flag.sh` / `load-profile.sh` (ADR-0005 amended for token-bound `PENDING.<session_id>`
+claiming). No live skill interview and no live multi-turn Claude Code pair was run. Status is
+`observed` on that hook evidence — never `met`.
+
+- SessionStart injects a `Session off-token:` equal to the sanitised `session_id` (scenario
+  **57p2d**), so `/squirrel:off` can write `PENDING.<token>` rather than a cwd-only sentinel.
+- Scenario **57p2a** (the P2 same-cwd race probe): session A leaves `PENDING.<A>`; session B's hook
+  fires first with the **same cwd** and must **not** claim; A's later hook claims and injects the
+  counter-instruction. A cwd-only `claim_pending` mutant is failure-proved to let B steal the
+  sentinel — showing the token-binding assertion is not vacuous.
+- Scenarios **57p2b** / **57p2c** cover the token path (contents optional) and the legacy tokenless
+  cwd path (no regression for different cwds).
+- Cross-link: criterion 9 still owns the 10-turn "stays suppressed" / `/squirrel:on` restore /
+  cross-session leak claim as a separate multi-branch criterion and remains `manual` for the live
+  halves (P5: 10-turn live conversion skipped per owner ruling).
+
+**Status:** `observed`, on P2 hook-level probes (57p2a–57p2d). Not a live multi-session Claude Code
+observation.
+
+---
+
+## 22. A `/squirrel:tune` that finishes writing `~/.squirrel/profile.md` becomes visible to another already-open Claude Code session on a later UserPromptSubmit without restart.
+
+**Verified:** automated (hook-level), under scratch `$HOME` — not a live `/squirrel:tune` skill run
+and not a live multi-turn `claude -p` pair.
+
+**Honesty standard.** The criterion is that after `profile.md` is rewritten (as `/squirrel:tune`
+does when it finishes), an already-open second session sees the new profile on a later
+UserPromptSubmit without restarting. Evidence is the **P3 hook-level** suite in
+`tests/test_hooks.sh`: `hooks.json` registers `load-profile.sh` on UserPromptSubmit alongside
+`check-off-flag.sh`, and the script reinjects when `profile.md` is newer than
+`profile-seen/<session_id>` (deterministic `touch -t` mtimes; no sleep). The probe simulates the
+finished write by replacing `profile.md` externally — it does **not** run the `/squirrel:tune`
+skill interview. Status is `observed` on that hook evidence — never `met`. Criterion 8 (the tune
+skill's own interview mechanics) stays `manual` separately.
+
+- Scenario 1 asserts UserPromptSubmit runs exactly two commands, including `load-profile.sh` (P3
+  reinjection), for a total of **4** hook commands in `hooks.json`.
+- P3-1..P3-5: Session A SessionStart injects profile v1 and touches `profile-seen/<A>`; an external
+  write advances `profile.md` to v2; A's next UserPromptSubmit reinjects v2 with OVERRIDE framing
+  (plain text, not SessionStart JSON); a second UPS with unchanged mtime prints empty; Session B
+  (different `session_id`, same `$HOME`) also receives v2 when it has no seen baseline.
+- Failure proofs (fpP3a / fpP3b) show the `-newer` / no-seen gate and the UserPromptSubmit event
+  branch are load-bearing for that reinjection.
+
+**Status:** `observed`, on P3 hook-level probes (P3-1..P3-5 and hooks.json wiring). Not a live
+`/squirrel:tune` or live multi-session Claude Code observation.
+
+---
+
 ## Summary table
 
 | # | Criterion (short form) | Verification | Status |
@@ -1159,12 +1258,18 @@ would trip the very check this paragraph documents.
 | 17 | No network/telemetry; auto-approval disclosed | automated (new) + static | met |
 | 18 | Citations verified + population-tagged | automated (new, tags) + documented (S6, sources) | met |
 | 19 | No claim that checkpoint writes go unseen | automated | met |
+| 20 | Parallel sessions keep distinct Done-log files | automated (hook-level P1) | observed |
+| 21 | `/squirrel:off` token-bound; no same-cwd cross-suppress | automated (hook-level P2) | observed |
+| 22 | Tune/`profile.md` visible to open session via UPS | automated (hook-level P3) | observed |
 
-7 of 19 criteria are `met` outright. 4 (criteria 4, 5, 11, 14) are `observed`: a live probe actually
-exercised the behavior and it held, at least once — real evidence, not a guarantee of consistency.
+7 of 22 criteria are `met` outright. 7 (criteria 4, 5, 11, 14, 20, 21, 22) are `observed`: 4, 5, 11,
+and 14 on live CLI probes; 20–22 on hook-level probes under scratch `$HOME` — real evidence either
+way, not a guarantee of consistency.
 (Criteria 11 and 14 moved from `manual` to `observed` in the S10 sweep: probe B produced
 `/squirrel:plan`'s full output shape, and probes E/F produced the scope guard firing on a declared
-task's drift, including the combined Extra-section-and-flag case.) 8 remain `manual`: criteria 3, 6,
+task's drift, including the combined Extra-section-and-flag case. Criteria 20–22 were added in the
+P5 concurrency acceptance pass: their evidence is the **hook-level** P1/P2/P3 probes in
+`tests/test_hooks.sh`, not live multi-turn `claude -p` — stated in each criterion's own section.) 8 remain `manual`: criteria 3, 6,
 7, 8, 9, and 13 in full; criterion 10 for the one branch no probe has ever reached — a Jira ticket
 digested via a tool actually connected and authorized, as distinct from the no-tool fallback S10
 probe D observed (see criterion 10's own section, which corrects `.build-checkpoint.md`'s "fully
