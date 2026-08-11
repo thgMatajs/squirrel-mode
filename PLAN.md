@@ -4,7 +4,7 @@
 > *"Read PLAN.md and build it exactly as specified. Work through the Build Steps in order."*
 >
 > Read [CONTEXT.md](./CONTEXT.md) for the vocabulary and [docs/adr/](./docs/adr/) for why the
-> architecture looks the way it does. The five ADRs record decisions a reader would otherwise
+> architecture looks the way it does. The six ADRs record decisions a reader would otherwise
 > assume were oversights and try to "fix".
 
 ---
@@ -173,7 +173,7 @@ before citing.
 
 ## 3. HOW — Architecture
 
-Five decisions shape this and are recorded as ADRs. Read them before changing the layout.
+Six decisions shape this and are recorded as ADRs. Read them before changing the layout.
 
 | ADR | Decision |
 | :-- | :-- |
@@ -182,6 +182,7 @@ Five decisions shape this and are recorded as ADRs. Read them before changing th
 | [0003](./docs/adr/0003-profile-outside-plugin-data.md) | Profile and checkpoints live in `~/.squirrel/`, not `${CLAUDE_PLUGIN_DATA}` |
 | [0004](./docs/adr/0004-tiered-parity-across-targets.md) | Targets get **tiered parity** from one canonical rules file |
 | [0005](./docs/adr/0005-session-flag-off-switch.md) | The off switch is a **session flag** plus a per-prompt counter-injection |
+| [0006](./docs/adr/0006-session-isolation-concurrency.md) | Concurrent sessions isolate by **ownership**, not by locking shared state |
 
 ### Repository layout (also serves as a plugin marketplace)
 
@@ -223,7 +224,7 @@ squirrel-mode/                       # repo name (brand)
 │   ├── RESEARCH.md                  # full evidence base, population-tagged
 │   ├── OTHER-TOOLS.md               # Codex + Cursor install and what each loses
 │   ├── ACCEPTANCE.md                # S9 conformance record against Section 5
-│   └── adr/0001…0005-*.md
+│   └── adr/0001…0006-*.md
 ├── CONTEXT.md                       # glossary
 ├── profile.example.md
 ├── README.md
@@ -281,17 +282,24 @@ tone: neutral              # neutral | warm | terse
 2. **The output style** is already in the system prompt, carrying the base rules and the instruction
    *"a squirrel-mode profile may be present in context; obey its fields. If absent, use these
    defaults."* It cannot interpolate anything (ADR-0001), so the profile path appears literally.
-3. **UserPromptSubmit** runs `check-off-flag.sh`: if `~/.squirrel/off/<session_id>` exists,
-   inject the counter-instruction (ADR-0005). Otherwise exit silently.
+3. **UserPromptSubmit** registers **two** commands in `hooks.json`, in order. First
+   `check-off-flag.sh`: if `~/.squirrel/off/<session_id>` exists, inject the counter-instruction
+   (ADR-0005); otherwise exit silently. Then `load-profile.sh` again, on its P3 reinjection path:
+   if `~/.squirrel/profile.md` is newer than `~/.squirrel/profile-seen/<session_id>` (or that
+   marker does not exist yet), reprint the profile framing so a `/squirrel:tune` in another
+   session reaches this one without a restart, and touch the marker; otherwise exit silently.
 4. **PreToolUse**, matcher `Write|Edit|Read`, runs `allow-checkpoint.sh` on every one. The hook's
    `if` field cannot safely express the path gate itself (ADR-0002: unverified whether it expands
    `~`/`$HOME` at plugin-build time), so the matcher is broad and the script reads
-   `tool_input.file_path` and returns `permissionDecision: "allow"` only for a path that genuinely
-   resolves inside `$HOME/.squirrel/checkpoints/`, `"defer"` otherwise — for a `Read` exactly
-   as for a `Write`/`Edit`, per S10-1's amendment to ADR-0002. This read requires `jq`: a regex
-   cannot safely parse `tool_input` when it carries a nested object, so without `jq` on `PATH` the
-   script never guesses and always returns `"defer"` (S10 review cycle 2, AC1's amendment to
-   ADR-0002).
+   `tool_input.file_path` and emits `permissionDecision: "allow"` only for a path that genuinely
+   resolves inside `$HOME/.squirrel/checkpoints/`; for every other path it emits **nothing at all**
+   and exits 0, which is how a `PreToolUse` hook says "no opinion, use the normal permission flow" —
+   for a `Read` exactly as for a `Write`/`Edit`, per S10-1's amendment to ADR-0002. Emitting
+   `permissionDecision: "defer"` here instead — which this script did until v0.3.1 — does *not* mean
+   that: it parks the tool call and stops the turn (see ADR-0002's Amendment (v0.3.1)). This read
+   requires `jq`: a regex cannot safely parse `tool_input` when it carries a nested object, so
+   without `jq` on `PATH` the script never guesses and always declines (S10 review cycle 2, AC1's
+   amendment to ADR-0002).
 
 ### The base rules (write these into `rules/base-rules.md`)
 
@@ -350,8 +358,11 @@ tone: neutral              # neutral | warm | terse
     security issues, or data loss. Clarity beats compression there. **This rule takes precedence over
     rules 1–12 and 16 wherever they conflict, explicitly including rule 7's `extras_section: no`
     gate** — a safety warning is never dropped because the Extra section is disabled.
-14. **Checkpoint maintenance:** when a meaningful unit of work completes, update
-    `~/.squirrel/checkpoints/<project-slug>.md` **with no commentary in the response** — do
+14. **Checkpoint maintenance:** when a meaningful unit of work completes, update **this session's
+    own** checkpoint file — `~/.squirrel/checkpoints/<project-slug>/<session-id>.md`, named for the
+    model on the injected `Project checkpoint path:` line, to be used exactly as given and never
+    computed, guessed, or re-derived; every other file in that slug directory belongs to another
+    session and is left alone — **with no commentary in the response** — do
     not announce it, do not ask. At most **one write per turn**, and only when `Doing` or `Next`
     actually changed. Append finished items to the Done log, keeping the last 10.
     *Never describe this as happening without the user's knowledge. Tool calls are always visible in
@@ -431,8 +442,12 @@ that question 2 set as a bundle.
 
 ### `/squirrel:off` and `/squirrel:on`
 
-`/squirrel:off` writes `~/.squirrel/off/<session_id>` and confirms in one line.
-`/squirrel:on` removes it. Suppression is delivered by the `UserPromptSubmit` hook, not by an
+`/squirrel:off` cannot learn its own session id, so it writes `~/.squirrel/off/PENDING.<token>` —
+`<token>` being the opaque off-token injected at session start — and confirms in one line; the
+`UserPromptSubmit` hook recomputes that token from the `session_id` it receives and renames the
+sentinel to `~/.squirrel/off/<session_id>` on the next prompt. `/squirrel:on` writes the mirror,
+`off/CLEAR.<token>`, which the same hook claims to remove the flag (ADR-0005 Amendment P2).
+Suppression is delivered by the `UserPromptSubmit` hook, not by an
 in-conversation instruction (ADR-0005). README documents `/plugin disable squirrel@squirrel-mode`,
 then a new session, as the hard off.
 
@@ -533,8 +548,9 @@ Jira and a Jira tool is available, show a preview, get a single confirm, then cr
 
 ### Checkpoints and `/squirrel:pickup`
 
-- Location: `~/.squirrel/checkpoints/<project-slug>.md`, slug derived from the project
-  directory path. Never inside the project repo.
+- Location: `~/.squirrel/checkpoints/<project-slug>/<session-id>.md` — one file per session inside
+  a per-project slug directory, slug derived from the project directory path. Never inside the
+  project repo.
 - Max ~15 lines:
 
 ```markdown

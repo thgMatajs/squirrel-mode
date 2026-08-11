@@ -6,7 +6,7 @@ Checkpoints only pay off if they are already written when an interruption arrive
 
 - **A plugin auto-approves its own file reads and writes.** This is the kind of thing a security reviewer must find documented rather than discover in `hooks.json`, so README states it under privacy alongside the no-telemetry claim. The scope is one directory the plugin owns; nothing else is auto-approved.
 - **The gate lives in the script, not in the hook's `if` field.** `PreToolUse` accepts an `if` using permission-rule syntax, but the plugin cannot know the user's `$HOME` at build time and it is unverified whether that syntax expands `~` or `$HOME`. So `hooks.json` matches broadly on `Write|Edit|Read` and `scripts/allow-checkpoint.sh` reads `tool_input.file_path` and decides. That makes the script a security boundary, and a testable one — an `if` expression is not. This is the settled, current design, not the one first shipped: the original script preferred a top-level `file_path` over `tool_input.file_path`, which a crafted payload could exploit (see the AB1 amendment below), and until the AC1 amendment below, the field was recovered by a sed fallback when `jq` was absent, which could not parse a nested `tool_input` correctly either. Both are recorded, not scrubbed, because a security boundary's history of what it used to get wrong is part of its documentation, not an embarrassment to edit away.
-- **The script returns `allow` or `defer`, never `deny`.** Refusing a write is not this plugin's business; `defer` hands the decision back to the normal permission flow.
+- **The script either auto-approves or declines to decide, never denies.** Refusing a write is not this plugin's business; declining hands the decision back to the normal permission flow. Declining is expressed by exiting 0 with **empty stdout** — see the Amendment (v0.3.1) below, which corrects this bullet's original wording ("returns `allow` or `defer`") and the mechanism it described.
 - **Symlink trust boundary.** A symlink at `checkpoints/` or anywhere below it is rejected: only the plugin creates that directory, so a symlink there is never legitimate and would silently redirect every auto-approved write. A symlink at `~/.claude` or `~/.claude/squirrel` is trusted, because `chezmoi`, `stow` and `yadm` routinely make those symlinks and rejecting them would break checkpoint writes for every dotfile-manager user. The check is a component walk using the `[ -L ]` shell builtin, so it holds on a system with neither `realpath` nor `readlink`. An earlier revision compared `realpath` of the target against `realpath` of the checkpoint directory; that can never detect a symlink at or above the shared prefix, because both sides resolve through it and always compare equal. That code was removed rather than relabelled — dead code that reads as protection is worse than none.
 - **`file_path` is capped at 4096 bytes before any per-segment work.** It arrives as an arbitrary JSON string, not a real path, so no `PATH_MAX` bounds it, and the normalisation is quadratic in segment count: 3000 segments cost over six seconds on the author's machine, paid on every `Write` and `Edit` in the session. A path just under the cap still costs about two seconds in the worst case — bounded, and judged acceptable.
 - **The spec's "silently update the checkpoint" was corrected wherever it described our own writes.** Tool calls are always visible in the transcript. What we can guarantee is no prose about it in the response, not invisibility, and promising otherwise would have been a promise we cannot keep. The narrow rule the repo enforces: no shipped instruction or user-facing document may claim these writes are hidden from the user. Describing an *error* path as failing quietly is an unrelated and legitimate use, and stays.
@@ -107,8 +107,12 @@ precisely on the function actually implicated.
 instead of being auto-approved. This is worse, in the single dimension of convenience on a jq-less
 machine, than the behaviour it replaces. It is accepted anyway: a wrong `allow` on this boundary is
 unrecoverable (the operation already happened by the time anyone could object), while a wrong
-`defer` merely costs one permission prompt on a machine that was already missing a tool this
-project's own test suite treats as a hard prerequisite (`tests/run.sh`). `README.md` and
+decline merely costs one permission prompt on a machine that was already missing a tool this
+project's own test suite treats as a hard prerequisite (`tests/run.sh`). That "merely costs one
+permission prompt" reading became true only with the Amendment (v0.3.1) below: at the time this
+amendment was written the decline was emitted as `permissionDecision: "defer"`, which does not cost
+a prompt — it parks the tool call and stops the turn. The sentence above describes the behaviour as
+it is now, and this note records that it did not describe the behaviour as it then was. `README.md` and
 `docs/ACCEPTANCE.md`'s criterion 12 both state this cost explicitly, alongside the auto-approval
 mechanism itself, rather than leaving it implicit in this ADR alone.
 
@@ -217,3 +221,63 @@ symlink defence, the `jq` requirement all stay exactly as amended above — beca
 path that Claude Code allows a hook to decide on at all. See
 [ADR-0003](./0003-profile-outside-plugin-data.md)'s own Amendment (S11) for the new location, the
 symlink trust boundary re-derived for it, and the migration notice for anyone still on the old path.
+
+## Amendment (v0.3.1) — "defer" is a real value that pauses the session; it was never "no opinion"
+
+Every amendment above fixed a defect in *which decision* the script reaches. This one is about *how
+the decision is spoken*, and it is the more serious class: the decision logic was right and the
+emission made it harmful.
+
+`scripts/allow-checkpoint.sh` ended with a two-armed `case`. The `allow` arm printed the
+auto-approval JSON. Every other arm printed:
+
+```
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"defer"}}
+```
+
+and this ADR, `README.md`, and the script's own header all described that as handing the decision
+back to the normal permission flow "exactly as if this hook did not exist."
+
+**That was false.** `permissionDecision: "defer"` is a real Claude Code value, but it does not mean
+"this hook has no opinion." It means *defer this tool call for later*: the session pauses, the tool
+never executes, and a headless run terminates with `stop_reason: "tool_deferred"`. The documented way
+for a `PreToolUse` hook to express "no opinion, use the normal permission flow" is to **exit 0 with
+empty stdout**. Confirmed twice over — by live testing and against the official documentation —
+before any code was changed.
+
+**What it cost.** Measured with the real `claude` CLI (v2.1.227), same prompt and project, only the
+plugin varying:
+
+| scenario | no plugin | plugin as shipped | plugin with the `defer` emission removed |
+| :-- | :-- | :-- | :-- |
+| default mode, `Read` a file in cwd | `end_turn`, correct answer | `tool_deferred`, EMPTY response | `end_turn`, correct answer |
+| `--permission-mode bypassPermissions`, `Write` a file | `end_turn`, file created | `tool_deferred`, no file | `end_turn`, file created |
+| default mode, write own checkpoint | n/a | allowed, no prompt | allowed, no prompt (unchanged) |
+
+So installing this plugin broke ordinary file operations for every user, on every path this hook's
+matcher (`Write|Edit|Read`) touches — which is nearly all of them, because the matcher is broad by
+design (see the second Consequence bullet above). It also explains, retroactively, why
+`/squirrel:off`, `/squirrel:init` and `/squirrel:tune` returned completely empty responses in live
+runs: the first tool call each of them makes was being parked rather than permitted, and there was
+nothing after it.
+
+**The fix is the emission, and only the emission.** The non-`allow` arm now prints nothing and exits
+0. The `allow` arm is byte-for-byte unchanged — row 3 of the table above is the point: the
+auto-approval this whole ADR exists to design was working, and still works. `decide()` still returns
+the two internal tokens `allow` and `defer`; "defer" remains the correct word for the *concept* (this
+hook declines to decide) and is still used that way throughout the script, this ADR, and `README.md`.
+What changed is what the process writes when that concept applies.
+
+**Why every static test missed it, again, and what changed so the next one will not.** This is the
+same structural blind spot Amendment (S11) records, in a different place: every scenario in
+`tests/test_hooks.sh` asserted on the *content of a JSON decision this script printed*, so a script
+that printed a syntactically perfect, semantically catastrophic decision passed all of them. The
+suite could see the value; it could not see what the value meant one layer up. The assertions are now
+rewritten to the shape the fix actually requires — for a no-opinion outcome the suite asserts **empty
+stdout AND exit status 0**, as a conjunction, in a single helper (`assert_no_opinion`), specifically
+so no future call site can assert only the empty-stdout half that a *crashed* script would also
+satisfy. Reverting this fix by hand in a scratch copy of the repository turns 77 assertions red.
+
+`README.md`'s description of the fallback ("that write falls back to the normal permission prompt")
+needed no change: it always described the intended concept, and this fix is what finally made it
+true.

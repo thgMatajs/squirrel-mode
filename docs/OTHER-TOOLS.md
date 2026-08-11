@@ -65,12 +65,13 @@ feature set; this page states the practical consequences plainly, with no hedgin
 ## The one consequence worth knowing before you install anything
 
 All three targets read the **same** file: `~/.squirrel/profile.md`. Nothing about the path
-changes per target. This means running `/squirrel:init` **once**, in Claude Code or in Codex,
-calibrates every target installed on that machine — Cursor included, even though Cursor cannot run
-the interview itself and has no way to read the file automatically. If you want Cursor's fixed
-defaults to reflect your own calibration, run `/squirrel:init` in Claude Code or Codex first, then
-open `~/.squirrel/profile.md` and use its values to hand-edit `~/.cursor/rules/squirrel-mode.mdc`
-yourself — Cursor will never do this for you.
+changes per target. This means **one** calibration run — `/squirrel:init` in Claude Code, or asking
+Codex in plain language to run squirrel init (Codex's skills are flat-named and invoked that way,
+not as `/squirrel:`-namespaced commands) — calibrates every target installed on that machine —
+Cursor included, even though Cursor cannot run the interview itself and has no way to read the file
+automatically. If you want Cursor's fixed defaults to reflect your own calibration, calibrate in
+Claude Code or Codex first, then open `~/.squirrel/profile.md` and use its values to hand-edit
+`~/.cursor/rules/squirrel-mode.mdc` yourself — Cursor will never do this for you.
 
 Claude Code reinjects an updated `profile.md` into already-open sessions on the next prompt
 (`UserPromptSubmit` mtime check). Cursor and Codex do not get that reinjection: a tune (or hand
@@ -88,9 +89,24 @@ directory is never under `$HOME`. Neither installer ever writes inside a project
 destination path is itself a symlink, the installer **refuses** — fails loudly, changes nothing —
 instead of writing through it; see "Ownership, and the symlink refusal" under Uninstall below.
 
+Three flags exist in total, the same three on both installers: `--yes` (or `-y`) to write for real,
+`--uninstall` to reverse an install (see Uninstall below — it obeys the same dry-run-by-default
+rule), and `--help` (or `-h`) to print the full list and exit without touching anything. Any other
+argument is rejected with an error and the same list. Neither installer has a flag that skips the
+dry run's own checks or writes outside `$HOME`.
+
+Both installers resolve the files they copy relative to their own location in this repository, so
+each of the two sections below starts by cloning it. Run the target's app once first as well: each
+installer keys off that app's own config directory under `$HOME`, which the app itself creates on
+first run.
+
 ### Codex
 
+Run Codex at least once before this — it creates `~/.codex` on first run.
+
 ```sh
+git clone https://github.com/thgMatajs/squirrel-mode
+cd squirrel-mode
 targets/codex/install.sh          # dry run - prints what would change
 targets/codex/install.sh --yes    # actually install
 ```
@@ -104,8 +120,9 @@ This touches:
   installer again after editing `AGENTS.md` yourself, outside that block, updates only the block; your
   own edits elsewhere in the file survive untouched.
 - `~/.agents/skills/<name>/SKILL.md` for `digest`, `plan`, `init`, and `tune` — one file per command,
-  copied in. If Codex was never run on this machine (`~/.codex` does not exist yet), the installer
-  reports that and does nothing, without failing.
+  copied in. If Codex has not been run on this machine yet, `~/.codex` does not exist, and the
+  installer reports exactly that and does nothing, without failing — run Codex once, then re-run the
+  installer.
 - `~/.codex/.squirrel-install.lock` — a mutex directory, created immediately before any `AGENTS.md`
   read-then-write work begins and held for the rest of that run — released by the `EXIT` trap on
   every exit path (including the four-skill loop that runs after `AGENTS.md`, a failure, or a caught
@@ -114,26 +131,32 @@ This touches:
 
 ### Cursor
 
+Open Cursor at least once before this — it creates `~/.cursor` on first run.
+
 ```sh
+git clone https://github.com/thgMatajs/squirrel-mode
+cd squirrel-mode
 targets/cursor/install.sh          # dry run - prints what would change
 targets/cursor/install.sh --yes    # actually install
 ```
 
 This touches:
 
-- `~/.cursor/rules/squirrel-mode.mdc` — the always-on base rules, copied in whole. If `~/.cursor` does
-  not exist yet, the installer reports that and does nothing, without failing.
+- `~/.cursor/rules/squirrel-mode.mdc` — the always-on base rules, copied in whole. If Cursor has not
+  been run on this machine yet, `~/.cursor` does not exist, and the installer reports exactly that
+  and does nothing, without failing — open Cursor once, then re-run the installer.
 - `~/.cursor/.squirrel-install.lock` — the same lock mechanism as Codex's above, created and removed
   only during a real write (`--yes`); a dry run never creates it.
 
 `/digest` and `/plan` are **not** installed anywhere by this script, because Cursor has no user-level
-command location (see "What each target loses" above). The installer prints the two file paths and
-the one line you need:
+command location (see "What each target loses" above). Instead, every run of the installer — dry run
+included — ends by naming the two files to copy, as absolute paths inside the checkout you ran it
+from:
 
 ```
-Copy these two files into <your-project>/.cursor/commands/:
-  targets/cursor/commands/digest.md
-  targets/cursor/commands/plan.md
+Cursor commands are project-scoped - there is nowhere under $HOME to install /digest and /plan once for every project. To add them to a specific project, copy these two files into that project's .cursor/commands/ directory:
+  <your-checkout>/targets/cursor/commands/digest.md
+  <your-checkout>/targets/cursor/commands/plan.md
 ```
 
 Repeat that copy for every project where you want `/digest` and `/plan` available.

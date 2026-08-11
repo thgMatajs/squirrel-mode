@@ -421,12 +421,22 @@ home11=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home11"
 if out11c=$(HOME="$home11" "$codex_install" --yes 2>&1); then exit11c=0; else exit11c=$?; fi
 assert_eq "0" "$exit11c" "codex install.sh must exit 0 when ~/.codex does not exist -- output: $out11c"
-assert_contains "$out11c" "not appear to be installed" "codex install.sh must report that Codex is not installed, not merely exit silently"
+# RE-PINNED: this used to require the substring "not appear to be
+# installed". That wording was deliberately removed from both installers
+# because it was WRONG for the case it actually fires on - a user who HAS
+# installed Codex but has never launched it has no ~/.codex yet, and
+# telling them the app "does not appear to be installed" sends them to
+# reinstall something that is already there. Both messages now say the
+# app "has not been run on this machine yet", which is the condition the
+# missing directory genuinely proves. Pinned to the phrase the two new
+# messages SHARE, so this stays a real assertion about what the user is
+# told rather than a copy of one installer's exact sentence.
+assert_contains "$out11c" "has not been run on this machine yet" "codex install.sh must report that Codex has not been run on this machine, not merely exit silently"
 assert_file_absent "$home11/.agents" "codex install.sh must not create ~/.agents when ~/.codex is absent"
 
 if out11u=$(HOME="$home11" "$cursor_install" --yes 2>&1); then exit11u=0; else exit11u=$?; fi
 assert_eq "0" "$exit11u" "cursor install.sh must exit 0 when ~/.cursor does not exist -- output: $out11u"
-assert_contains "$out11u" "not appear to be installed" "cursor install.sh must report that Cursor is not installed, not merely exit silently"
+assert_contains "$out11u" "has not been run on this machine yet" "cursor install.sh must report that Cursor has not been run on this machine, not merely exit silently (same re-pinning as the codex assertion above)"
 assert_file_absent "$home11/.cursor" "cursor install.sh must not create ~/.cursor when it does not already exist"
 
 # ==========================================================================

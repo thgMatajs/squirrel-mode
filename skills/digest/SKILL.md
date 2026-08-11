@@ -55,6 +55,7 @@ Rules for this section:
 - Never invent a requirement that is not in the input. An empty Open questions / blockers section, left out entirely, is the honest result when nothing is genuinely unclear.
 - If the input contains more than one independent ask, digest each one separately under `## Item 1`, `## Item 2`, and so on, one full section structure per item. Never merge independent asks into one brief.
 - End the response the moment the last section is complete. No closing line, no summary of what was just done.
+- That ban covers only what this command would add on its own. It never suppresses a line the base rules license for this response - a mid-task recap line before the brief, an `Extra` section, or the one-line scope-guard flag as the final line - each of which keeps the position and order the base rules give it.
 
 ## Optional: --for-reply
 

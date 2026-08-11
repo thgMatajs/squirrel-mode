@@ -52,8 +52,16 @@
 #     exists for this project - never the checkpoint's own body text
 #     (PLAN.md is explicit that the contents are not dumped into chat).
 # It also prunes stale ~/.squirrel/off/<session_id> flag files
-# (see check-off-flag.sh) and stale per-session checkpoint files (see
-# prune_stale_session_checkpoints) so neither accumulates forever.
+# (see check-off-flag.sh), stale per-session checkpoint files (see
+# prune_stale_session_checkpoints) and stale
+# ~/.squirrel/profile-seen/<session_id> stamps (see
+# prune_stale_profile_seen) so none of the three accumulates forever.
+# Both the pruning and the "Resume available" check REFUSE to act at all
+# when ~/.squirrel/checkpoints or ~/.squirrel/checkpoints/<slug> is a
+# symlink - see checkpoint_slug_dir_untrusted, which mirrors the
+# write-side trust boundary allow-checkpoint.sh already enforces, and
+# which deliberately still permits a symlinked ~/.squirrel itself
+# (dotfile managers).
 # After injecting a REAL profile body it touches
 # ~/.squirrel/profile-seen/<sanitised-session-id> so later prompts know
 # the baseline (P3). Sanitize failure skips that touch only - SessionStart
@@ -63,13 +71,28 @@
 # Does NOT re-run prune, migration notice, off-token, checkpoint path, or
 # resume banner. Reads hook_event_name from stdin. When the event is
 # UserPromptSubmit: if profile.md is absent, print nothing (no /init nag
-# every prompt); if profile.md exists and is newer than this session's
-# seen file (or no seen file yet), emit the SAME profile framing
+# every prompt); if this session has no seen file yet, or its seen file
+# is NOT strictly newer than profile.md, emit the SAME profile framing
 # SessionStart uses for the body as PLAIN TEXT additionalContext (same
 # stdout convention as check-off-flag.sh - not SessionStart JSON), then
 # touch the seen file. Otherwise empty stdout. Sanitize failure skips
 # seen tracking and reinjection (empty stdout). emit_json stays
 # SessionStart-only.
+#
+# AN EXACT MTIME TIE REINJECTS - fixed MINOR, this cycle. The gate used
+# to be `find "$profile_file" -newer "$seen_file"`, which is STRICTLY
+# newer, so a profile.md and a seen stamp sharing an mtime silently
+# meant the tune was never propagated to that session at all - not late,
+# never. That is reachable without anything exotic: a filesystem with
+# one-second mtime granularity, or a /squirrel:tune landing in the same
+# second SessionStart touched the stamp. The gate is now the mirror
+# image, "reinject unless the seen stamp is strictly newer than
+# profile.md", so the tie falls the other way. The worst case that
+# creates is ONE redundant reinjection of a profile the session already
+# has, and it converges on the very next prompt, because touching the
+# seen file afterwards makes it strictly newer. Losing a tune forever is
+# not recoverable by the next prompt, or by any prompt; that asymmetry
+# is the whole reason the tie was moved.
 #
 # S11 MIGRATION NOTICE: squirrel-mode's data directory migrated from
 # ~/.claude/squirrel/ to ~/.squirrel/ (docs/adr/0003's Amendment (S11) -
@@ -188,8 +211,9 @@
 # PATH (correct JSON construction and field extraction, including
 # proper escaping) but every jq call has an awk fallback so a machine
 # without jq installed still gets correct behaviour, just via a
-# narrower (line-oriented for extraction, byte-oriented for escaping)
-# parser. See extract_field() and emit_json() below. The escaping
+# narrower (byte-oriented in both directions - see
+# extract_top_level_string's own list of what its scanner does not
+# cover) parser. See extract_field() and emit_json() below. The escaping
 # fallback (json_escape) runs entirely under `LC_ALL=C` so the result
 # does not depend on the invoking shell's locale - see json_escape's
 # own comment for why that matters even when jq IS present elsewhere
@@ -203,12 +227,206 @@ set -eu
 
 # --- JSON field extraction ------------------------------------------
 #
-# extract_field <json> <key>: best-effort read of a top-level string
-# field named <key> from <json>. Prefers jq; falls back to a
-# line-oriented sed scan for `"<key>": "<value>"` when jq is not on
-# PATH. The sed fallback assumes the key/value pair for a STRING field
-# sits on one line - true for both compact and pretty-printed JSON,
-# since a string value never legitimately contains a raw newline.
+# extract_top_level_string <json> <key>: prints the value of the STRING
+# field named <key> that sits at DEPTH 1 - directly inside the payload's
+# own outermost object - and prints nothing at all when there is no such
+# field. This is the no-jq path for extract_field below.
+#
+# DUPLICATED, DELIBERATELY, between scripts/load-profile.sh and
+# scripts/check-off-flag.sh, exactly as sanitize_session_id already is
+# and for the identical reason: this project forbids `source`/`.`
+# between shipped scripts, so each hook must be a single self-contained
+# file that runs correctly no matter what else is or is not installed
+# alongside it. The two copies are byte-identical and have no state; if
+# one changes, the other must be changed to match. scripts/
+# allow-checkpoint.sh deliberately does NOT get a third copy - see the
+# note inside its own extract_field for why it keeps the old scan.
+#
+# FIXED (this cycle) - what this replaces and why a scanner, not a
+# narrower pattern. The fallback used to be one sed substitution,
+# `s/.*"<key>"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p`. POSIX sed is
+# leftmost-longest, so the leading `.*` swallowed as much as it could
+# and the LAST occurrence of <key> on the line won - INCLUDING one
+# nested inside a sub-object. Reproduced with jq stripped from PATH: a
+# UserPromptSubmit payload carrying `"session_id":"sessionBBB"` at the
+# top level and `"meta":{"session_id":"sessionAAA"}` beneath it made
+# check-off-flag.sh read sessionAAA, claim another session's
+# off/PENDING.sessionAAA sentinel, and print the counter-instruction -
+# while session A's own /squirrel:off silently never took effect. The
+# same payload shape aimed at `hook_event_name` misroutes THIS script
+# between its SessionStart and UserPromptSubmit contracts. Claude Code's
+# real payloads are flat, so neither was reachable in production; both
+# files nevertheless advertise "jq: preferred, not required", which is
+# what makes closing the class the honest option rather than documenting
+# it away. It is a scanner rather than a tighter regex for the reason
+# allow-checkpoint.sh's extract_tool_input_field already records: a
+# regex matches text shapes and cannot track brace depth, so each
+# narrower pattern only shrinks the class of shapes that defeat it -
+# the same "narrower guard, same bug" outcome this project has now hit
+# seven times.
+#
+# HOW IT SCANS. One `awk` pass. The payload is SPLIT on the double-quote
+# character, which turns it into alternating OUTSIDE-a-string and
+# INSIDE-a-string segments, and the three things a regex cannot track
+# are then all derived from that split: string state, escape state, and
+# `{`/`[` nesting depth.
+#   - The split separator is written as the bracket expression `["]`,
+#     never as a bare `"`. With a SINGLE-character separator the
+#     one-true-awk shipped as /usr/bin/awk on macOS also breaks at every
+#     NEWLINE, which silently shreds any pretty-printed payload; a
+#     two-or-more-character separator takes awk's regex path and does
+#     not. Verified against that awk, gawk, and mawk.
+#   - A quote whose preceding segment ends in an ODD number of
+#     backslashes is escaped, so the string continues across it and the
+#     two segments are re-joined. That is what stops a `"` inside a
+#     value from being read as a delimiter.
+#   - ONLY the outside segments are inspected for structure, so a `{`,
+#     `}`, `[`, `]` or `:` appearing inside a value can never change the
+#     nesting depth or turn its string into a key. Depth is maintained
+#     by COUNTING the opening and closing brackets in each outside
+#     segment with `gsub`.
+#   - A string is a KEY only when the outside segment that follows it
+#     begins with `:`, and its value is a string only when that segment
+#     is EXACTLY `:` once whitespace is removed.
+#   - The value is taken only when the depth recorded at its key is
+#     exactly 1 - the key sits directly inside the payload's own
+#     outermost object. Anything nested deeper is outside what this
+#     scan looks at, which is the whole point.
+# Only the matched value is ever unescaped; keys are compared, and
+# non-matching values skipped, in their raw form.
+#
+# COST. Proportional to the payload's length plus the number of string
+# tokens in it - deliberately NOT a character-at-a-time `substr` walk
+# over the whole buffer, which is how this fix was first written and
+# which is quadratic in practice: the macOS awk's `substr` is O(length)
+# per call, and that version took 8.9 SECONDS on a single 500 KB prompt
+# (10 KB 25 ms, 100 KB 408 ms, 500 KB 8889 ms). Measured after the
+# rewrite, same machine: 500 KB 40 ms, 2 MB 91 ms, 20 000 levels of
+# nesting 109 ms, and a deliberately pathological 1 MB payload of 50 000
+# separate top-level keys 1.7 s. Those are machine-specific figures, not
+# a portable performance guarantee - the point they support is that the
+# cost no longer grows with the SQUARE of an input this hook does not
+# control. This path only runs at all when jq is absent, or when jq is
+# present and reports the field genuinely missing.
+#
+# Run entirely under `LC_ALL=C`, for the reason json_escape's own
+# comment sets out at length: BSD tools abort mid-stream on a byte that
+# is not valid UTF-8 under a UTF-8 locale (this machine's real LANG is
+# pt_BR.UTF-8), and `LC_ALL=C` makes `length`/`substr`/`split` here
+# genuinely byte-indexed so an invalid byte simply passes through
+# instead. The key is handed over through the ENVIRONMENT rather than
+# `awk -v`, because POSIX awk re-processes backslash escapes in a `-v`
+# assignment (the same trap tests/test_hooks.sh's own line_of helper
+# documents).
+#
+# WHAT IT DOES NOT DO - the residual limits, stated rather than implied:
+#   - `\uXXXX` inside a VALUE is left in the output literally, as the
+#     six bytes `\u` plus four hex digits, not decoded to a character.
+#     Decoding it means UTF-8 re-encoding and surrogate pairing in awk,
+#     which is a great deal of machinery for a shape none of the three
+#     keys this is ever called for (`session_id`, `cwd`,
+#     `hook_event_name`) carries in practice. The failure direction is
+#     closed, not open: sanitize_session_id rejects a backslash
+#     outright, and a `cwd` carrying a literal `\u` simply fails
+#     check-off-flag.sh's byte-for-byte comparison against a sentinel's
+#     contents, so a mangled value can only ever produce "no match",
+#     never a wrong match. The two-character escapes JSON defines - \"
+#     \\ \/ \b \f \n \r \t - ARE decoded.
+#   - A KEY spelled with ANY escape for one of its own characters -
+#     a `\u` sequence, or a needlessly escaped `\/` - is not recognised
+#     as that key: key names are compared in their RAW form, and a real
+#     parser would resolve the escape before matching. Same direction:
+#     the field reads as absent, never as some other field.
+#   - Two top-level occurrences of the same key: the LAST string-valued
+#     one wins, which is what jq's own object construction does, so the
+#     jq path and this path agree rather than diverging.
+#   - Malformed JSON (an unterminated string) stops the scan; nothing is
+#     printed.
+#   - `awk` absent from PATH: prints nothing and still returns 0 (the
+#     trailing `|| true`), so a missing awk degrades this to "no field
+#     found" instead of failing the hook - see the Contract paragraph in
+#     this file's header, which claims exactly that for one-at-a-time
+#     tool absence.
+extract_top_level_string() {
+  printf '%s\n' "$1" | SQUIRREL_JSON_KEY="$2" LC_ALL=C awk '
+    function take_raw(   s, seg, bs, closed) {
+      s = ""
+      while (i <= m) {
+        seg = part[i]
+        bs = 0
+        if (match(seg, /\\+$/)) { bs = RLENGTH }
+        closed = (i < m)
+        i = i + 1
+        if (closed == 0) { unterminated = 1; return s seg }
+        if (bs % 2 == 1) { s = s seg "\""; continue }
+        return s seg
+      }
+      unterminated = 1
+      return s
+    }
+    function decode(s,   out, p, nx) {
+      if (index(s, "\\") == 0) { return s }
+      out = ""
+      while (1) {
+        p = index(s, "\\")
+        if (p == 0) { return out s }
+        out = out substr(s, 1, p - 1)
+        nx = substr(s, p + 1, 1)
+        if (nx == "n") { out = out "\n" }
+        else if (nx == "t") { out = out "\t" }
+        else if (nx == "r") { out = out "\r" }
+        else if (nx == "b") { out = out sprintf("%c", 8) }
+        else if (nx == "f") { out = out sprintf("%c", 12) }
+        else if (nx == "\"") { out = out "\"" }
+        else if (nx == "\\") { out = out "\\" }
+        else if (nx == "/") { out = out "/" }
+        else { out = out "\\" nx }
+        s = substr(s, p + 2)
+      }
+    }
+    { buf = buf $0 "\n" }
+    END {
+      key = ENVIRON["SQUIRREL_JSON_KEY"]
+      m = split(buf, part, "[\"]")
+      depth = 0
+      found = 0
+      val = ""
+      have_prev = 0
+      prev_str = ""
+      prev_depth = 0
+      expect_value = 0
+      unterminated = 0
+      i = 1
+      while (i <= m) {
+        o = part[i]
+        gsub(/[ \t\r\n]/, "", o)
+        if (have_prev == 1 && substr(o, 1, 1) == ":") {
+          if (o == ":" && prev_depth == 1 && prev_str == key) { expect_value = 1 }
+        }
+        have_prev = 0
+        t = o
+        opens = gsub(/[{[]/, "", t)
+        t = o
+        closes = gsub(/[]}]/, "", t)
+        depth = depth + opens - closes
+        i = i + 1
+        if (i > m) { break }
+        raw = take_raw()
+        if (unterminated == 1) { break }
+        if (expect_value == 1) { found = 1; val = decode(raw); expect_value = 0 }
+        else { prev_str = raw; prev_depth = depth; have_prev = 1 }
+      }
+      if (found == 1) { printf "%s", val }
+    }
+  ' 2>/dev/null || true
+}
+
+# extract_field <json> <key>: best-effort read of a TOP-LEVEL string
+# field named <key> from <json>. Prefers jq (a real parser); falls back
+# to extract_top_level_string's byte scanner above when jq is not on
+# PATH, or when jq is present and reports the field absent. Both paths
+# read the top level only, so which one ran is not observable in the
+# result for any payload shape either can parse.
 extract_field() {
   json=$1
   key=$2
@@ -220,7 +438,7 @@ extract_field() {
       fi
     fi
   fi
-  printf '%s\n' "$json" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+  extract_top_level_string "$json" "$key"
 }
 
 # --- Project slug (tech-lead Decision 1 support) ---------------------
@@ -404,6 +622,65 @@ prune_stale_off_flags() {
   return 0
 }
 
+# --- Stale profile-seen stamp pruning ----------------------------------
+#
+# P3 added a THIRD per-session directory,
+# ~/.squirrel/profile-seen/<sanitised-session-id>, and shipped no pruning
+# for it, so it grew by one empty file per session forever (19 files
+# accumulated in a single afternoon of testing). This closes that, in the
+# same posture as the two pruners above: a no-op when the directory is
+# absent, every fallible step guarded, and no path through it can fail
+# the hook.
+#
+# WHY AGE ALONE IS SAFE HERE, when it explicitly is NOT for checkpoints.
+# prune_stale_session_checkpoints goes to considerable trouble to avoid a
+# pure "older than N days" rule, because a checkpoint's whole purpose is
+# to still be there after a long interruption and deleting one loses work
+# the user cannot get back. A profile-seen stamp is the opposite kind of
+# thing: it is derived, per-session bookkeeping that answers exactly one
+# question - "has THIS session already been shown the current
+# profile.md?" - and it is worthless the moment that session ends. It is
+# therefore much closer to an off-flag than to a checkpoint, and it gets
+# the off-flag's rule and threshold: `find ... -mtime +7 -exec rm -f`,
+# same idiom, same 7-day cushion so no realistically long-lived session
+# has its own still-live stamp pruned out from under it. The worst case
+# if this ever deletes a stamp too early is ONE redundant reinjection of
+# a profile that session already has, which converges on the very next
+# prompt (touching the stamp afterwards makes it strictly newer) - the
+# exact failure mode the "AN EXACT MTIME TIE REINJECTS" fix in this
+# file's header already chose deliberately, for the same reason.
+#
+# THE SYMLINK GUARD IS NOT DECORATION. `[ -d ]` follows symlinks, which
+# is precisely how the checkpoint pruner came to delete a user's own
+# files through a symlinked slug directory (see the FIXED MAJOR note on
+# prune_stale_session_checkpoints). The `[ -L ]` test below states the
+# boundary explicitly rather than leaving it to `find`'s own default:
+# profile-seen/ is created by this script alone (touch_profile_seen), so
+# a symlink AT it is never legitimate and nothing behind one gets
+# touched. A dotfile-managed symlink at ~/.squirrel ITSELF is unaffected
+# and still works, exactly as it does for the other two pruners - this
+# never looks above its own directory. Belt and braces, and deliberately
+# so: POSIX `find` does not follow a symbolic link given as an OPERAND
+# either (no -H, no -L, no trailing slash - the same property verified on
+# this machine for prune_stale_off_flags above), so the `[ -L ]` here is
+# the second of two independent reasons this cannot delete through a
+# symlink, not the only one. It is stated in the code because a boundary
+# that depends solely on a tool's default flag is one refactor away from
+# being gone.
+# The parameter is deliberately NOT named `seen_dir`: POSIX sh has no
+# function-local scope, and touch_profile_seen below uses `seen_dir` for
+# its own copy of this same path. Distinct names keep the two from ever
+# writing over each other if either is later called from somewhere new.
+prune_stale_profile_seen() {
+  profile_seen_dir=$1
+  [ -d "$profile_seen_dir" ] || return 0
+  if [ -L "$profile_seen_dir" ]; then
+    return 0
+  fi
+  find "$profile_seen_dir" -type f -mtime +7 -exec rm -f -- {} + >/dev/null 2>&1 || true
+  return 0
+}
+
 # --- Stale per-session checkpoint pruning ------------------------------
 #
 # One file per session accumulates without bound (see "P1 PER-SESSION
@@ -456,13 +733,87 @@ prune_stale_off_flags() {
 # Follows prune_stale_off_flags' posture exactly: a no-op when the
 # directory is absent, every fallible step guarded, and no path through
 # it can fail the hook.
+#
+# FIXED MAJOR (this cycle) - the pruner deleted the user's own files
+# through a symlinked slug directory. `[ -d "$slug_dir" ]` FOLLOWS
+# symlinks, so with ~/.squirrel/checkpoints/<slug> pointing at any other
+# directory, the globs below enumerated THAT directory's real files and
+# `rm -f`-ed the ones the age-and-rank rule selected. Reproduced against
+# the real hook: twelve files in an unrelated directory, one of them
+# back-dated, one SessionStart, and the back-dated file was gone. The
+# `[ ! -L ]` guards already on the candidate and peer loops could not
+# see this: they reject a symlinked ENTRY, not a symlinked CONTAINER.
+# checkpoint_slug_dir_untrusted below is the fix, and it is applied to
+# checkpoint_dir_has_any too - the identical `[ -d ]` follows the
+# identical symlink there and made "Resume available" fire on a stranger's
+# files (also reproduced).
+#
+# prune_stale_off_flags above was audited for the same mistake and is
+# genuinely NOT affected, so it is deliberately left alone rather than
+# "hardened" to look symmetrical: its `[ -d "$off_dir" ]` follows a
+# symlink exactly the same way, but the deletion is done by
+# `find "$off_dir" -type f`, and POSIX find does not follow a symbolic
+# link given as an OPERAND unless -H or -L is passed (there is no
+# trailing slash on that path to change this). Verified on this machine:
+# with ~/.squirrel/off symlinked at a directory holding a back-dated
+# file, the file survived, and the same `find` re-run with a trailing
+# slash appended DID list it - so the guard is find's own default, not
+# an accident of the fixture.
 CHECKPOINT_PRUNE_MIN_AGE_DAYS=30
 CHECKPOINT_PRUNE_KEEP_NEWEST=10
 CHECKPOINT_PRUNE_MAX_CANDIDATES=100
 
+# checkpoint_slug_dir_untrusted <slug_dir>: returns 0 (true) when
+# <slug_dir> must NOT be pruned or read as resume data, because either
+# it or the checkpoints/ directory it sits in is a SYMLINK. `[ -L ]` is
+# a POSIX shell builtin - no realpath, no readlink, no external command
+# of any kind - so this holds with an empty PATH, the same property
+# allow-checkpoint.sh's component_walk_has_symlink relies on.
+#
+# THE TRUST BOUNDARY IS THE SAME ONE, MIRRORED ONTO THE READ SIDE. See
+# "WHERE THE TRUST BOUNDARY SITS, DELIBERATELY" in
+# scripts/allow-checkpoint.sh for the argument in full; the short form:
+#   - checkpoints/ and checkpoints/<slug>/ are created by this plugin
+#     alone, and allow-checkpoint.sh already DEFERS every write that
+#     goes through a symlink at or below checkpoints/. Nothing correct
+#     can have written through one, so a symlink AT either of those two
+#     places is never legitimate and this refuses to touch what is
+#     behind it.
+#   - ~/.squirrel ITSELF, by contrast, is ordinary user configuration
+#     that dotfile managers (chezmoi, stow, yadm) routinely symlink into
+#     a dotfiles repo. That is a supported setup, not an attack, and
+#     this function never looks that far up - exactly as the write-side
+#     walk never inspects anything above checkpoints_dir. See
+#     tests/test_hooks.sh scenario 31 for the write-side regression
+#     guard and 6g7c for the read-side one.
+#
+# The parent is taken LEXICALLY, with `${slug_dir%/*}`, and that is
+# exactly checkpoints_dir at both call sites rather than approximately:
+# build_context builds <slug_dir> as "$checkpoints_dir/$slug", and
+# project_slug puts its output through `tr -c 'A-Za-z0-9._-' '-'` plus a
+# numeric hash, a character class that cannot contain "/". So there is
+# always exactly one "/" between the two, and no filesystem access is
+# needed to find it.
+checkpoint_slug_dir_untrusted() {
+  candidate_slug_dir=$1
+  if [ -L "$candidate_slug_dir" ]; then
+    return 0
+  fi
+  parent_checkpoints_dir=${candidate_slug_dir%/*}
+  if [ -n "$parent_checkpoints_dir" ] && [ "$parent_checkpoints_dir" != "$candidate_slug_dir" ]; then
+    if [ -L "$parent_checkpoints_dir" ]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 prune_stale_session_checkpoints() {
   slug_dir=$1
   [ -d "$slug_dir" ] || return 0
+  if checkpoint_slug_dir_untrusted "$slug_dir"; then
+    return 0
+  fi
 
   examined=0
   # Pathname expansion is ON for the for-lists below (portable depth-1).
@@ -503,16 +854,28 @@ prune_stale_session_checkpoints() {
 }
 
 # checkpoint_dir_has_any <dir>: true when <dir> holds at least one
-# regular file that is not a symlink. This is what drives the "Resume
-# available" line now that a project's memory lives in a directory
-# rather than in one file. A dangling symlink is not a regular file and
-# correctly does not count; a symlink to a regular file is also
-# rejected - only the plugin writes real checkpoint files here, so a
-# symlink is never legitimate resume data (same trust boundary
-# allow-checkpoint.sh enforces on the write path).
+# regular file that is not a symlink, AND <dir> is itself a directory
+# this plugin is willing to read (see checkpoint_slug_dir_untrusted).
+# This is what drives the "Resume available" line now that a project's
+# memory lives in a directory rather than in one file. A dangling
+# symlink is not a regular file and correctly does not count; a symlink
+# to a regular file is also rejected - only the plugin writes real
+# checkpoint files here, so a symlink is never legitimate resume data
+# (same trust boundary allow-checkpoint.sh enforces on the write path).
+#
+# FIXED (this cycle, alongside the pruner's MAJOR): `[ -d "$dir" ]`
+# follows symlinks, so a symlinked <slug> directory used to make the
+# per-entry `[ ! -L ]` test below run against a STRANGER'S regular
+# files and report "Resume available" for them. Reproduced against the
+# real hook with a slug directory symlinked at an unrelated folder
+# holding one ordinary .md file. The per-entry guard could not catch it
+# - it rejects a symlinked entry, not a symlinked container.
 checkpoint_dir_has_any() {
   dir=$1
   [ -d "$dir" ] || return 1
+  if checkpoint_slug_dir_untrusted "$dir"; then
+    return 1
+  fi
   for entry in "$dir"/*; do
     if [ -f "$entry" ] && [ ! -L "$entry" ]; then
       return 0
@@ -813,8 +1176,17 @@ touch_profile_seen() {
 }
 
 # handle_user_prompt_submit <input_json>: P3 reinjection path. Prints
-# plain-text profile framing when profile.md is newer than this
-# session's seen file (or no seen file yet); otherwise prints nothing.
+# plain-text profile framing UNLESS this session's seen stamp is
+# STRICTLY NEWER than profile.md - so no seen file at all reinjects, and
+# an exact mtime TIE reinjects too; otherwise prints nothing.
+#
+# The direction stated above is deliberate and is NOT the mirror of
+# itself: the gate used to be "reinject when profile.md is newer than
+# the seen stamp", which is also strictly-newer and therefore lost the
+# tie the OTHER way, dropping a tune permanently rather than late. See
+# the "AN EXACT MTIME TIE REINJECTS" paragraph in this file's header for
+# why the tie must fall this way, and the inline comment at the `find`
+# call below for what a FAILING find does under each direction.
 # Never emits SessionStart JSON. Never nags /init. Never prunes.
 handle_user_prompt_submit() {
   input=$1
@@ -830,8 +1202,22 @@ handle_user_prompt_submit() {
 
   seen_file="$home_dir/.squirrel/profile-seen/$session_id"
   if [ -f "$seen_file" ]; then
-    newer=$(find "$profile_file" -newer "$seen_file" 2>/dev/null) || newer=""
-    [ -n "$newer" ] || { printf ''; return 0; }
+    # FIXED MINOR (this cycle): the test is "is the SEEN STAMP strictly
+    # newer than profile.md", and reinjection happens unless it is - so
+    # an exact mtime TIE reinjects. It used to be the mirror image,
+    # `find "$profile_file" -newer "$seen_file"`, which is also strictly
+    # newer and therefore lost the tie the other way: a profile.md and a
+    # seen stamp landing on the same mtime (one-second filesystem
+    # granularity, or a tune written inside the same second the stamp
+    # was touched) meant the tune was NEVER propagated to that session
+    # again. See the P3 paragraph in this file's header for why a
+    # redundant reinjection is the better of the two failure modes.
+    #
+    # Note this also flips what a FAILING `find` does: seen_newer is
+    # then empty, which now means reinject rather than stay silent -
+    # the same safe direction, for the same reason.
+    seen_newer=$(find "$seen_file" -newer "$profile_file" 2>/dev/null) || seen_newer=""
+    [ -z "$seen_newer" ] || { printf ''; return 0; }
   fi
 
   profile_body=$(cat "$profile_file" 2>/dev/null) || profile_body=""
@@ -852,8 +1238,13 @@ build_context() {
   profile_file="$squirrel_dir/profile.md"
   checkpoints_dir="$squirrel_dir/checkpoints"
   off_dir="$squirrel_dir/off"
+  seen_prune_dir="$squirrel_dir/profile-seen"
 
   prune_stale_off_flags "$off_dir"
+  # Same call site as the other two pruners, and SessionStart-only for
+  # the same reason: handle_user_prompt_submit's contract is explicitly
+  # "Never prunes" (it runs on the hot path of every message).
+  prune_stale_profile_seen "$seen_prune_dir"
 
   slug=$(project_slug "$cwd")
   session_dir="$checkpoints_dir/$slug"

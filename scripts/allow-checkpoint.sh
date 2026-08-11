@@ -8,10 +8,45 @@
 # syntax cannot see the user's real $HOME at plugin-build time, and it
 # is unverified whether it even expands `~`/$HOME) - so it matches
 # broadly on Write|Edit|Read and hands the actual decision to THIS
-# script, which reads `tool_input.file_path` from stdin and returns
-# `allow` or `defer`. It never returns `deny`: denying is not this
-# hook's job, and `defer` hands the decision back to the normal
-# permission flow exactly as if this hook did not exist.
+# script, which reads `tool_input.file_path` from stdin and either
+# AUTO-APPROVES the operation or declines to decide. It never denies:
+# denying is not this hook's job, and declining hands the decision back
+# to the normal permission flow exactly as if this hook did not exist.
+#
+# HOW "NO OPINION" IS EXPRESSED - FIXED BLOCKER (v0.3.1). This script
+# used to print `{"hookSpecificOutput":{"hookEventName":"PreToolUse",
+# "permissionDecision":"defer"}}` for every non-allow case, and this
+# header, README.md and docs/adr/0002 all described that as handing the
+# decision back "exactly as if this hook did not exist". That was
+# FALSE. `defer` is a real Claude Code permissionDecision, but it does
+# not mean "no opinion" - it means "defer this tool call for LATER":
+# the session PAUSES, the tool never executes, and a headless run ends
+# with stop_reason "tool_deferred". The documented way for a PreToolUse
+# hook to express "I have no opinion, use the normal permission flow"
+# is to exit 0 with EMPTY stdout, which is what the final `case` below
+# now does.
+#
+# What that bug cost, measured on this machine with the real `claude`
+# CLI, same prompt and project, only the plugin varying:
+#
+#   scenario                                | no plugin | as shipped     | fixed
+#   default mode, Read a file in cwd        | end_turn  | tool_deferred  | end_turn
+#   bypassPermissions, Write a file         | end_turn  | tool_deferred  | end_turn
+#   default mode, write own checkpoint      | n/a       | allowed        | allowed
+#
+# So as shipped, installing this plugin broke ORDINARY file operations
+# for every user - and it is also why /squirrel:off, /squirrel:init and
+# /squirrel:tune came back completely empty in live runs: the first
+# tool call each of them makes was being parked, not permitted.
+#
+# ONLY THE NO-OPINION PATH CHANGED. The `allow` branch's JSON is
+# byte-for-byte what it always was - it was verified working by live
+# probe both before and after this fix, and was deliberately left
+# untouched. decide() below likewise still speaks in the two internal
+# tokens `allow` and `defer`; "defer" remains the right word for the
+# CONCEPT (this hook declines to decide) and is used that way
+# throughout this file. What changed is one thing: what the process
+# WRITES when that concept applies, which is now nothing at all.
 #
 # FIXED BLOCKER (S10-1): the matcher and this script originally covered
 # only Write and Edit. Every checkpoint interaction actually STARTS with
@@ -185,8 +220,18 @@
 # ever called as `if decision=$(decide ...); then ... fi`, which is
 # exempt from `set -e`, so nothing inside it can make this script exit
 # non-zero. Whatever decide() does or does not manage to print, the
-# final `case` below always emits exactly one well-formed JSON decision
-# and this script always exits 0 - PROVIDED decide() returns AT ALL.
+# final `case` below always emits exactly ONE OF THE TWO WELL-FORMED
+# OUTCOMES - a single line of `allow` JSON, or nothing at all - and this
+# script always exits 0, PROVIDED decide() returns AT ALL.
+#
+# NARROWED BY THE v0.3.1 EMISSION FIX: this paragraph used to say the
+# final `case` "always emits exactly one well-formed JSON decision".
+# That is no longer true and is not restated as though it were - the
+# no-opinion path now emits NO JSON, by design (see "HOW 'NO OPINION' IS
+# EXPRESSED" above). The property that actually still holds, and the one
+# every caller depends on, is the one stated above: exactly one of the
+# two outcomes, always exit 0. An empty stdout from this hook is a
+# COMPLETE, well-formed answer, not a truncated one.
 #
 # CORRECTED CLAIM (cycle-3 review, AD1): the paragraph above used to stop
 # at "always exits 0", stated with no qualification. That is false for
@@ -209,7 +254,8 @@
 # buys.
 #
 # The honest, correctable claim: this script's "always exits 0, always
-# exactly one well-formed JSON decision" contract holds for every command
+# exactly one of the two well-formed outcomes" contract holds for every
+# command
 # FAILURE it depends on - `jq` exiting non-zero, `jq` exiting 0 with no
 # output, and `jq` printing the literal string `null` are all reproduced
 # (this fix) to defer correctly in well under a second (112-272ms,
@@ -360,6 +406,35 @@ extract_field() {
   # anywhere in the payload," a property this function has always had
   # and that AC1 was never asked to change. Scope kept precisely to the
   # function actually implicated.
+  #
+  # THE THREE COPIES HAVE DELIBERATELY DIVERGED - recorded here so the
+  # divergence is written down rather than discovered later. The sibling
+  # scripts' extract_field (load-profile.sh, check-off-flag.sh) no longer
+  # has this sed fallback at all: it now calls a top-level-only awk byte
+  # scanner, extract_top_level_string, because the greedy scan below
+  # binds the LAST occurrence of a key on the line - including one nested
+  # inside a sub-object - which in check-off-flag.sh let a crafted
+  # payload steal another session's off-switch sentinel with jq absent.
+  # THIS file keeps the old scan, on purpose, for three reasons, each
+  # re-verified rather than assumed:
+  #   (a) It is called for exactly one key, `tool_name`, at one call site
+  #       in decide() below. `file_path` never comes through here - it
+  #       comes through extract_tool_input_field, which has no fallback.
+  #   (b) So no `allow` decision can be reached on the strength of this
+  #       function's scan. With jq stripped from PATH,
+  #       extract_tool_input_field returns empty, file_path fails the
+  #       `case ... in /*)` test, and decide() defers. Confirmed by
+  #       running this script both ways against a legitimate nested
+  #       checkpoint Write: jq absent defers, jq present allows.
+  #   (c) tests/test_hooks.sh scenarios 16/17 build HISTORICAL,
+  #       pre-AB1-shaped mutant decide() bodies that call this function
+  #       for `file_path` precisely to simulate "reads file_path from
+  #       anywhere in the payload" while proving an older, different bug.
+  #       Narrowing this function to the top level would empty their
+  #       file_path and turn those proofs green-for-the-wrong-reason.
+  # If a future change ever routes a security-relevant key through this
+  # function, that reasoning expires with it and the scanner must be
+  # copied in here too.
   json=$1
   key=$2
   if command -v jq >/dev/null 2>&1; then
@@ -640,12 +715,19 @@ else
   decision="defer"
 fi
 
+# THE EMISSION LAYER (see "HOW 'NO OPINION' IS EXPRESSED" in the header).
+# decide() still speaks in the two internal tokens `allow` and `defer`;
+# only the translation into what this process actually WRITES changed.
+# The `allow` arm is byte-for-byte the JSON it has always been - it is
+# the verified-working half and was deliberately not touched. The
+# no-opinion arm prints NOTHING at all, which is the documented way for
+# a PreToolUse hook to decline to decide.
 case "$decision" in
   allow)
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: operation targets its own checkpoint directory (ADR-0002)."}}\n'
     ;;
   *)
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"defer"}}\n'
+    :
     ;;
 esac
 exit 0

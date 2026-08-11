@@ -183,14 +183,18 @@ agents_skills_dir="$home_dir/.agents/skills"
 
 # --- Host detection, scoped to the AGENTS.md step only ------------------
 #
-# ~/.codex existing is this script's signal that Codex is installed on
-# this machine (PLAN.md's own verified fact: Codex reads AGENTS.md
-# layered from ~/.codex/ down to cwd, so ~/.codex/ is where its global
-# layer lives).
+# ~/.codex existing is this script's signal that Codex has been RUN at
+# least once on this machine (PLAN.md's own verified fact: Codex reads
+# AGENTS.md layered from ~/.codex/ down to cwd, so ~/.codex/ is where
+# its global layer lives). It is deliberately not read as a signal that
+# Codex is or is not installed: Codex creates that directory on first
+# run, so an installed-but-never-launched Codex looks identical to an
+# absent one here, and the message below names the condition this check
+# can actually distinguish rather than the one it cannot.
 #
 # For INSTALL, its absence is reported, not treated as a failure: exit
 # 0, do nothing at all (including the skills below), so a machine that
-# simply does not have Codex installed is not blocked by running this
+# has no Codex layer to install into is not blocked by running this
 # script by mistake (or as part of a script that installs into every
 # target unconditionally). This is unchanged from before.
 #
@@ -208,7 +212,7 @@ if [ -d "$codex_home" ]; then
 fi
 
 if [ "$action" = "install" ] && [ "$codex_home_present" = "no" ]; then
-  echo "Codex home directory not found at $codex_home - Codex does not appear to be installed on this machine. Nothing to do."
+  echo "Codex home directory not found at $codex_home - Codex creates that directory the first time it runs, so it has not been run on this machine yet (installing Codex is not enough on its own). There is nothing to install into: run Codex once, then re-run this script."
   exit 0
 fi
 

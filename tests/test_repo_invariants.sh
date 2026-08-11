@@ -1370,7 +1370,8 @@ assert_eq "no" "$mutant_paraphrase13_caught" "DEMONSTRATION, not a defect (invar
 #       purpose to exercise scripts/load-profile.sh's migration-detection
 #       feature. This does NOT excuse tests/*.sh from actually testing the
 #       new ~/.squirrel/ boundary — that correctness is enforced by
-#       tests/test_hooks.sh's own decision-outcome assertions (allow/defer
+#       tests/test_hooks.sh's own decision-outcome assertions (the allow
+#       JSON, and the empty-stdout-plus-exit-0 no-opinion outcome, both
 #       against the real, current checkpoints_dir), not by this scan.
 #
 #   (b) scripts/load-profile.sh's migration notice — the ONE place this
@@ -2276,9 +2277,14 @@ extract_manual_number_set() {
   # set_subset_violations()'s own return value), not a silent miss, and
   # not the same "compare two whole strings and spot the diff yourself"
   # experience equality gave. Today's real text has no such stray mention
-  # after the anchor (verified: every number named after "N remain
-  # `manual`" — 3, 6, 7, 8, 9, 13, 10, 12 — is a criterion that is
-  # genuinely `manual`), so this does not fire against the shipped
+  # after the anchor (verified against the CURRENT document, v0.3.1: the
+  # numbers named after "N remain `manual`" are 6, 8, 9, 10, 12 and 13,
+  # every one of them genuinely `manual`. The list this comment carried
+  # before — 3, 6, 7, 8, 9, 13, 10, 12 — described the PREVIOUS document,
+  # in which 3 and 7 were still `manual`; both have since moved to
+  # `observed` and both dropped out of this span, which is why the
+  # containment check did not start firing when they moved), so this does
+  # not fire against the shipped
   # document; a future edit that introduces one would need to either fix
   # the wrong reference or move the anchor/comment deliberately, exactly
   # the same remedy this file's header already prescribes for the
@@ -2808,25 +2814,41 @@ assert_eq "met" "$sanity_indword15" "FAILURE PROOF (invariant 15, extract_status
 # FAILURE PROOF (invariant 15, Fix 2, `observed`) — the tech lead's exact
 # reproduction: rewrite the parenthetical to name a WRONG criterion (16,
 # which is `met`) in place of a real one (14), leaving the leading count
-# "4" untouched so 15b's count-only check stays green. All four mutations
+# untouched so 15b's count-only check stays green. All four mutations
 # below run against $tally_flat15 (the ALREADY-FLATTENED tally text, the
 # exact input extract_observed_number_set()/extract_manual_number_set()
 # themselves consume) rather than against the raw, multi-line
-# $acceptance_content — the real document happens to hard-wrap the manual
-# clause's number list mid-phrase (see docs/ACCEPTANCE.md around line
-# 1167-1168), and pinning a literal string to that incidental wrap point
-# would make this proof brittle to the next unrelated re-wrap, exactly the
-# fragility this build's own history warns against. Testing at the
-# flattened-text level still exercises the real functions under test
-# end-to-end; get_tally_paragraph()/flatten_acceptance_section()'s own
-# line-join behavior is separately proved elsewhere (invariant 13's
+# $acceptance_content — the real document hard-wraps the tally paragraph
+# at whatever column the prose happens to reach (see the tally paragraph
+# near the end of docs/ACCEPTANCE.md, in the "Summary" section, whose
+# `observed` clause currently breaks mid-sentence immediately after the
+# parenthetical), and pinning a literal string to an incidental wrap
+# point would make this proof brittle to the next unrelated re-wrap,
+# exactly the fragility this build's own history warns against. Testing
+# at the flattened-text level still exercises the real functions under
+# test end-to-end; get_tally_paragraph()/flatten_acceptance_section()'s
+# own line-join behavior is separately proved elsewhere (invariant 13's
 # mutation proofs, and this invariant's own mutation 3 above).
+#
+# RE-PINNED (v0.3.1): every literal below quoted the PREVIOUS tally text
+# and rotted the moment docs/ACCEPTANCE.md's statuses and tally were
+# rewritten - 13 assertions went red while every real check (15a's
+# section-vs-table agreement, 15b's counts, the `observed` set equality,
+# the `manual` containment, invariants 12/13, the glossary scans) stayed
+# green. That split is the point, and it is exactly what this fixture's
+# own comment predicts: the rot was confined to the mutation fixtures'
+# hardcoded anchors, which by construction must quote the document
+# verbatim to mutate it, and never reached anything that checks the
+# document's actual truth. The literals are re-derived from the current
+# document below; the fixture's SHAPE - what each mutation does and why -
+# is unchanged, and each one is re-verified to still fail for its own
+# original reason rather than merely to parse.
 # ==========================================================================
 # shellcheck disable=SC2016 # single-quoted deliberately, both below:
 # literal backtick-quoted phrases, not substitution.
-tally_old_observed_phrase='7 (criteria 4, 5, 11, 14, 20, 21, 22) are `observed`'
+tally_old_observed_phrase='9 (criteria 3, 4, 5, 7, 11, 14, 20, 21, 22) are `observed`'
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
-tally_falseenum_observed_phrase='7 (criteria 4, 5, 11, 16, 20, 21, 22) are `observed`'
+tally_falseenum_observed_phrase='9 (criteria 3, 4, 5, 7, 11, 16, 20, 21, 22) are `observed`'
 
 tally_observed_anchor_hits15=$(printf '%s' "$tally_flat15" | grep -oF -- "$tally_old_observed_phrase" | wc -l | tr -d ' ')
 assert_eq "1" "$tally_observed_anchor_hits15" "sanity (invariant 15, Fix 2 proof, observed): the tally paragraph's observed clause must appear exactly once in the flattened tally text, or this mutation proof is not well-defined"
@@ -2835,39 +2857,48 @@ mutant15_falseenum_observed_flat=$(mutate_first_literal "$tally_flat15" "$tally_
 mutant15_falseenum_observed_changed=$([ "$mutant15_falseenum_observed_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_falseenum_observed_changed" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must actually change the flattened tally text, or this proof is not well-defined"
 
-# 15b (count-only) must NOT catch this — the count is still "7" — proving
+# 15b (count-only) must NOT catch this — the count is still "9" — proving
 # the gap Fix 2 exists to close, not merely re-demonstrating 15b.
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
 mutant15_falseenum_observed_count=$(printf '%s\n' "$mutant15_falseenum_observed_flat" | grep -oE '[0-9]+ \(criteria[^)]*\) are `observed`' | head -n 1 | awk '{print $1}')
-assert_eq "7" "$mutant15_falseenum_observed_count" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must leave the leading count at 7, or this is not the count-preserving defeat it claims to be"
+assert_eq "9" "$mutant15_falseenum_observed_count" "sanity (invariant 15, Fix 2 proof, observed): the false-enumeration mutation must leave the leading count at 9, or this is not the count-preserving defeat it claims to be"
 
 mutant15_falseenum_observed_set=$(extract_observed_number_set "$mutant15_falseenum_observed_flat")
 falseenum_observed_caught=$([ "$mutant15_falseenum_observed_set" != "$s15_observed_set" ] && echo yes || echo no)
 assert_eq "yes" "$falseenum_observed_caught" "FAILURE PROOF (invariant 15, Fix 2): renaming ONE number inside the \`observed\` parenthetical (14 -> 16, count left at 7) must be caught — the mutated tally's enumerated set must no longer equal the real \`observed\` set"
 
 # LEGITIMATE REWORDING, same true facts, must still pass. Reorders the
-# parenthetical's numbers and drops the serial "and" — a plausible future
-# copy-edit that changes nothing about which criteria are `observed`.
+# parenthetical's numbers (descending instead of ascending) — a plausible
+# future copy-edit that changes nothing about which criteria are
+# `observed`.
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
-tally_reworded_observed_phrase='7 (criteria 22, 21, 20, 14, 11, 5, 4) are `observed`'
+tally_reworded_observed_phrase='9 (criteria 22, 21, 20, 14, 11, 7, 5, 4, 3) are `observed`'
 mutant15_reword_observed_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_observed_phrase" "$tally_reworded_observed_phrase")
 mutant15_reword_observed_changed=$([ "$mutant15_reword_observed_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_reword_observed_changed" "sanity (invariant 15, Fix 2 proof, observed): the legitimate-rewording mutation must actually change the flattened tally text, or this proof is not well-defined"
 mutant15_reword_observed_set=$(extract_observed_number_set "$mutant15_reword_observed_flat")
-assert_eq "$s15_observed_set" "$mutant15_reword_observed_set" "LEGITIMATE REWORDING (invariant 15, Fix 2, observed): reordering the SAME seven numbers in the parenthetical, and dropping the serial \"and\", must still be recognized as the identical \`observed\` set — a guard that rejects this is a guard that blocks correct work"
+assert_eq "$s15_observed_set" "$mutant15_reword_observed_set" "LEGITIMATE REWORDING (invariant 15, Fix 2, observed): reordering the SAME nine numbers in the parenthetical (descending instead of ascending) must still be recognized as the identical \`observed\` set — a guard that rejects this is a guard that blocks correct work"
 
 # ==========================================================================
 # FAILURE PROOF (invariant 15, Fix 2, `manual`) — the tech lead's exact
 # reproduction applied to the manual span: swap ONE real manual criterion
 # number (13) for a criterion that is NOT manual (11, which is `observed`),
-# leaving the leading count "8" and every other number untouched. Same
-# flattened-text scoping rationale as the `observed` block above.
+# leaving the leading count and every other number untouched. Same
+# flattened-text scoping rationale as the `observed` block above, and the
+# same v0.3.1 re-pinning note.
+#
+# The anchor below deliberately stops at the number list rather than
+# extending into the sentence that follows it: the current document's
+# manual clause reads "6 remain `manual`: criteria 6, 8, 9, 10, 12, and
+# 13." and that number list appears exactly once in the flattened tally
+# text (asserted immediately below, not assumed), which is all this
+# fixture's shape needs.
 # ==========================================================================
 # shellcheck disable=SC2016 # single-quoted deliberately, both below:
 # literal backtick-quoted phrases, not substitution.
-tally_old_manual_phrase='criteria 3, 6, 7, 8, 9, and 13 in full'
+tally_old_manual_phrase='criteria 6, 8, 9, 10, 12, and 13'
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted phrase, not substitution.
-tally_falseenum_manual_phrase='criteria 3, 6, 7, 8, 9, and 11 in full'
+tally_falseenum_manual_phrase='criteria 6, 8, 9, 10, 12, and 11'
 
 tally_manual_anchor_hits15=$(printf '%s' "$tally_flat15" | grep -oF -- "$tally_old_manual_phrase" | wc -l | tr -d ' ')
 assert_eq "1" "$tally_manual_anchor_hits15" "sanity (invariant 15, Fix 2 proof, manual): the tally paragraph's manual list phrase must appear exactly once in the flattened tally text, or this mutation proof is not well-defined"
@@ -2877,15 +2908,15 @@ mutant15_falseenum_manual_changed=$([ "$mutant15_falseenum_manual_flat" != "$tal
 assert_eq "yes" "$mutant15_falseenum_manual_changed" "sanity (invariant 15, Fix 2 proof, manual): the false-enumeration mutation must actually change the flattened tally text, or this proof is not well-defined"
 
 # 15b (count-only) must NOT catch this — still 6 numbers in the clause and
-# the leading "8 remain `manual`" count is untouched — proving the gap Fix
+# the leading "6 remain `manual`" count is untouched — proving the gap Fix
 # 2 closes, not merely re-demonstrating 15b.
 # shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
 mutant15_falseenum_manual_count=$(printf '%s\n' "$mutant15_falseenum_manual_flat" | grep -oE '[0-9]+ remain `manual`' | head -n 1 | awk '{print $1}')
-assert_eq "8" "$mutant15_falseenum_manual_count" "sanity (invariant 15, Fix 2 proof, manual): the false-enumeration mutation must leave the leading count at 8, or this is not the count-preserving defeat it claims to be"
+assert_eq "6" "$mutant15_falseenum_manual_count" "sanity (invariant 15, Fix 2 proof, manual): the false-enumeration mutation must leave the leading count at 6, or this is not the count-preserving defeat it claims to be"
 
 mutant15_falseenum_manual_set=$(extract_manual_number_set "$mutant15_falseenum_manual_flat")
 mutant15_falseenum_manual_violations=$(set_subset_violations "$mutant15_falseenum_manual_set" "$s15_manual_set")
-assert_eq "11" "$mutant15_falseenum_manual_violations" "FAILURE PROOF (invariant 15, Fix 2, manual containment): renaming ONE number inside the \`manual\` list (13 -> 11, count left at 8) must be caught and NAMED - 11 is genuinely \`observed\`, not \`manual\`, so the containment check names 11 directly, rather than reporting two whole sets and leaving a human to diff them"
+assert_eq "11" "$mutant15_falseenum_manual_violations" "FAILURE PROOF (invariant 15, Fix 2, manual containment): renaming ONE number inside the \`manual\` list (13 -> 11, count left at 6) must be caught and NAMED - 11 is genuinely \`observed\`, not \`manual\`, so the containment check names 11 directly, rather than reporting two whole sets and leaving a human to diff them"
 
 # LEGITIMATE REWORDING 1/4 (reordering), same true facts, must still pass
 # CLEAN under containment. Reorders the same six numbers in the main
@@ -2895,7 +2926,7 @@ assert_eq "11" "$mutant15_falseenum_manual_violations" "FAILURE PROOF (invariant
 # criterion-7 note) is untouched. This one would also have passed under
 # cycle 2's set EQUALITY — it is re-run here so all four legitimate cases
 # are proved together, against the SAME comparison the shipped code uses.
-tally_reworded_manual_phrase='criteria 13, 3, 6, 7, 8, and 9 in full'
+tally_reworded_manual_phrase='criteria 13, 6, 8, 9, 10, and 12'
 mutant15_reword_manual_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_manual_phrase" "$tally_reworded_manual_phrase")
 mutant15_reword_manual_changed=$([ "$mutant15_reword_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_reword_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, reordering): the legitimate-rewording mutation must actually change the flattened tally text, or this proof is not well-defined"
@@ -2904,37 +2935,71 @@ mutant15_reword_manual_violations=$(set_subset_violations "$mutant15_reword_manu
 assert_eq "" "$mutant15_reword_manual_violations" "LEGITIMATE REWORDING 1/4 (invariant 15, Fix 2, manual, reordering): reordering the SAME six numbers in the main manual list (13 moved to the front), leaving the rest of the span alone, must pass CLEAN under containment — a guard that rejects this is a guard that blocks correct work"
 
 # LEGITIMATE REWORDING 2/4 (elliptical range) — the review's own
-# reproduction. "6 through 9" collapses FOUR literal numbers (6, 7, 8, 9)
-# into a phrase extract_criteria_numbers() cannot expand — its regex only
-# ever consumes digits it can literally see, joined by ", "/" and "; the
-# word "through" is not a joiner it recognizes — so the extracted set
-# legitimately SHRINKS to a proper subset of the true set (verified below,
-# not assumed). Set EQUALITY (cycle 2) rejected this outright; CONTAINMENT
+# reproduction, re-derived for the current manual set. "8 through 10"
+# collapses THREE literal numbers (8, 9, 10) into a phrase
+# extract_criteria_numbers() cannot expand — its regex only ever consumes
+# digits it can literally see, joined by ", "/" and "; the word "through"
+# is not a joiner it recognizes — so the extracted set legitimately
+# SHRINKS to a proper subset of the true set (verified below, not
+# assumed). Set EQUALITY (cycle 2) rejected this outright; CONTAINMENT
 # (cycle 3) does not, because every number the under-extraction DOES find
 # is still genuinely `manual`.
-tally_reworded2_manual_phrase='criteria 3 and 6 through 9, plus 13, in full'
+tally_reworded2_manual_phrase='criteria 6 and 8 through 10, plus 12 and 13'
 mutant15_reword2_manual_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_manual_phrase" "$tally_reworded2_manual_phrase")
 mutant15_reword2_manual_changed=$([ "$mutant15_reword2_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_reword2_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, range wording): the '6 through 9' rewording must actually change the flattened tally text, or this proof is not well-defined"
 mutant15_reword2_manual_set=$(extract_manual_number_set "$mutant15_reword2_manual_flat")
-mutant15_reword2_manual_underextracts=$([ "$mutant15_reword2_manual_set" != "$s15_manual_set" ] && echo yes || echo no)
-assert_eq "yes" "$mutant15_reword2_manual_underextracts" "sanity (invariant 15, Fix 2 proof, manual, range wording): '6 through 9' must genuinely extract a PROPER SUBSET of the real set (not the full set) — otherwise this proof is not exercising containment's own reason to exist, since set equality would already pass a full-set match trivially"
+
+# WHERE THE UNDER-EXTRACTION IS NOW OBSERVABLE, and why this sanity check
+# moved (v0.3.1 re-pinning). This assertion used to measure the range
+# wording's under-extraction against the WHOLE flattened tally paragraph,
+# and that worked only because of an accident of the document's prose at
+# the time. It stopped working, and the reason is worth recording rather
+# than papering over: the current manual span names every one of its six
+# criteria AGAIN, individually, in the sentences that follow the list
+# ("Criteria 8 and 13 are `manual` in full...", "Criterion 6's
+# seven-question interview...", "Criterion 9's off-switch...", "Criterion
+# 10 is held...", "criterion 12 **moved twice**"). extract_manual_number_set
+# deliberately reads to the END OF THE PARAGRAPH (see its own header for
+# why one-sentence bounding would itself be a guard that blocks correct
+# work), so it recovers every number from that prose no matter what the
+# list says - collapsing numbers in the LIST can no longer shrink the
+# PARAGRAPH's extracted set at all.
+#
+# That does not weaken containment; it is containment working. But it does
+# mean the whole-paragraph text can no longer demonstrate under-extraction,
+# so the sanity check is applied where under-extraction is real: to the
+# reworded CLAUSE in isolation, wearing the same "N remain `manual`" anchor
+# extract_manual_number_set keys on. Verified, not assumed - the clause
+# alone yields {6, 8}, because "through" is not a joiner the extraction
+# grammar recognizes. The containment assertion immediately below still
+# runs against the FULL flattened text, unchanged, because "a legitimate
+# rewording of the real document must not be rejected" is a claim about
+# the real document.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal backtick-quoted status word, not substitution.
+mutant15_reword2_isolated='6 remain `manual`: criteria 6 and 8 through 10, plus 12 and 13.'
+mutant15_reword2_isolated_set=$(extract_manual_number_set "$mutant15_reword2_isolated")
+mutant15_reword2_manual_underextracts=$([ -n "$mutant15_reword2_isolated_set" ] && [ "$mutant15_reword2_isolated_set" != "$s15_manual_set" ] && echo yes || echo no)
+assert_eq "yes" "$mutant15_reword2_manual_underextracts" "sanity (invariant 15, Fix 2 proof, manual, range wording): '8 through 10' must genuinely extract a NON-EMPTY PROPER SUBSET of the real set when the reworded clause is read on its own — otherwise this proof is not exercising containment's own reason to exist, since set equality would already pass a full-set match trivially"
+mutant15_reword2_isolated_violations=$(set_subset_violations "$mutant15_reword2_isolated_set" "$s15_manual_set")
+assert_eq "" "$mutant15_reword2_isolated_violations" "LEGITIMATE REWORDING 2/4 (invariant 15, Fix 2, manual, range wording, isolated): the under-extracted set the range wording actually produces must pass CLEAN under containment — this is the assertion set EQUALITY would have failed, and the whole reason containment replaced it"
+
 mutant15_reword2_manual_violations=$(set_subset_violations "$mutant15_reword2_manual_set" "$s15_manual_set")
-assert_eq "" "$mutant15_reword2_manual_violations" "LEGITIMATE REWORDING 2/4 (invariant 15, Fix 2, manual, range wording): 'criteria 3 and 6 through 9, plus 13, in full' — a legitimate rewording set EQUALITY would have rejected because it under-extracts — must pass CLEAN under containment, since every number it DOES find is genuinely \`manual\`"
+assert_eq "" "$mutant15_reword2_manual_violations" "LEGITIMATE REWORDING 2/4 (invariant 15, Fix 2, manual, range wording): 'criteria 6 and 8 through 10, plus 12 and 13' — a legitimate rewording set EQUALITY would have rejected because it under-extracts — must pass CLEAN under containment, since every number it DOES find is genuinely \`manual\`"
 
 # LEGITIMATE REWORDING 3/4 (semicolon restructure) — extract_criteria_numbers()'s
 # continuation grammar only recognizes ", "/" and " as joiners, never ";",
 # so this under-extracts even harder than the range wording above (down to
-# a single number, "3" — verified below, not assumed). Same containment
-# argument, taken further.
-tally_reworded3_manual_phrase='criteria 3; 6; 7; 8; 9; and 13'
+# a single number, "6" — verified below to be non-empty, not assumed).
+# Same containment argument, taken further.
+tally_reworded3_manual_phrase='criteria 6; 8; 9; 10; 12; and 13'
 mutant15_reword3_manual_flat=$(mutate_first_literal "$tally_flat15" "$tally_old_manual_phrase" "$tally_reworded3_manual_phrase")
 mutant15_reword3_manual_changed=$([ "$mutant15_reword3_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_reword3_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, semicolon restructure): the semicolon rewording must actually change the flattened tally text, or this proof is not well-defined"
 mutant15_reword3_manual_set=$(extract_manual_number_set "$mutant15_reword3_manual_flat")
 assert_eq "yes" "$([ -n "$mutant15_reword3_manual_set" ] && echo yes || echo no)" "sanity (invariant 15, Fix 2 proof, manual, semicolon restructure): the semicolon rewording must still yield at least one criterion number, or this proof is not well-defined"
 mutant15_reword3_manual_violations=$(set_subset_violations "$mutant15_reword3_manual_set" "$s15_manual_set")
-assert_eq "" "$mutant15_reword3_manual_violations" "LEGITIMATE REWORDING 3/4 (invariant 15, Fix 2, manual, semicolon restructure): 'criteria 3; 6; 7; 8; 9; and 13' — semicolons instead of commas, states the same true facts — must pass CLEAN under containment even though this under-extracts far more severely than the range wording above"
+assert_eq "" "$mutant15_reword3_manual_violations" "LEGITIMATE REWORDING 3/4 (invariant 15, Fix 2, manual, semicolon restructure): 'criteria 6; 8; 9; 10; 12; and 13' — semicolons instead of commas, states the same true facts — must pass CLEAN under containment even though this under-extracts far more severely than the range wording above"
 
 # LEGITIMATE REWORDING 4/4 (added explanatory sentence) — appended at the
 # end of the same paragraph, mentioning ANOTHER criterion by number (8) —
@@ -2945,6 +3010,10 @@ assert_eq "" "$mutant15_reword3_manual_violations" "LEGITIMATE REWORDING 3/4 (in
 # extract_manual_number_set()'s own header comment (mentioning a
 # NON-manual criterion this way WOULD legitimately fail; this sentence
 # deliberately mentions a criterion that IS manual, so it must not).
+# Criterion 8 is still genuinely `manual` in the current document, so this
+# variant needed no re-derivation in the v0.3.1 re-pinning - re-verified
+# against the new manual set (6, 8, 9, 10, 12, 13) rather than assumed to
+# have survived.
 mutant15_addsentence_manual_flat="$tally_flat15 This same shape of gap recurs in criterion 8's own section as well."
 mutant15_addsentence_manual_changed=$([ "$mutant15_addsentence_manual_flat" != "$tally_flat15" ] && echo yes || echo no)
 assert_eq "yes" "$mutant15_addsentence_manual_changed" "sanity (invariant 15, Fix 2 proof, manual, added sentence): appending the explanatory sentence must actually change the flattened tally text, or this proof is not well-defined"

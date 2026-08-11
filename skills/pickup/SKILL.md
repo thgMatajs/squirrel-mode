@@ -59,6 +59,8 @@ Omit the Open decisions section entirely when the checkpoint lists none. Never p
 
 Do not add a suggestion, a question, or a "shall we continue?" after Open decisions. The whole point of showing recent wins first is to hand the decision of what to do next back to the user, not to make it for them. Stop the moment the fixed output above is complete.
 
+This bans only what this command would add on its own. It never suppresses a line the base rules license for this response - a mid-task recap line before Recent wins, an `Extra` section, the one-line checkpoint-failure report, or the scope-guard flag as the final line - each of which keeps the position and order the base rules give it.
+
 ## Respecting the profile
 
 Any list here, Recent wins or Open decisions, respects `max_list_items` if the folded result happens to hold more entries than that. The cap matters more now than it did when one file held everything: each checkpoint file keeps only its own last 10 Done log entries, so folding several of them together can produce a long list even though no single file is long. Apply `max_list_items` to the folded list, keeping the newest entries.

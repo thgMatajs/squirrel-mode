@@ -169,15 +169,21 @@ source_commands_dir="$repo_root/targets/cursor/commands"
 
 # --- Host detection --------------------------------------------------
 #
-# ~/.cursor existing is this script's signal that Cursor is installed
-# on this machine. Its absence is reported, not treated as a failure:
-# exit 0, do nothing. Unlike Codex, Cursor has nothing this script
+# ~/.cursor existing is this script's signal that Cursor has been RUN
+# at least once on this machine - not that it is installed, which this
+# check cannot tell apart: Cursor creates that directory on first run,
+# so an installed-but-never-opened Cursor looks identical to an absent
+# one here, and the message below names only the condition the check
+# can actually distinguish. Its absence is reported, not treated as a
+# failure: exit 0, do nothing. Because this gate covers uninstall too
+# (see below), the message covers both actions.
+# Unlike Codex, Cursor has nothing this script
 # manages OUTSIDE ~/.cursor (there is no separate skills tree the way
 # Codex has ~/.agents/skills/), so - unlike targets/codex/install.sh -
 # this gate applies identically to both install and uninstall: there is
 # never anything left to strand.
 if [ ! -d "$cursor_home" ]; then
-  echo "Cursor home directory not found at $cursor_home - Cursor does not appear to be installed on this machine. Nothing to do."
+  echo "Cursor home directory not found at $cursor_home - Cursor creates that directory the first time it runs, so it has not been run on this machine yet (installing Cursor is not enough on its own). There is nothing here to install into, and nothing to uninstall; if you are installing, open Cursor once, then re-run this script."
   exit 0
 fi
 

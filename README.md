@@ -32,23 +32,35 @@ mid-conversation, so editing rules first is the wrong place to look.
 
 ### Codex
 
+Run Codex at least once first — it creates `~/.codex` on first run, and the installer needs that
+directory to exist. Then clone this repository; the installer reads its sources from a checkout.
+
 ```sh
+git clone https://github.com/thgMatajs/squirrel-mode
+cd squirrel-mode
 targets/codex/install.sh          # dry run - shows what would change
 targets/codex/install.sh --yes    # actually install
 ```
 
 Adds a delimited block to `~/.codex/AGENTS.md` and four skills under `~/.agents/skills/`. Dry-run
-by default, POSIX `sh`, never touches a project repository. Full detail, and what Codex loses
+by default, POSIX `sh`, never touches a project repository. `targets/codex/install.sh --uninstall`
+reverses it, on the same dry-run-by-default terms. Full detail, and what Codex loses
 compared to Claude Code, in [docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md).
 
 ### Cursor
 
+Open Cursor at least once first — it creates `~/.cursor` on first run, and the installer needs that
+directory to exist. Then clone this repository; the installer reads its sources from a checkout.
+
 ```sh
+git clone https://github.com/thgMatajs/squirrel-mode
+cd squirrel-mode
 targets/cursor/install.sh          # dry run
 targets/cursor/install.sh --yes    # actually install
 ```
 
-Adds `~/.cursor/rules/squirrel-mode.mdc`. `/digest` and `/plan` still need copying by hand into
+Adds `~/.cursor/rules/squirrel-mode.mdc`; `targets/cursor/install.sh --uninstall` removes it again,
+on the same dry-run-by-default terms. `/digest` and `/plan` still need copying by hand into
 each project's `.cursor/commands/` — [docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md) has the two
 file paths and why Cursor can't install them once for every project.
 
@@ -80,11 +92,12 @@ off/on, or profile reinjection after a tune — a change elsewhere can leave the
 their own cadence re-reads the file. Claude Code isolates concurrent sessions (one checkpoint file
 per session, token-bound off/on) and reinjects an updated profile on the next prompt; see
 [ADR-0006](./docs/adr/0006-session-isolation-concurrency.md). Neither Codex nor Cursor has a
-harness-level guarantee against the model starting `/squirrel:init` on its own the way Claude
+harness-level guarantee against the model starting calibration on its own the way Claude
 Code's `disable-model-invocation: true` does. All three targets read the same
-`~/.squirrel/profile.md`, so running `/squirrel:init` once, in Claude Code or Codex,
-calibrates every target on that machine. Full breakdown — which commands port and why, what each
-target loses — in [docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md).
+`~/.squirrel/profile.md`, so one calibration run — `/squirrel:init` in Claude Code, or asking Codex
+in plain language to run squirrel init — calibrates every target on that machine. Full breakdown —
+which commands port and why, what each target loses — in
+[docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md).
 
 ## Why it's shaped this way
 

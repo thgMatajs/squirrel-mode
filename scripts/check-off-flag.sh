@@ -123,9 +123,211 @@
 # same posture allow-checkpoint.sh takes toward `file_path`. Contents
 # matter only on the legacy tokenless path; the token path ignores them.
 #
-# jq: preferred, not required - see extract_field's sed fallback.
+# jq: preferred, not required - see extract_field, whose no-jq path is
+# extract_top_level_string's top-level-only byte scanner (and that
+# function's own list of what the scanner does not cover).
 set -eu
 
+# extract_top_level_string <json> <key>: prints the value of the STRING
+# field named <key> that sits at DEPTH 1 - directly inside the payload's
+# own outermost object - and prints nothing at all when there is no such
+# field. This is the no-jq path for extract_field below.
+#
+# DUPLICATED, DELIBERATELY, between scripts/check-off-flag.sh and
+# scripts/load-profile.sh, exactly as sanitize_session_id already is and
+# for the identical reason: this project forbids `source`/`.` between
+# shipped scripts, so each hook must be a single self-contained file
+# that runs correctly no matter what else is or is not installed
+# alongside it. The two copies are byte-identical and have no state; if
+# one changes, the other must be changed to match. scripts/
+# allow-checkpoint.sh deliberately does NOT get a third copy - see the
+# note inside its own extract_field for why it keeps the old scan.
+#
+# FIXED (this cycle) - what this replaces and why a scanner, not a
+# narrower pattern. The fallback used to be one sed substitution,
+# `s/.*"<key>"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p`. POSIX sed is
+# leftmost-longest, so the leading `.*` swallowed as much as it could
+# and the LAST occurrence of <key> on the line won - INCLUDING one
+# nested inside a sub-object. Reproduced with jq stripped from PATH: a
+# UserPromptSubmit payload carrying `"session_id":"sessionBBB"` at the
+# top level and `"meta":{"session_id":"sessionAAA"}` beneath it made
+# THIS script read sessionAAA, claim session A's own
+# off/PENDING.sessionAAA sentinel by the token path, rename it to
+# off/sessionAAA and print the counter-instruction - so session B was
+# silenced and session A's /squirrel:off never took effect. That is
+# precisely the cross-session theft Amendment P2's token binding exists
+# to prevent, reintroduced one layer lower down. Claude Code's real
+# payloads are flat, so it was not reachable in production; this file's
+# header nevertheless advertises "jq: preferred, not required", which is
+# what makes closing the class the honest option rather than documenting
+# it away. It is a scanner rather than a tighter regex for the reason
+# allow-checkpoint.sh's extract_tool_input_field already records: a
+# regex matches text shapes and cannot track brace depth, so each
+# narrower pattern only shrinks the class of shapes that defeat it -
+# the same "narrower guard, same bug" outcome this project has now hit
+# seven times.
+#
+# HOW IT SCANS. One `awk` pass. The payload is SPLIT on the double-quote
+# character, which turns it into alternating OUTSIDE-a-string and
+# INSIDE-a-string segments, and the three things a regex cannot track
+# are then all derived from that split: string state, escape state, and
+# `{`/`[` nesting depth.
+#   - The split separator is written as the bracket expression `["]`,
+#     never as a bare `"`. With a SINGLE-character separator the
+#     one-true-awk shipped as /usr/bin/awk on macOS also breaks at every
+#     NEWLINE, which silently shreds any pretty-printed payload; a
+#     two-or-more-character separator takes awk's regex path and does
+#     not. Verified against that awk, gawk, and mawk.
+#   - A quote whose preceding segment ends in an ODD number of
+#     backslashes is escaped, so the string continues across it and the
+#     two segments are re-joined. That is what stops a `"` inside a
+#     value from being read as a delimiter.
+#   - ONLY the outside segments are inspected for structure, so a `{`,
+#     `}`, `[`, `]` or `:` appearing inside a value can never change the
+#     nesting depth or turn its string into a key. Depth is maintained
+#     by COUNTING the opening and closing brackets in each outside
+#     segment with `gsub`.
+#   - A string is a KEY only when the outside segment that follows it
+#     begins with `:`, and its value is a string only when that segment
+#     is EXACTLY `:` once whitespace is removed.
+#   - The value is taken only when the depth recorded at its key is
+#     exactly 1 - the key sits directly inside the payload's own
+#     outermost object. Anything nested deeper is outside what this
+#     scan looks at, which is the whole point.
+# Only the matched value is ever unescaped; keys are compared, and
+# non-matching values skipped, in their raw form.
+#
+# COST. Proportional to the payload's length plus the number of string
+# tokens in it - deliberately NOT a character-at-a-time `substr` walk
+# over the whole buffer, which is how this fix was first written and
+# which is quadratic in practice: the macOS awk's `substr` is O(length)
+# per call, and that version took 8.9 SECONDS on a single 500 KB prompt
+# (10 KB 25 ms, 100 KB 408 ms, 500 KB 8889 ms). That matters here more
+# than anywhere else in this plugin, because THIS hook runs on the hot
+# path of every message. Measured after the rewrite, same machine:
+# 500 KB 40 ms, 2 MB 91 ms, 20 000 levels of nesting 109 ms, and a
+# deliberately pathological 1 MB payload of 50 000 separate top-level
+# keys 1.7 s. Those are machine-specific figures, not a portable
+# performance guarantee - the point they support is that the cost no
+# longer grows with the SQUARE of an input this hook does not control.
+# This path only runs at all when jq is absent, or when jq is present
+# and reports the field genuinely missing.
+#
+# Run entirely under `LC_ALL=C`, for the reason load-profile.sh's
+# json_escape sets out at length: BSD tools abort mid-stream on a byte
+# that is not valid UTF-8 under a UTF-8 locale, and `LC_ALL=C` makes
+# `length`/`substr`/`split` here genuinely byte-indexed so an invalid
+# byte simply passes through instead. The key is handed over through the
+# ENVIRONMENT rather than `awk -v`, because POSIX awk re-processes
+# backslash escapes in a `-v` assignment (the same trap
+# tests/test_hooks.sh's own line_of helper documents).
+#
+# WHAT IT DOES NOT DO - the residual limits, stated rather than implied:
+#   - `\uXXXX` inside a VALUE is left in the output literally, as the
+#     six bytes `\u` plus four hex digits, not decoded to a character.
+#     Decoding it means UTF-8 re-encoding and surrogate pairing in awk,
+#     which is a great deal of machinery for a shape neither key this is
+#     ever called for (`session_id`, `cwd`) carries in practice. The
+#     failure direction is closed, not open: sanitize_session_id rejects
+#     a backslash outright, and a `cwd` carrying a literal `\u` simply
+#     fails the byte-for-byte comparison sentinel_matches_this_session
+#     makes against a sentinel's contents, so a mangled value can only
+#     ever produce "no match", never a wrong match. The two-character
+#     escapes JSON defines - \" \\ \/ \b \f \n \r \t - ARE decoded.
+#   - A KEY spelled with ANY escape for one of its own characters -
+#     a `\u` sequence, or a needlessly escaped `\/` - is not recognised
+#     as that key: key names are compared in their RAW form, and a real
+#     parser would resolve the escape before matching. Same direction:
+#     the field reads as absent, never as some other field.
+#   - Two top-level occurrences of the same key: the LAST string-valued
+#     one wins, which is what jq's own object construction does, so the
+#     jq path and this path agree rather than diverging.
+#   - Malformed JSON (an unterminated string) stops the scan; nothing is
+#     printed.
+#   - `awk` absent from PATH: prints nothing and still returns 0 (the
+#     trailing `|| true`), so a missing awk degrades this to "no field
+#     found" - which this hook already treats as "nothing to say" -
+#     instead of failing the hook.
+extract_top_level_string() {
+  printf '%s\n' "$1" | SQUIRREL_JSON_KEY="$2" LC_ALL=C awk '
+    function take_raw(   s, seg, bs, closed) {
+      s = ""
+      while (i <= m) {
+        seg = part[i]
+        bs = 0
+        if (match(seg, /\\+$/)) { bs = RLENGTH }
+        closed = (i < m)
+        i = i + 1
+        if (closed == 0) { unterminated = 1; return s seg }
+        if (bs % 2 == 1) { s = s seg "\""; continue }
+        return s seg
+      }
+      unterminated = 1
+      return s
+    }
+    function decode(s,   out, p, nx) {
+      if (index(s, "\\") == 0) { return s }
+      out = ""
+      while (1) {
+        p = index(s, "\\")
+        if (p == 0) { return out s }
+        out = out substr(s, 1, p - 1)
+        nx = substr(s, p + 1, 1)
+        if (nx == "n") { out = out "\n" }
+        else if (nx == "t") { out = out "\t" }
+        else if (nx == "r") { out = out "\r" }
+        else if (nx == "b") { out = out sprintf("%c", 8) }
+        else if (nx == "f") { out = out sprintf("%c", 12) }
+        else if (nx == "\"") { out = out "\"" }
+        else if (nx == "\\") { out = out "\\" }
+        else if (nx == "/") { out = out "/" }
+        else { out = out "\\" nx }
+        s = substr(s, p + 2)
+      }
+    }
+    { buf = buf $0 "\n" }
+    END {
+      key = ENVIRON["SQUIRREL_JSON_KEY"]
+      m = split(buf, part, "[\"]")
+      depth = 0
+      found = 0
+      val = ""
+      have_prev = 0
+      prev_str = ""
+      prev_depth = 0
+      expect_value = 0
+      unterminated = 0
+      i = 1
+      while (i <= m) {
+        o = part[i]
+        gsub(/[ \t\r\n]/, "", o)
+        if (have_prev == 1 && substr(o, 1, 1) == ":") {
+          if (o == ":" && prev_depth == 1 && prev_str == key) { expect_value = 1 }
+        }
+        have_prev = 0
+        t = o
+        opens = gsub(/[{[]/, "", t)
+        t = o
+        closes = gsub(/[]}]/, "", t)
+        depth = depth + opens - closes
+        i = i + 1
+        if (i > m) { break }
+        raw = take_raw()
+        if (unterminated == 1) { break }
+        if (expect_value == 1) { found = 1; val = decode(raw); expect_value = 0 }
+        else { prev_str = raw; prev_depth = depth; have_prev = 1 }
+      }
+      if (found == 1) { printf "%s", val }
+    }
+  ' 2>/dev/null || true
+}
+
+# extract_field <json> <key>: best-effort read of a TOP-LEVEL string
+# field named <key> from <json>. Prefers jq (a real parser); falls back
+# to extract_top_level_string's byte scanner above when jq is not on
+# PATH, or when jq is present and reports the field absent. Both paths
+# read the top level only, so which one ran is not observable in the
+# result for any payload shape either can parse.
 extract_field() {
   json=$1
   key=$2
@@ -137,7 +339,7 @@ extract_field() {
       fi
     fi
   fi
-  printf '%s\n' "$json" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
+  extract_top_level_string "$json" "$key"
 }
 
 # sanitize_session_id <raw>: prints <raw> and returns 0 only if it is a
