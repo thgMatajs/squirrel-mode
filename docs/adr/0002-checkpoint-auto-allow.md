@@ -281,3 +281,72 @@ satisfy. Reverting this fix by hand in a scratch copy of the repository turns 77
 `README.md`'s description of the fallback ("that write falls back to the normal permission prompt")
 needed no change: it always described the intended concept, and this fix is what finally made it
 true.
+
+## Amendment (PICKUP-LIST) — the promise held for the write and broke on the read, the moment a project's memory became a directory
+
+This ADR promises that an ordinary checkpoint interaction never costs a permission prompt, and
+Amendment (S10-1) above already widened the matcher to `Read` on the grounds that every such
+interaction *begins* with one. Both statements stayed true for `Write`. Neither survived
+[ADR-0006](./0006-session-isolation-concurrency.md).
+
+**What changed underneath this ADR.** v0.3.0 split a project's memory from one flat file into one
+file per session inside a per-project directory. Rule 14's write is unaffected — it writes the single
+path it was handed. `/squirrel:pickup` is not: folding every past session's file into one answer
+means **enumerating that directory**, which is a thing this ADR's mechanism structurally cannot
+cover. `hooks/hooks.json`'s `PreToolUse` matcher is `Write|Edit|Read`; enumeration is none of those.
+On a harness exposing only Read, Write, Edit and Bash, the one tool left that can list a directory is
+Bash, and `scripts/allow-checkpoint.sh` never sees a Bash call. Recorded when the fix was written: an
+ordinary `/squirrel:pickup` under default permissions stopped and asked for approval to list the
+directory — the exact interaction the first paragraph of this ADR says never costs one.
+
+**The fix is not a wider matcher, and deliberately so.** Auto-approving `Bash` would mean returning
+`permissionDecision: "allow"` for a tool whose argument is an arbitrary command string. Everything
+that makes the auto-approval in this ADR defensible — one field, `tool_input.file_path`, normalised
+and checked against one directory this plugin owns — evaporates there. So the enumeration is removed
+instead of permitted: `scripts/load-profile.sh` hands the model the answer at `SessionStart`, as a
+block of absolute checkpoint paths, newest first. This is the same move tech-lead Decision 1 already
+makes for the checkpoint path itself (the model cannot compute the project-slug algorithm, so it is
+given the result rather than the means), applied one level further out. With the list in context,
+`/squirrel:pickup` needs only `Read` on paths this hook already auto-approves.
+
+**Two properties keep the new line from becoming its own surface.**
+
+1. **The block's header carries this session's off-token.** `build_context` quotes `profile.md` into
+   the same `additionalContext` FIRST and VERBATIM, so profile text can spell any line it likes,
+   including a perfect copy of the header followed by paths of an attacker's choosing — and
+   `/squirrel:tune` writes `profile.md` from user-dictated text, so "the profile is trusted" was
+   never available as an answer. The token is derived from the `session_id` this hook was handed on
+   stdin, so a `profile.md` written before this session started cannot contain it. It rides on the
+   incompleteness marker below for the sharper version of the same reason: a marker is an
+   *instruction to go enumerate*, and unbound it would be a way for profile text to spend a
+   permission prompt.
+2. **A block that left something out says so.** It closes with
+   `(more checkpoint files exist in that directory than are listed here - session <token>)` on
+   exactly two conditions — the `CHECKPOINT_LIST_MAX_FILES` cap, and a real checkpoint whose filename
+   falls outside the character class the hook writes. The absence of that line is therefore a
+   positive guarantee that the list is whole, which is what lets `skills/pickup/SKILL.md` forbid
+   enumeration in the common case without ever making memory unreachable.
+
+**What this amendment does not change.** `scripts/allow-checkpoint.sh` is untouched, byte for byte.
+No new tool is auto-approved, and the set of auto-approved paths is unchanged. Enumeration still
+costs one permission prompt in the two cases where it genuinely has to happen — a marked block whose
+unnamed files the user's request actually needs, and no block at all — and `skills/pickup/SKILL.md`
+tells the model to ask for it plainly rather than work around it.
+
+**Evidence, and what remains unobserved.** Suite at 2021 assertions, 0 failures. Against a copy of
+the repository, neutralising the hook's call site turns **42** assertions in `tests/test_hooks.sh`
+red; removing the session token from the block header turns **34** red; weakening the completeness
+clause in `skills/pickup/SKILL.md` turns **1** red in `tests/test_skills.sh`. Driven directly against
+the real hook under a scratch `HOME`: fourteen eligible files yield exactly ten, newest first, plus
+the marker, with all fourteen still on disk; exactly ten yield no marker; a `café.md` newer than the
+ASCII files under `LC_ALL=pt_BR.UTF-8` yields a block naming only the ASCII file, the marker, and
+`Resume available` unchanged; a symlinked slug directory yields no block and no resume banner; a
+newline in `$HOME` yields no block, valid JSON and exit 0; a failing `ls` yields no block with
+`Resume available` intact, so pickup falls back to enumerating. A `profile.md` spelling the header
+and `/etc/passwd` yields two headers in one context, of which only the hook's carries the token, and
+the hook's is both last and below the last `Session off-token:` line.
+
+What none of that observes is the half that lives in the model: that `/squirrel:pickup` now reads the
+handed-over list instead of shelling out. That needs a live authenticated session, which is
+unavailable under the scratch `HOME` every probe here requires, and it is the same reason
+`docs/ACCEPTANCE.md` criterion 12 stays `manual`.

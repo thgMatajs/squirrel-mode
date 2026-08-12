@@ -45,6 +45,38 @@
 #     answer. Neither consumer can derive the other's value without
 #     re-implementing the slug algorithm, which is exactly what
 #     Decision 1 forbids.
+#   - the project's existing checkpoint files, newest first, as a BLOCK:
+#     one header line,
+#     "Project checkpoint files, newest first (session <token>):",
+#     carrying the same off-token as the line above it, then one ABSOLUTE
+#     path per line, at most CHECKPOINT_LIST_MAX_FILES of
+#     them, the run of paths ending at the first line that does not begin
+#     with "/". Emitted ONLY when there is at least one such file that
+#     this hook could name - no header, no block, nothing, otherwise.
+#     When the block does NOT name everything in that directory - the cap
+#     was reached, or a real file's name fell outside the class - one
+#     further line closes it,
+#     "(more checkpoint files exist in that directory than are listed
+#     here - session <token>)", carrying that same token and beginning
+#     with "(" rather than "/" so it terminates the run of paths instead
+#     of joining it. Its absence is a positive guarantee that the list is
+#     whole; see checkpoint_file_lines for both grammars stated together.
+#     The
+#     token is in the header because the profile body quoted ABOVE this
+#     block is verbatim and can spell any line it likes, forged header
+#     included; see checkpoint_file_lines for the reproduction and for
+#     why a session token beats reordering. This is the same Decision 1
+#     move applied one level further out: knowing the DIRECTORY is not
+#     enough for /squirrel:pickup, which has to ENUMERATE it, and on a
+#     harness that exposes no Glob or Grep tool (Read, Write, Edit and
+#     Bash only - the shape verified while this was written) the sole
+#     enumeration tool left is Bash. hooks.json's PreToolUse matcher is
+#     Write|Edit|Read, so allow-checkpoint.sh can never auto-approve a
+#     Bash call, and an ordinary pickup therefore cost a permission
+#     prompt. Handing over the list makes Read on already-approved
+#     checkpoint paths sufficient. See checkpoint_file_lines below for
+#     the format's full grammar and for what `ls` is, and is not,
+#     trusted for there.
 #   - "Legacy checkpoint file: <path>" if, and only if, a pre-P1 flat
 #     checkpoint file still exists for this project - see
 #     "P1 PER-SESSION CHECKPOINT LAYOUT" below.
@@ -68,10 +100,11 @@
 # JSON emission is unchanged.
 #
 # UserPromptSubmit (P3, second command alongside check-off-flag.sh):
-# Does NOT re-run prune, migration notice, off-token, checkpoint path, or
-# resume banner. Reads hook_event_name from stdin. When the event is
-# UserPromptSubmit: if profile.md is absent, print nothing (no /init nag
-# every prompt); if this session has no seen file yet, or its seen file
+# Does NOT re-run prune, migration notice, off-token, checkpoint path,
+# checkpoint file list, or resume banner. Reads hook_event_name from
+# stdin. When the event is UserPromptSubmit: if profile.md is absent,
+# print nothing (no /init nag every prompt); if this session has no seen
+# file yet, or its seen file
 # is NOT strictly newer than profile.md, emit the SAME profile framing
 # SessionStart uses for the body as PLAIN TEXT additionalContext (same
 # stdout convention as check-off-flag.sh - not SessionStart JSON), then
@@ -763,6 +796,28 @@ CHECKPOINT_PRUNE_MIN_AGE_DAYS=30
 CHECKPOINT_PRUNE_KEEP_NEWEST=10
 CHECKPOINT_PRUNE_MAX_CANDIDATES=100
 
+# CHECKPOINT_LIST_MAX_FILES: how many checkpoint paths the injected
+# "Project checkpoint files, newest first (session <token>):" block
+# (checkpoint_file_lines, below) may name in one session's context.
+#
+# WHY THIS NUMBER. It is CHECKPOINT_PRUNE_KEEP_NEWEST, and it is written
+# as that name rather than as a second literal 10 because the two are the
+# same number for a reason and must not drift apart. The pruner above
+# guarantees that the N most recently modified direct children of a slug
+# directory always survive, whatever else it deletes. N is therefore
+# exactly the count that is both safe - every path this hook names is one
+# the pruner is committed to keeping, so the model is never handed a path
+# that the next session start will delete - and sufficient - listing
+# fewer would hide memory the pruner deliberately preserves.
+#
+# WHY A CAP AT ALL. This block goes into EVERY session start, and "the
+# pruner bounds the directory" is not on its own a bound: the pruner only
+# deletes a file that is ALSO older than CHECKPOINT_PRUNE_MIN_AGE_DAYS,
+# so a developer with thirty sessions open this month legitimately has
+# thirty files there and none of them is a deletion candidate. Uncapped,
+# that is thirty absolute paths injected into every session start.
+CHECKPOINT_LIST_MAX_FILES=$CHECKPOINT_PRUNE_KEEP_NEWEST
+
 # checkpoint_slug_dir_untrusted <slug_dir>: returns 0 (true) when
 # <slug_dir> must NOT be pruned or read as resume data, because either
 # it or the checkpoints/ directory it sits in is a SYMLINK. `[ -L ]` is
@@ -882,6 +937,656 @@ checkpoint_dir_has_any() {
     fi
   done
   return 1
+}
+
+# --- The injected checkpoint file list --------------------------------
+#
+# checkpoint_list_candidates <slug_dir>: pass 1 of checkpoint_file_lines,
+# and its ONLY caller. Prints, in directory-glob order:
+#
+#   zero or more ABSOLUTE paths, one per line - the entries eligible to
+#   be named in the injected block;
+#   then exactly ONE final line, "0" or "1" - whether an entry that IS
+#   this project's memory was rejected anyway, which is one of the two
+#   things that raise the incompleteness marker.
+#
+# A stream rather than two variables because the caller captures this
+# with `$( )` and a subshell cannot hand a variable back; a path line
+# always begins with "/", so the flag line is never mistaken for one.
+#
+# WHY A SEPARATE FUNCTION AT ALL, given it has one caller: bash 3.2 -
+# /bin/sh on macOS, and therefore what this file's shebang selects there
+# - cannot parse a `case` inside `$( )`. See "WHY A SEPARATE FUNCTION" in
+# checkpoint_file_lines' header for the reproduction.
+#
+# TWO TESTS, DELIBERATELY DIFFERENT IN KIND:
+#   - The NAME must lie within [A-Za-z0-9._-], the class
+#     session_checkpoint_name produces via sanitize_session_id. This is a
+#     COLLATION range and therefore locale-dependent, which is why this
+#     function is only ever called from inside checkpoint_file_lines'
+#     LC_ALL=C subshell - see "WHY THE BODY RUNS UNDER LC_ALL=C" there.
+#   - The PATH must be a regular file that is not a symlink, the same
+#     `[ -f ] && [ ! -L ]` trust boundary checkpoint_dir_has_any and
+#     prune_stale_session_checkpoints already enforce.
+#
+# The flag is raised only where those two DISAGREE - name rejected, file
+# test passed - because that is exactly the case where this hook reports
+# "Resume available" for a file it will not name. A subdirectory, a FIFO,
+# a symlink, and the unmatched-glob literal "<slug_dir>/*" all fail the
+# file test, are none of them memory, and so raise nothing: a marker for
+# any of those would cost the user a permission prompt for nothing.
+#
+# The `-eq 0` guard in front of the flag is not decoration. It
+# short-circuits the two extra stat calls away for every further rejected
+# entry once the flag is already set, so a directory full of
+# non-conforming names costs at most one of them.
+#
+# The glob is newline-safe where `ls` output is not: the shell hands back
+# one word per directory entry however that entry is spelled.
+checkpoint_list_candidates() {
+  clc_dir=$1
+  clc_omitted=0
+  for clc_path in "$clc_dir"/*; do
+    clc_name=${clc_path##*/}
+    case "$clc_name" in
+      '' | *[!A-Za-z0-9._-]*)
+        if [ "$clc_omitted" -eq 0 ] && [ -f "$clc_path" ] && [ ! -L "$clc_path" ]; then
+          clc_omitted=1
+        fi
+        continue
+        ;;
+    esac
+    [ -f "$clc_path" ] && [ ! -L "$clc_path" ] || continue
+    printf '%s\n' "$clc_path"
+  done
+  printf '%s\n' "$clc_omitted"
+}
+
+# checkpoint_file_lines <slug_dir> <session_token>: prints the block
+# /squirrel:pickup reads - or nothing at all.
+#
+# EXACT FORMAT. It is a format rather than a sentence because something
+# has to parse it:
+#
+#   Project checkpoint files, newest first (session <token>):
+#   <absolute path>
+#   <absolute path>
+#   ...
+#   (more checkpoint files exist in that directory than are listed here - session <token>)
+#
+# One header line, spelled exactly as above and carrying THIS session's
+# off-token, then one ABSOLUTE path per line, most recently modified
+# first, at most CHECKPOINT_LIST_MAX_FILES of them. The RUN OF PATHS ends
+# at the first line that does not begin with "/" (or at the end of the
+# injected context) - that clause is unchanged, and it is still all a
+# path extractor needs. NOTHING is printed - not even the header - when
+# the directory is absent, untrusted, or holds no eligible file, so a
+# fresh project never gains a dangling empty header for
+# /squirrel:pickup to read as "the list is here, and it is empty".
+#
+# THE INCOMPLETENESS MARKER is that last line, and it appears if and only
+# if this function left something out. Its grammar, stated here beside
+# the block's own: ONE line, matched WHOLE and never by prefix, spelled
+#
+#   (more checkpoint files exist in that directory than are listed here - session <token>)
+#
+# carrying the same session token the header carries. Two deliberate
+# properties:
+#   - It does NOT begin with "/", so it TERMINATES the run of paths
+#     instead of joining it, and no reader of the clause above can
+#     mistake it for a path. (It also holds no ": ", so a reader that
+#     splits a line on its first ": " to get a single value finds
+#     nothing here either - the same care the header itself takes.)
+#   - It carries the token for the identical reason the header does, and
+#     the reason is sharper here: a marker is an instruction to go
+#     ENUMERATE a directory, and the profile body quoted above this block
+#     is verbatim and can spell any line it likes. An unbound marker
+#     would be a way for profile text to spend a permission prompt.
+#
+# WHY IT EXISTS. Without it this block is a list that LOOKS complete and
+# is not, and skills/pickup/SKILL.md - the only reader there is - said so
+# in as many words while forbidding the enumeration that would find the
+# rest. So: a block WITHOUT this line names every checkpoint file in that
+# directory this hook could see, and pickup may rely on that. A block
+# WITH it does not, and pickup is told to enumerate when the request
+# actually needs the unnamed ones and to say so in one line when it does
+# not.
+#
+# IT FIRES ON EXACTLY TWO CONDITIONS, both of which leave real memory
+# unnamed:
+#   - THE CAP. More eligible files than CHECKPOINT_LIST_MAX_FILES, so the
+#     oldest of them are not named. This is not a rare shape, and the cap
+#     comment above names it exactly: the pruner only deletes a file that
+#     is ALSO older than CHECKPOINT_PRUNE_MIN_AGE_DAYS, so a developer
+#     with fourteen sessions open this month legitimately has fourteen
+#     files there and not one of them is a deletion candidate. Reproduced
+#     with fourteen such files: ten named, four still on disk and named
+#     nowhere.
+#   - THE NAME CLASS. A depth-1 REGULAR, NON-SYMLINK file whose NAME
+#     falls outside [A-Za-z0-9._-]. That is deliberately the same
+#     `[ -f ] && [ ! -L ]` test checkpoint_dir_has_any uses to decide
+#     "this project has memory", so the marker fires exactly when this
+#     function and the resume banner DISAGREE about a file, and not
+#     otherwise. A subdirectory, a FIFO, a symlink, and the literal
+#     unmatched-glob word "<slug_dir>/*" all fail that test, are none of
+#     them memory, and so raise no marker - a marker for any of those
+#     would cost the user a permission prompt for nothing. Reproduced
+#     under LC_ALL=pt_BR.UTF-8 with a slug directory holding sess-01.md,
+#     sess-02.md, "café.md" and "sess-café.md": the block named the two
+#     ASCII files and omitted the two NEWEST, one of which was that
+#     session's OWN checkpoint path, emitted verbatim on the
+#     "Project checkpoint path:" line.
+#
+# IT DOES NOT FIRE when `ls` printed fewer lines than it was handed
+# operands. That is the concurrent-deletion case - a peer session's
+# prune_stale_session_checkpoints deleting in this very directory - and
+# `ls` prints every SURVIVING operand, correctly sorted, rather than a
+# prefix. A file deleted between the glob and the `ls` is not something
+# enumerating the directory afterwards could reach either, so a marker
+# there would send the model looking for something that no longer exists.
+#
+# WHY THE HEADER CARRIES THE SESSION TOKEN, AND WHAT THIS COMMENT NO
+# LONGER CLAIMS. It used to claim the block "cannot collide with any
+# other line this hook emits", and enumerated the single-value
+# "<Label>: <value>" lines to prove it. That enumeration omitted the
+# LARGEST thing this hook emits - the profile body - and was therefore
+# false. build_context puts profile.md's body into the injected context
+# FIRST and VERBATIM (format_profile_framing interpolates it with %s, no
+# fencing) and appends this block some thirty lines later, so a profile
+# body is free to contain a line that reads exactly like this header
+# followed by any absolute paths it likes, and that forged block lands
+# BEFORE the real one. Reproduced with a profile.md holding
+# "Project checkpoint files, newest first:" and "/etc/passwd", and again
+# on the UserPromptSubmit reinjection path, which emits the profile body
+# and no block of its own. profile.md is a documented, privileged
+# prompt-injection surface that the cap above only BOUNDS (see
+# PROFILE_MAX_LINES), and /squirrel:tune writes it from user-dictated
+# text, so "the profile is trusted" was never available as an answer.
+#
+# The token is the answer instead: it is this session's off-token, the
+# same opaque value build_context puts on the "Session off-token:" line,
+# derived from the session_id this hook was handed on stdin. A profile.md
+# written before this session started cannot contain it. Ordering
+# therefore stops mattering - which is precisely why this is the fix
+# rather than reordering the context so the plugin's lines come first: a
+# project with NO checkpoint files emits no real block at all, so under
+# any first-wins or last-wins rule a forged block is the only block there
+# is and wins by default. Under the token rule there is simply nothing
+# for /squirrel:pickup to accept.
+#
+# The three claims that ARE true, and that skills/pickup/SKILL.md relies
+# on, are narrower than the old one:
+#   - Only a header carrying THIS session's token is this hook's.
+#   - WITHIN ONE SessionStart payload, every line this hook GENERATES -
+#     this header included - is appended AFTER the quoted profile body,
+#     and nothing profile-controlled follows them. So within that one
+#     payload, of any duplicated label the LAST occurrence is the hook's.
+#     That costs no code (it is simply the order build_context already
+#     assembles in) and it is what makes the "Session off-token:" line
+#     the token check reads well-founded even against a profile that
+#     forges one of those too.
+#   - ACROSS the conversation that rule would invert, so it is scoped
+#     rather than stated flat. handle_user_prompt_submit re-emits the
+#     profile body - forged lines and all - on later prompts, and those
+#     messages arrive AFTER this payload. What makes that harmless is
+#     that the reinjection carries NO line this hook generates: no
+#     "Session working directory:", no "Session off-token:", no
+#     checkpoint path, and never a block. Verified by scenario 6h6(e) in
+#     tests/test_hooks.sh and by P3-3 alongside it. So a block appearing
+#     outside the SessionStart payload is forged by construction,
+#     whatever token its header carries - which is exactly how
+#     skills/pickup/SKILL.md words it.
+# The header is still deliberately NOT spelled
+# "Project checkpoint files: <...>": a reader that splits a line on its
+# first ": " to get a single value must not find one where a multi-line
+# block starts.
+#
+# WHY THIS EXISTS. /squirrel:pickup folds every past session's
+# checkpoint into one answer, so it has to ENUMERATE this directory.
+# Told only where the directory is, a model shells out to `ls` or
+# `find` - and hooks.json's PreToolUse matcher is Write|Edit|Read, so
+# allow-checkpoint.sh can never auto-approve a Bash call. Reproduced
+# live under default permissions: pickup stopped and asked for approval
+# to list the directory, which is precisely the ordinary interaction
+# ADR-0002 promises never costs a prompt. Handing the model the list is
+# the same move tech-lead Decision 1 already makes for the checkpoint
+# paths themselves - the model cannot compute the slug algorithm, so it
+# is given the answer instead of the means - and with the list in
+# context, pickup needs only Read on paths it was handed, which
+# allow-checkpoint.sh already auto-approves.
+#
+# WHAT `ls` IS USED FOR, AND WHAT IT IS NOT TRUSTED FOR. `ls` is used
+# ONLY as a SORT. It is the one POSIX way to order files by mtime without
+# a `stat` (there is no portable one) or the pruner's O(n^2) pairwise
+# `find -newer` sweep, which is affordable there because it is bounded by
+# CHECKPOINT_PRUNE_MAX_CANDIDATES and skipped entirely for files under
+# 30 days old, and is not affordable here because this must rank EVERY
+# file in the directory on every single session start. No NAME is ever
+# learned from it. The function is two passes for exactly that reason:
+#   - Pass 1 enumerates the directory with a GLOB - the same newline-safe
+#     idiom checkpoint_dir_has_any and prune_stale_session_checkpoints
+#     already use - and validates every entry before `ls` ever sees it:
+#     its NAME must lie within [A-Za-z0-9._-] (the character class
+#     session_checkpoint_name produces, via sanitize_session_id) and the
+#     path it names must be a regular file that is not a symlink, the
+#     same `[ -f ] && [ ! -L ]` trust boundary the other two already
+#     enforce. Survivors, and only survivors, become `ls` OPERANDS.
+#   - Pass 2 runs `ls -td --` over exactly those operands and prints back
+#     the lines it returns. Every operand is
+#     "<slug_dir>/<name in [A-Za-z0-9._-]>", so no operand's final
+#     component can hold a newline, a space, or a glob character: `ls`
+#     returns exactly one line per operand, and the mapping from line to
+#     file is unambiguous by construction rather than by inspection.
+#
+# HOW PASS 1 ACCUMULATES, AND THE TWO QUADRATICS IT AVOIDS. Pass 1's loop
+# lives in checkpoint_list_candidates, which PRINTS one survivor per
+# line; this function CAPTURES that whole stream once and splits it into
+# positional parameters once, under `set -f` and IFS=newline.
+#
+# Both obvious alternatives are quadratic, and this code path has a
+# standard to meet: prune_stale_session_checkpoints' own comment says a
+# directory that accumulated hundreds of files "must not turn into a
+# multi-second stall on turn one", and it bounds itself at
+# CHECKPOINT_PRUNE_MAX_CANDIDATES to keep that promise. This function has
+# no such bound - it must rank EVERY file - so its loop has to be linear
+# in fact and not merely in intent. Measured on this machine (Apple
+# silicon, bash 3.2 as /bin/sh, APFS - machine-specific, like the other
+# timings in this file), accumulating 5000 already-validated paths:
+#
+#   set -- "$@" "$p"   (rebuild the positional list each iteration)  103.68s
+#   s="$s$p<newline>"  (append to a shell string each iteration)      28.41s
+#   printf, captured with $( ) once                                    0.31s
+#
+# The middle one is the trap: it LOOKS linear and is not, because each
+# append copies the whole string built so far. Only the capture is
+# actually O(n) - the shell collects the subshell's stdout into one
+# buffer and hands it over once.
+#
+# Whole-hook wall time, same machine, one back-to-back run:
+#
+#          files:                    200    500   1000   2000    5000
+#   this change, first attempt:     0.49s  1.31s  2.98s  7.76s  33.03s
+#   this change, as it now stands:  0.45s  1.03s  2.03s  4.02s  10.37s
+#   v0.3.1, with no list at all:    0.48s  1.05s  2.08s  4.10s  10.24s
+#
+# i.e. as it now stands this whole feature is inside the measurement
+# noise of the pruner that was already there, at every size, where the
+# first attempt cost 23 extra seconds at 5000 files.
+#
+# NOTHING IN THE SUITE BOUNDS THIS, AND THAT IS A DECISION WITH NUMBERS
+# BEHIND IT. tests/test_hooks.sh bounds allow-checkpoint.sh by wall time
+# (scenarios 33/33r) and check-off-flag.sh too (57), and the same was
+# attempted here. It does not survive the measurement. Whole-hook wall
+# time on this machine, a slug directory of N files, against hand-mutated
+# copies that accumulate the survivors the two quadratic ways instead:
+#
+#                         N=4000            N=8000
+#                    /bin/sh    dash    /bin/sh    dash
+#   as it stands      10-11s      8s        22s     16s
+#   set -- "$@" "$p"  24-25s     13s        79s     36s
+#   s="$s$p<newline>"    15s       -          -     16s
+#
+# A single threshold has to be GREEN for row 1 on every platform and RED
+# for row 2. The shipped code is slowest under bash 3.2 (22s at N=8000)
+# and the mutant is fastest under dash (36s at N=8000), so the entire
+# admissible window is (22s, 36s) - and dash is what /bin/sh IS on CI's
+# ubuntu-24.04, so that narrow end is the end that decides it. Picking
+# 30s leaves 1.36x of headroom over the shipped code's own worst
+# measured cost, on the FASTEST hardware in play; repeat runs here vary
+# by ~20% under ordinary load, and a slower runner turns that into a red
+# build with no defect in it. Scenario 57, by contrast, bounds a 0.73s
+# operation at 3s.
+#
+# Worse, the string-append row - which is the trap this section is
+# actually about, being what an "inline the helper" edit naturally
+# produces - is INSIDE THE NOISE at both sizes on both shells (15s vs
+# 10-11s, 16s vs 16s). So even a threshold that worked would catch only
+# the one shape nobody writes by accident, at a cost of ~90s of suite
+# time for the N=8000 fixture.
+#
+# The limit is therefore written down rather than asserted, which is this
+# repo's stated preference over a green-but-flaky test: THE THREE-PIECE
+# SHAPE BELOW - a separate checkpoint_list_candidates, ONE `$( )`
+# capture, ONE split - IS LOAD-BEARING FOR THE O(n) PROPERTY, AND NO TEST
+# WILL NOTICE IF IT GOES. Inlining the loop, or accumulating into a
+# positional list or a shell string, passes the whole suite green and
+# costs what the table above says.
+#
+# WHY A SEPARATE FUNCTION rather than the loop inline inside the
+# capture. bash 3.2 - which is /bin/sh on this machine, and therefore
+# what the shebang actually selects here - CANNOT PARSE a `case` inside
+# `$( )`: `syntax error near unexpected token ';;'`, reproduced with
+# exactly this loop, while dash and zsh-as-sh both accept it. Moving the
+# loop into a function leaves the substitution body a single command and
+# sidesteps the bug entirely.
+#
+# THE STREAM'S SHAPE, and why the flag rides in it. The capture is zero
+# or more path lines followed by EXACTLY ONE final line, "0" or "1",
+# which is the incompleteness marker's name-class trigger. A subshell
+# cannot hand a variable back to its parent, and this is the one bit of
+# state pass 1 has to return besides the paths, so it travels in the same
+# stream and is split off by the last-newline. A path line always begins
+# with "/", so the flag line can never be mistaken for one - and when
+# there is no newline at all, there were no paths.
+#
+# Splitting the captured stream on newline is safe HERE, and only because
+# of the character class checkpoint_list_candidates enforces: a surviving
+# name cannot contain a newline, so no entry can split into two. `set -f`
+# around the split is what stops a $HOME containing "*", "?" or "[" from
+# turning one word into a glob expansion. IFS=newline alone would still
+# leave names holding spaces or tabs intact, which is why the join is a
+# newline rather than a space even though the class forbids both.
+#
+# FIXED (this cycle): those two passes used to be the other way round -
+# `ls -t` on the DIRECTORY, names parsed out of its output - and the
+# comment here claimed "a name carrying a newline therefore arrives as
+# two candidate names, and both are rejected (neither names an existing
+# regular file)". That is false the moment one half names a real file.
+# Reproduced against the real hook with a directory holding sess-dup.md,
+# sess-zzz.md, and a file literally named "junk<newline>sess-dup.md": the
+# block named sess-dup.md TWICE and put the OLDER of the two real files
+# FIRST, inverting the newest-first order that is the entire reason this
+# block exists, and burning a slot of the cap on the duplicate. Note that
+# neither dropping duplicates nor keeping the last of them repairs it -
+# a spurious half sits at the PATHOLOGICAL file's mtime rank, which can
+# fall on either side of the real entry's, so first-wins and last-wins
+# are each wrong for one arrangement of the fixture. The split is removed
+# at its source instead: a name containing a newline fails the character
+# class in pass 1 and never becomes an operand at all.
+#
+# THE NEWLINE $HOME GUARD, and why this block is guarded where the two
+# single-value lines are not. This paragraph used to say the opposite -
+# that a newline in $HOME was "the one assumption left, stated rather
+# than guarded", that it "would break this block into lines that are not
+# paths", and that "a guard here could not fire without those two lines
+# already being broken". BOTH HALVES WERE FALSE once the pass-2 retry
+# below existed. Reproduced against the real hook:
+#
+#   $HOME = <W>/nl/h<newline>x   (a directory)
+#   <W>/nl/h                     (an ORDINARY REGULAR FILE - not a
+#                                 checkpoint, not even in ~/.squirrel)
+#   $HOME/.squirrel/checkpoints/<slug>/sess-01.md, sess-02.md
+#
+# Pass 1 prints two paths, each carrying the newline. The one split turns
+# those two words into FOUR - "<W>/nl/h" and the relative fragment
+# "x/.squirrel/..." twice over. The first `ls` fails on the two relative
+# fragments; the retry's `[ -f ] && [ ! -L ]` re-filter KEEPS both
+# "<W>/nl/h" words, because that path really is a regular file; `$#`
+# shrank, so the retry fires; the second `ls` succeeds. What came out was
+# a block of two syntactically PERFECT absolute paths naming a file that
+# is not a checkpoint at all, with no incompleteness marker on it. It is
+# not "lines that are not paths" - it is worse, because nothing about it
+# reads as broken: the neighbouring "Project checkpoint directory:" and
+# "Project checkpoint path:" lines degrade into obviously-mangled text in
+# the same fixture, while these two read as ordinary output, and
+# skills/pickup/SKILL.md Case 1 promises "every path it names is correct"
+# and tells the model to Read each one.
+#
+# Proven to be the retry's doing rather than the split's: the identical
+# fixture against a copy whose retry loop is replaced by the old single
+# `listing=$(ls -td -- "$@" 2>/dev/null) || listing=""` emits NO BLOCK AT
+# ALL - the first `ls` fails and there is no second chance.
+#
+# Hence the `case` at the top of checkpoint_file_lines: a newline
+# anywhere in <slug_dir> and this function emits nothing. That is the
+# stated bar for this input - it may legitimately produce no block, but
+# it must never emit a corrupted path. The two single-value lines above
+# are still unguarded, and still on purpose: they degrade VISIBLY, they
+# are one value each rather than a run this block's grammar invites a
+# reader to walk, and nothing tells the model to Read what they name
+# without first noticing they are broken.
+#
+# WHY THE BODY RUNS UNDER LC_ALL=C. `case "$name" in *[!A-Za-z0-9._-]*)`
+# is a COLLATION range, and collation is locale-dependent. Reproduced on
+# this hook with nothing but LC_ALL varying: "café.md" is REJECTED under
+# LC_ALL=C and ACCEPTED under en_US.UTF-8 and pt_BR.UTF-8 (bash-as-
+# /bin/sh and ksh; dash is locale-blind here and rejects under all
+# three). This machine's real locale is pt_BR.UTF-8 and CI's is C.UTF-8,
+# so the stated "[A-Za-z0-9._-]" invariant was true in CI and false
+# locally. The whole body therefore runs in one explicit SUBSHELL with
+# LC_ALL=C exported - the same discipline json_escape and
+# strip_incomplete_utf8_tail already apply to their `awk` - which makes
+# the comparison byte-wise on every platform. The subshell costs nothing:
+# this function's only output is its stdout, and build_context already
+# calls it inside a command substitution. `ls -t` sorts by mtime, never
+# by collation, so the C locale cannot change the order it returns.
+#
+# The range itself now lives in checkpoint_list_candidates, which is
+# called from INSIDE that subshell and inherits the exported LC_ALL - so
+# the pinning still covers it. That is the only reason that function may
+# not be called from anywhere else, and its own header says so.
+#
+# A DELIBERATE, DOCUMENTED MISMATCH, AND WHAT NOW CARRIES IT. A depth-1
+# regular file whose NAME falls outside that character class still makes
+# checkpoint_dir_has_any report "Resume available", but is never named
+# here. This comment used to answer that with "if the list does not
+# account for it, /squirrel:pickup's own fallback covers the gap", and
+# that was FALSE whenever the directory ALSO holds conforming files:
+# pickup's fallback is keyed on there being NO block, and a mixed
+# directory emits one. Reproduced - the "café.md" fixture in the marker
+# section above. So the answer is now the incompleteness marker, which
+# fires on exactly this condition and is what makes the asymmetry
+# recoverable rather than merely written down. `ls` absent from PATH
+# entirely is the other half and is unchanged: no block at all, "Resume
+# available" unchanged, exit 0, and with no block there IS no list for
+# pickup to over-trust, so its fallback genuinely does cover that one.
+#
+# The LC_ALL=C above opens one further route into that same asymmetry,
+# and it is deliberate. sanitize_session_id keeps the plain, unpinned
+# range form, so under a UTF-8 locale it accepts a session_id holding
+# non-ASCII letters and this session's own checkpoint is then named, say,
+# "sess-café.md" - which this function, reading byte-wise, will not name.
+# Verified: "Resume available" fires and "Project checkpoint path:" is
+# emitted unchanged; if that file is the only one in the directory no
+# block appears, and if it sits alongside conforming files a block
+# appears WITH the marker. Claude Code session ids are UUIDs, so no real
+# session reaches it; the point of writing it down is that the two
+# character classes now differ ON PURPOSE, and the difference falls on
+# the side that under-reports - and now says that it is under-reporting -
+# rather than the side that hands over a path.
+#
+# <session_token> is passed in rather than recomputed: build_context
+# already holds the value it puts on the "Session off-token:" line, and
+# it guarantees that value is non-empty and within [A-Za-z0-9_-]. Two
+# derivations of one token is exactly how they drift apart.
+#
+# Same posture as the two pruners: a no-op when the directory is absent,
+# every fallible step guarded, and no path through it can fail the hook.
+checkpoint_file_lines() {
+  (
+    LC_ALL=C
+    export LC_ALL
+
+    list_dir=$1
+    list_token=$2
+    [ -d "$list_dir" ] || exit 0
+    # A NEWLINE ANYWHERE IN <slug_dir> - which means a newline in $HOME,
+    # since everything below it is [A-Za-z0-9._-] by construction - and
+    # this function emits nothing at all. See "THE NEWLINE $HOME GUARD"
+    # above for the reproduction and for why the retry below makes this
+    # a guard rather than a stated assumption. A plain `( )` body, not
+    # `$( )`: bash 3.2 cannot parse a `case` inside a command
+    # substitution (see "WHY A SEPARATE FUNCTION"), and this one sits in
+    # the same subshell as the `case` at the split below.
+    case "$list_dir" in
+      *"
+"*) exit 0 ;;
+    esac
+    # The identical refusal prune_stale_session_checkpoints and
+    # checkpoint_dir_has_any make, through the identical helper rather
+    # than a second check of its own: a symlink at <slug> or at
+    # checkpoints/ means these are not this plugin's files, and it must
+    # neither read, rank, nor name them.
+    if checkpoint_slug_dir_untrusted "$list_dir"; then
+      exit 0
+    fi
+
+    # Pass 1, captured once - see "HOW PASS 1 ACCUMULATES" above for the
+    # measurements, for why the loop lives in its own function, and for
+    # the stream's shape. Split the trailing flag line off first: the
+    # last line is always "0" or "1", and a stream with no newline in it
+    # at all had no paths in it at all.
+    list_cands=$(checkpoint_list_candidates "$list_dir")
+    list_nl='
+'
+    list_omitted=${list_cands##*"$list_nl"}
+    case "$list_cands" in
+      *"$list_nl"*) list_cands=${list_cands%"$list_nl"*} ;;
+      *) list_cands="" ;;
+    esac
+    # Total, not defensive-looking-but-partial: anything that is not the
+    # literal "1" is "not omitted", so no value of this variable can
+    # reach the arithmetic test below and fail it.
+    [ "$list_omitted" = "1" ] || list_omitted=0
+
+    # The one split. `set -f` for the whole of it: a $HOME holding "*",
+    # "?" or "[" would otherwise make the shell glob these words on the
+    # way into "$@", and the paths they name are about to be handed to
+    # the model. The function's own two arguments were saved above,
+    # before `set --` discards them. `$#` is 0 for an empty $list_cands,
+    # which is also the guard that stops a bare `ls -td --` from being
+    # run with no operands at all - that would list the CURRENT
+    # DIRECTORY.
+    set -f
+    list_old_ifs=$IFS
+    IFS=$list_nl
+    # shellcheck disable=SC2086
+    # SC2086 (quote to prevent splitting) is exactly what this line wants:
+    # splitting on newline is the conversion, and `set -f` above has
+    # already removed the globbing half of the hazard SC2086 warns about.
+    set -- $list_cands
+    IFS=$list_old_ifs
+    set +f
+    [ "$#" -gt 0 ] || exit 0
+
+    # Pass 2. `ls` sorts the operands and nothing else - AT MOST TWICE.
+    #
+    # THE DEFECT THIS LOOP FIXES. This was one line, `listing=$(ls -td --
+    # "$@" 2>/dev/null) || listing=""`. `ls` exits 1 when ANY operand is
+    # missing, so a single file vanishing between the glob above and this
+    # call threw away the ENTIRE block - converting the whole benefit of
+    # this feature back into the permission prompt it exists to remove.
+    # The race is not hypothetical: prune_stale_session_checkpoints
+    # deletes in this very directory at every SessionStart, so a peer
+    # session in the same project is the trigger. Reproduced with an `ls`
+    # shim that removed one operand and then exec'd the real `ls`:
+    # thirteen survivors printed by `ls`, no block emitted at all.
+    #
+    # WHY NOT SIMPLY `|| true` AND KEEP THE PARTIAL OUTPUT. Because on
+    # BSD `ls` the partial output is NOT NEWEST-FIRST, and the order is
+    # the entire reason this block exists. Measured on this machine's
+    # /bin/ls across 172 (operand count, missing index) combinations: 10
+    # of them come back as TWO descending runs rather than one, and they
+    # are exactly the ones where the missing operand sits at the MIDDLE
+    # of the argument list - N=8 missing the 4th, N=14 missing the 7th,
+    # N=32 missing the 16th, and so on, deterministic on repeat, plainly
+    # a merge artifact. GNU `ls` returns a single correct run in all 172.
+    # Keeping that output would hand /squirrel:pickup a list whose FIRST
+    # path is not the newest file, and pickup takes "You were doing" and
+    # "Next action" from the first file that records them - so the cost
+    # would be a silently stale answer, where the cost of no block at all
+    # is one permission prompt and a correct one. This file has ruled the
+    # same way once already: see FIXED (this cycle) above, where a
+    # different route to an inverted order was removed at its source
+    # rather than papered over.
+    #
+    # SO: on failure, rebuild the operand list from the operands that
+    # STILL EXIST and ask `ls` once more. The second call has no missing
+    # operand and therefore returns one correctly sorted run. Bounded at
+    # two calls - a second concurrent deletion inside that window leaves
+    # no block, which is the pre-existing behaviour and still correct.
+    # The re-filter is skipped, and the loop breaks, when nothing
+    # actually vanished: `ls` absent from PATH and an operand list past
+    # ARG_MAX both fail with EVERY operand still on disk, and a second
+    # identical call would fail identically, so those two keep costing
+    # exactly one `ls` invocation and emit no block, as before.
+    list_attempt=0
+    listing=""
+    while :; do
+      list_attempt=$((list_attempt + 1))
+      # shellcheck disable=SC2012
+      # SC2012 (prefer find over ls) is disabled deliberately and
+      # narrowly - see "WHAT `ls` IS USED FOR" above for the argument in
+      # full. `find` has no portable mtime SORT, which is the one thing
+      # this line needs.
+      if listing=$(ls -td -- "$@" 2>/dev/null); then
+        break
+      fi
+      # A failed command substitution still ASSIGNS whatever was printed.
+      # That partial, possibly mis-ordered output is exactly what must
+      # not survive to the emit loop, so it is cleared here rather than
+      # anywhere later.
+      listing=""
+      [ "$list_attempt" -lt 2 ] || break
+      list_before=$#
+      # Captured the same way pass 1 is, and for the same reason: at 5000
+      # operands, appending to a shell string instead costs 28s. No name
+      # check here - every operand already passed one - and no `case`, so
+      # this one is safe to write inline.
+      list_cands=$(
+        for cand_path in "$@"; do
+          [ -f "$cand_path" ] && [ ! -L "$cand_path" ] || continue
+          printf '%s\n' "$cand_path"
+        done
+      )
+      set -f
+      list_old_ifs=$IFS
+      IFS=$list_nl
+      # shellcheck disable=SC2086
+      # Splitting on newline IS the conversion; `set -f` above removes
+      # the globbing half of the hazard. Same idiom, same reasons, as the
+      # one split in pass 1.
+      set -- $list_cands
+      IFS=$list_old_ifs
+      set +f
+      [ "$#" -gt 0 ] && [ "$#" -lt "$list_before" ] || break
+    done
+    [ -n "$listing" ] || exit 0
+
+    # The header is printed LAZILY, from inside the loop, on the first
+    # line. That, and nothing else, is what guarantees a directory with
+    # no eligible file emits no header: there is no code path that prints
+    # the header without also printing a path under it. The marker is
+    # gated on the same `emitted` counter for the same reason - a marker
+    # with no block above it would be a bare instruction to go enumerate,
+    # which is the one thing this feature exists to avoid paying for.
+    #
+    # `read` rather than a `for` over a word-split string, and therefore a
+    # subshell: `emitted` lives and dies inside the pipeline, which is
+    # fine because nothing outside needs it. list_omitted is INHERITED
+    # into that subshell from pass 1 and raised again here for the cap -
+    # the marker is printed from inside the pipeline precisely so both
+    # triggers can be read in one place. The `|| true` is the pruners'
+    # own idiom - it makes the pipeline exempt from `set -e` so a `read`
+    # or `printf` failing on some pathological input cannot abort
+    # build_context.
+    #
+    # The cap branch raises the flag rather than merely breaking: entering
+    # it means a further line was read that will not be emitted, so the
+    # block is short of files that are on disk right now. With exactly
+    # CHECKPOINT_LIST_MAX_FILES files there is no further line, the branch
+    # never runs, and no marker appears - which is what makes "no marker"
+    # mean "you have everything" instead of "probably everything".
+    printf '%s\n' "$listing" | {
+      emitted=0
+      while IFS= read -r entry_path; do
+        if [ "$emitted" -ge "$CHECKPOINT_LIST_MAX_FILES" ]; then
+          list_omitted=1
+          break
+        fi
+        if [ "$emitted" -eq 0 ]; then
+          printf 'Project checkpoint files, newest first (session %s):\n' "$list_token"
+        fi
+        printf '%s\n' "$entry_path"
+        emitted=$((emitted + 1))
+      done
+      if [ "$emitted" -gt 0 ] && [ "$list_omitted" -ne 0 ]; then
+        printf '(more checkpoint files exist in that directory than are listed here - session %s)\n' "$list_token"
+      fi
+    } || true
+    exit 0
+  ) || true
+  return 0
 }
 
 # --- S11 migration notice --------------------------------------------
@@ -1285,6 +1990,31 @@ Session working directory: $cwd
 Session off-token: $off_token
 Project checkpoint directory: $session_dir
 Project checkpoint path: $checkpoint_file"
+
+  # The enumerated list, newest first, optionally closed by the
+  # incompleteness marker - see checkpoint_file_lines for both grammars
+  # and for why either exists at all. Gated on $home_dir the
+  # same way the two blocks below are, and appended only when the
+  # function actually produced something, so an absent, untrusted or
+  # empty directory adds no line of any kind. Guarded at the call site
+  # exactly like every other fallible step in this function.
+  #
+  # $off_token is handed over so the block's header - and the marker, for
+  # the same reason and with sharper stakes, a marker being an
+  # instruction to go enumerate - can carry it. That is
+  # what makes the header unforgeable by the profile body quoted above:
+  # see "WHY THE HEADER CARRIES THE SESSION TOKEN" at
+  # checkpoint_file_lines. It is the SAME variable emitted on the
+  # "Session off-token:" line a few lines up - one derivation, two uses,
+  # so /squirrel:pickup comparing them can never be comparing two
+  # independently computed values.
+  if [ -n "$home_dir" ]; then
+    checkpoint_list=$(checkpoint_file_lines "$session_dir" "$off_token") || checkpoint_list=""
+    if [ -n "$checkpoint_list" ]; then
+      context="$context
+$checkpoint_list"
+    fi
+  fi
 
   if [ -n "$home_dir" ] && [ -f "$legacy_checkpoint_file" ]; then
     context="$context
