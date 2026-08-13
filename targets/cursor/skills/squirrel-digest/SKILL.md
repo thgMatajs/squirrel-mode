@@ -1,6 +1,6 @@
 ---
 name: squirrel-digest
-description: "Restructure a rambling ticket, email, pasted note, file, or Jira issue - prose the user received - into the fixed digest brief (TL;DR, Next action, Breakdown, Priority). Trigger on an explicit request to digest or restructure a named piece of prose into that brief, or an ordinary-language question like 'what should I do with this?' asked immediately alongside pasted ticket, email, or note content. Never trigger merely because text or code was pasted with no such request, and never for a request to restructure, refactor, or clean up code."
+description: "Restructure a rambling ticket, email, pasted note, file, or Jira issue - prose the user received - into the fixed digest brief (TL;DR, Next action, Breakdown, Priority). Trigger on or an explicit request to digest or restructure a named piece of prose into that brief. An ordinary-language question like 'what should I do with this?' triggers this only when what was pasted alongside it is itself recognisably a ticket, an email, or a written note - a tracker key or URL, mail headers, or a message from a named person asking for work; never when it is code, a stack trace, a log, a diff, a config, or command output, which asks for a diagnosis and not for a brief. Never trigger merely because text was pasted with no such request, and never for a request to restructure, refactor, or clean up code."
 disable-model-invocation: true
 ---
 

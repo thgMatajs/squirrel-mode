@@ -1276,4 +1276,66 @@ for tone_value in neutral terse; do
   assert_eq "yes" "$fp_other_tone_reachable" "FAILURE PROOF (scenario 27, independence): deleting only the warm row must leave tone='$tone_value' reachable"
 done
 
+# ==========================================================================
+# 28. digest's auto-trigger clause does not license "what should I do
+#     with this?" on its own.
+#
+#     digest carries no disable-model-invocation, so its description IS
+#     the auto-trigger rule. That clause used to end at "...asked
+#     immediately alongside pasted ticket, email, or note content", and
+#     the guard following it ("Never trigger merely because text or code
+#     was pasted with NO SUCH REQUEST") does not exclude that case,
+#     because the question IS the request. A pasted stack trace, log
+#     excerpt or config plus that question satisfied the clause on its
+#     face; a false fire loads ~5 KB and answers a diagnosis question
+#     with a TL;DR/Next action/Breakdown/Priority brief.
+#
+#     The clause now requires the pasted content to be recognisable as a
+#     ticket, email or note in its own right, and names the classes that
+#     must never fire it. Explicit invocation is deliberately NOT
+#     narrowed: /squirrel:digest on a config file is the user asking.
+# ==========================================================================
+digest_desc_line=$(extract_frontmatter_line "$(skill_file_for "digest")" "description")
+
+DIGEST_QUESTION_PHRASE="what should I do with this?"
+DIGEST_RECOGNISABLE_PHRASE="recognisably a ticket, an email, or a written note"
+DIGEST_EXCLUSION_PHRASE="never when it is code, a stack trace, a log, a diff, a config, or command output"
+DIGEST_RETIRED_CLAUSE="asked immediately alongside pasted ticket, email, or note content"
+
+assert_contains "$digest_desc_line" "$DIGEST_QUESTION_PHRASE" "digest's description must still name the ordinary-language question it handles - the fix narrows that clause, it does not delete it"
+assert_contains "$digest_desc_line" "$DIGEST_RECOGNISABLE_PHRASE" "digest's ordinary-language trigger must require the pasted content to be recognisable as a ticket, email or note - otherwise that question beside any paste fires a 5 KB skill that answers a diagnosis with a brief"
+assert_contains "$digest_desc_line" "$DIGEST_EXCLUSION_PHRASE" "digest's description must name the content classes that never fire it, since the pre-existing 'no such request' guard cannot exclude them - the question IS the request"
+assert_not_contains "$digest_desc_line" "$DIGEST_RETIRED_CLAUSE" "digest's description must no longer license the ordinary-language question against any pasted content at all - that unqualified clause is the defect"
+
+# --- Failure proof: the four pins above are not vacuous ----------------
+#
+# The retired wording, reconstructed here verbatim, must fail all three
+# positive/negative pins in exactly the ways they claim to measure: it
+# carries the question and the retired clause, and carries neither the
+# recognisability requirement nor the exclusion list.
+digest_retired_desc="description: \"Restructure a rambling ticket, email, pasted note, file, or Jira issue - prose the user received - into the fixed digest brief (TL;DR, Next action, Breakdown, Priority). Trigger on an explicit /squirrel:digest invocation, an explicit request to digest or restructure a named piece of prose into that brief, or an ordinary-language question like '$DIGEST_QUESTION_PHRASE' $DIGEST_RETIRED_CLAUSE. Never trigger merely because text or code was pasted with no such request, and never for a request to restructure, refactor, or clean up code.\""
+
+for digest_absent_phrase in "$DIGEST_RECOGNISABLE_PHRASE" "$DIGEST_EXCLUSION_PHRASE"; do
+  if printf '%s' "$digest_retired_desc" | grep -qF -- "$digest_absent_phrase"; then
+    digest_fp_has=yes
+  else
+    digest_fp_has=no
+  fi
+  assert_eq "no" "$digest_fp_has" "FAILURE PROOF (scenario 28): the retired description must NOT carry '$digest_absent_phrase' - proving that pin measures the narrowing rather than something both versions share"
+done
+
+if printf '%s' "$digest_retired_desc" | grep -qF -- "$DIGEST_RETIRED_CLAUSE"; then
+  digest_fp_retired_seen=yes
+else
+  digest_fp_retired_seen=no
+fi
+assert_eq "yes" "$digest_fp_retired_seen" "FAILURE PROOF (scenario 28, negative pin): the retired clause must be detectable by the same grep the assert_not_contains above uses, proving that guard would catch a revert"
+
+if printf '%s' "$digest_retired_desc" | grep -qF -- "$DIGEST_QUESTION_PHRASE"; then
+  digest_fp_question_seen=yes
+else
+  digest_fp_question_seen=no
+fi
+assert_eq "yes" "$digest_fp_question_seen" "FAILURE PROOF (scenario 28, independence): the retired description still carries the ordinary-language question, so the question pin above cannot be what distinguishes narrowed from unnarrowed"
+
 assert_report
