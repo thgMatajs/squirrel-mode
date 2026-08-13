@@ -163,9 +163,15 @@
 #      have. Checked STRUCTURALLY (which tag is in force at that citation bullet) rather than by
 #      phrase, because a substring check cannot distinguish "this source is about ADHD" from "this
 #      source is not about ADHD" — both contain the token.
+#  30. [THIRD VERIFICATION PASS] Finding 12 states Brown et al. (2020)'s main effect and does not
+#      assert the ADHD-by-redundancy interaction its abstract never reports. The study really does
+#      have redundancy and nonredundancy groups, which is what made the invented conditional
+#      plausible enough to survive two passes. Both retired phrasings are banned file-wide, which is
+#      affordable only because Finding 12's ⚠ note and Corrections entry were written to DESCRIBE
+#      the retired conditional rather than quote it.
 #
-# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, and 29
-# are
+# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+# and 30 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -1994,5 +2000,39 @@ fixture_finding5_tag=$(check_finding5_meltzer_tag "$finding5_fixture")
 assert_eq "ADHD" "$fixture_finding5_tag" "FAILURE PROOF (scenario 29): re-tagging Finding 5's Meltzer & Basho citation as an ADHD-population source must be caught"
 
 assert_not_contains "$research_flat_28" "Educational guidance for ADHD converges" "the retired claim that ADHD guidance converges on three specific accommodations must stay retired — only the chunking one is in the source, and the source is general-education"
+
+# ================================================================================================
+# 30. Finding 12 states Brown et al. (2020)'s MAIN EFFECT and does not assert the ADHD-by-redundancy
+#     INTERACTION its abstract never reports (third verification pass). The study does have
+#     redundancy and nonredundancy groups, which is what made the invented conditional plausible
+#     enough to survive two passes; the abstract nonetheless states the result flat, and the full
+#     text is paywalled, so check 2 cannot be cleared for the conditional.
+#
+#     Both retired phrasings are banned OUTRIGHT here, file-wide, rather than allowed inside
+#     correction prose. That is affordable only because Finding 12's own ⚠ note and its Corrections
+#     entry were deliberately written to DESCRIBE the retired conditional instead of quoting it —
+#     the same dodge Finding 3's Corrections entry needed for scenario 28's needle, and the reason
+#     check_retired_success_amnesia_phrasing's comment says a correction that must quote its own
+#     retired claim cannot be guarded this cheaply. Checked against the real file (expect both
+#     absent, and the main-effect quote present), then against a fixture with the retired sentence
+#     restored (expect the ban to fire).
+# ================================================================================================
+assert_contains "$research_flat_28" "an increase in ADHD symptoms resulted in an increase in mental effort and a decrease in recall and transfer" "Finding 12 must quote Brown et al. (2020)'s actual reported result — the unconditional main effect"
+assert_not_contains "$research_flat_28" "when that redundant information was present" "Finding 12 must not assert an ADHD-by-redundancy interaction: the abstract reports a main effect only, and the full text is paywalled"
+assert_not_contains "$research_flat_28" "direct, ADHD-population confirmation" "Finding 12 must not call itself a direct ADHD-population confirmation of Finding 4 — that reading needed the interaction its source never reports"
+
+# Failure proof, subshell-isolated in the same style as scenario 14's, so the deliberate FAIL does
+# not pollute this file's real counters.
+proof_output=$( (
+  ASSERT_PASS_COUNT=0
+  ASSERT_FAIL_COUNT=0
+  fixture_body="$research_flat_28 higher symptom scores were associated with more mental effort and less recall and transfer when that redundant information was present"
+  assert_not_contains "$fixture_body" "when that redundant information was present" "proof check"
+) )
+case "$proof_output" in
+  *"FAIL:"*) fixture_finding12_caught=yes ;;
+  *) fixture_finding12_caught=no ;;
+esac
+assert_eq "yes" "$fixture_finding12_caught" "FAILURE PROOF (scenario 30): restoring Finding 12's retired interaction conditional must be caught"
 
 assert_report

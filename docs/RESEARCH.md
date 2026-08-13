@@ -508,19 +508,28 @@ plain wording; it does not rest on this citation, which documents a gap rather t
 
 ---
 
-## Finding 12: Redundant, unrequested content measurably raises cognitive load in ADHD
+## Finding 12: Higher ADHD-symptom scores cost more effort and less recall in a multimedia study
+
+⚠ This finding used to attach a condition to its result — that the cost held specifically where the
+redundant subtitles were present — and to call it a direct ADHD-population confirmation of Finding
+4's reasoning. The paper's abstract reports no such conditional, and no interaction between symptom
+severity and the redundancy manipulation. It reports a main effect, unqualified by condition. The
+full text is paywalled, so per check 2 the interaction cannot be asserted here; the condition is cut
+rather than hedged (see Corrections and "What we could not verify").
 
 Adding subtitles to a narrated multimedia presentation is redundant information by cognitive-load
-theory's own definition. In a study measuring outcomes against ADHD-symptom severity, higher
-symptom scores were associated with *more* mental effort and *less* recall and transfer when that
-redundant information was present — the opposite of what the "more support" framing of subtitles
-usually assumes. This is a direct, ADHD-population confirmation of Finding 4's general
-cognitive-load reasoning, not just an inference borrowed from elsewhere.
+theory's own definition, and the study did manipulate exactly that: "The redundancy group included
+subtitles with a narrated multimedia presentation, and the nonredundancy group included the same
+presentation with narration only." What its abstract then reports is stated flat, across the study:
+"an increase in ADHD symptoms resulted in an increase in mental effort and a decrease in recall and
+transfer." That is a genuine, ADHD-dimensional cost on the three outcomes this project cares about —
+effort, recall, transfer. It is not, on the abstract alone, a demonstration that the *redundant*
+content is what imposed it.
 
 The paper's abstract describes its participants only as "learners," scored on ADHD-symptom
 severity rather than by clinical diagnosis; the venue (a journal on educational multimedia) and the
-descriptor tags on the indexed record suggest a higher-education sample, but the abstract itself
-does not state this plainly.
+descriptor tags on the indexed record ("Preservice Teachers," "Graduate Students," "Higher
+Education") point to a higher-education sample, but the abstract itself does not state this plainly.
 
 **Population:** ADHD
 
@@ -530,8 +539,13 @@ does not state this plainly.
   Attention-Deficit Symptoms*. Journal of Educational Multimedia and Hypermedia, 29(2), 133–150.
   <https://eric.ed.gov/?id=EJ1252029>
 
-**Rules justified:** 2, 7 — no preamble/postamble and no tangents: unrequested content is not a
-free addition, it is measured cost, and this finding measures that cost directly in an ADHD sample.
+**Rules justified:** 2, 7 — no preamble/postamble and no tangents. Stated honestly, this finding is
+weaker support for those two rules than it was written to be: it establishes that ADHD-symptom
+severity carries a measurable cost in effort, recall and transfer, not that unrequested content is
+what imposes that cost. The "content that was not asked for is not free" step belongs to Finding 4's
+general cognitive-load reasoning, and rules 2 and 7 rest on it there. What this finding contributes
+is ADHD-population evidence that the outcomes that reasoning is about are genuinely at stake in this
+population — and no more than that.
 
 ---
 
@@ -723,6 +737,18 @@ source that never mentions that population.
    blocks, the chunking claim is retagged `general working memory`, and "one topic at a time" is
    retired. The chapter's title was also mis-transcribed as "classroom-wide"; the printed title reads
    "Classroomwide," and is corrected.
+4. **Finding 12's headline required an interaction its source's abstract does not report.** The
+   finding stated that higher symptom scores meant more effort and less recall specifically where
+   the redundant subtitles were present, and called that a direct ADHD-population confirmation of
+   Finding 4. Brown et al. (2020)'s abstract reports a main effect with no condition attached: "an
+   increase in ADHD symptoms resulted in an increase in mental effort and a decrease in recall and
+   transfer." The study does have redundancy and nonredundancy groups, but the abstract never reports
+   symptom severity interacting with them, and the full text is behind a paywall — so check 2 cannot
+   be cleared for the conditional. The conditional is cut, the main effect is stated as the paper
+   states it, and the finding's own rule-linkage now says plainly that it is weaker support for rules
+   2 and 7 than it was written to be. Rules 2 and 7 do not fall: they rest on Finding 4's general
+   cognitive-load reasoning, which is where the "unrequested content is not free" step actually
+   lives.
 
 ---
 
@@ -758,6 +784,14 @@ reframed rather than kept with a hedge.
   general pilot-study summary that does not itself mention over-engineering. The claim is retired
   from Finding 7 rather than kept on the strength of a paper this file could not actually read — see
   Finding 7 for what replaced it.
+- **Whether Brown et al. (2020)'s effect interacts with their redundancy manipulation**, for Finding
+  12. The study ran a redundancy group (subtitles plus narration) and a nonredundancy group
+  (narration only), but its abstract reports only a main effect — "an increase in ADHD symptoms
+  resulted in an increase in mental effort and a decrease in recall and transfer" — with no
+  condition attached and no interaction stated. The full text sits behind the journal's paywall.
+  Finding 12 previously asserted the interaction anyway; it now states only the main effect, and the
+  claim that redundant content specifically is what costs ADHD readers is left where it is actually
+  supported, as Finding 4's general cognitive-load reasoning rather than an ADHD-population result.
 - **Any direct empirical test of external cues or incremental presentation reducing working-memory
   load in an ADHD sample**, for Finding 2. Both citations previously attached to that finding turned
   out not to test this (see Corrections, substance failure 5), and a further search for a source that
