@@ -6045,6 +6045,96 @@ assert_eq "0" "$exit_p3_bad" "P3: UserPromptSubmit with unsanitisable session_id
 assert_eq "" "$out_p3_bad" "P3: UserPromptSubmit with unsanitisable session_id must skip reinjection (empty stdout)"
 
 # ==========================================================================
+# P3-C. An unrecordable profile-seen stamp must be BOUNDED and REPORTED,
+#       never a silent per-prompt reinjection of the whole profile body.
+#
+# THE DEFECT. touch_profile_seen swallowed every failure - `mkdir -p ...
+# || return 0`, `touch ... || true` - and returned 0 either way, so the
+# caller could not tell "recorded" from "silently did not record". The
+# reinjection gate is "does this session have a stamp NEWER than
+# profile.md", an unwritable ~/.squirrel means the stamp never appears,
+# and so the FULL profile body was reinjected on every prompt, for the
+# whole session, forever, with nothing anywhere reporting why. Measured
+# on the shipped script: 364 B/prompt with a five-line profile.md and
+# 12 415 B/prompt with a forty-line one - i.e. a tax that scaled with
+# profile.md and never converged.
+#
+# THE FIXTURES ARE ROOT-PROOF, deliberately. The obvious way to make
+# ~/.squirrel unwritable is `chmod 555`, and it is the wrong way here:
+# root ignores the mode bits, so on any CI box running the suite as root
+# the stamp would succeed, the notice would never fire, and every
+# assertion below would pass vacuously while proving nothing. Both
+# fixtures below instead make the stamp impossible by SHAPE, which no
+# uid can override:
+#   C1 - ~/.squirrel/profile-seen is a regular FILE, so `mkdir -p` on it
+#        fails outright.
+#   C2 - ~/.squirrel/profile-seen/<session_id> is a DIRECTORY. `touch` on
+#        an existing directory SUCCEEDS (it just updates the mtime), so
+#        this is the case a `touch`-exit-status-only check still gets
+#        wrong; it is caught by the `[ -f ]` re-test, and it is here to
+#        hold that re-test in place.
+# ==========================================================================
+p3c_body_marker="PROFILE_P3C_BODY_MARKER"
+p3c_notice="cannot record profile state"
+
+# p3c_prompt <home> <session_id> - one UserPromptSubmit, stdout only.
+p3c_prompt() {
+  p3c_stdin=$(printf '{"session_id":"%s","cwd":"%s/proj-p3c","hook_event_name":"UserPromptSubmit"}' "$2" "$1")
+  capture_stdout "$load_profile_script" "$1" "$p3c_stdin"
+}
+
+for p3c_case in C1 C2; do
+  home_p3c=$(new_home)
+  mkdir -p "$home_p3c/.squirrel"
+  printf '%s\n' '# squirrel-mode profile' "language: $p3c_body_marker" >"$home_p3c/.squirrel/profile.md"
+  if [ "$p3c_case" = "C1" ]; then
+    printf 'not-a-directory\n' >"$home_p3c/.squirrel/profile-seen"
+  else
+    mkdir -p "$home_p3c/.squirrel/profile-seen/sess-p3c"
+  fi
+
+  p3c_stdin_one=$(printf '{"session_id":"sess-p3c","cwd":"%s/proj-p3c","hook_event_name":"UserPromptSubmit"}' "$home_p3c")
+  assert_eq "0" "$(capture_exit "$load_profile_script" "$home_p3c" "$p3c_stdin_one")" "P3-C/$p3c_case: UserPromptSubmit must still exit 0 when the profile-seen stamp cannot be recorded"
+
+  p3c_out1=$(p3c_prompt "$home_p3c" "sess-p3c")
+  p3c_out2=$(p3c_prompt "$home_p3c" "sess-p3c")
+  p3c_out3=$(p3c_prompt "$home_p3c" "sess-p3c")
+
+  assert_contains "$p3c_out1" "$p3c_notice" "P3-C/$p3c_case: an unrecordable profile-seen stamp must be REPORTED - the condition stops /squirrel:tune propagating and used to recur silently forever"
+  assert_not_contains "$p3c_out1" "$p3c_body_marker" "P3-C/$p3c_case: the profile BODY must not be reinjected when this session cannot record that it has seen it - reinjecting it is precisely the per-prompt tax that never converges"
+  assert_eq "$p3c_out1" "$p3c_out2" "P3-C/$p3c_case: the second prompt must cost exactly what the first did - a fixed notice, not a growing or varying payload"
+  assert_eq "$p3c_out2" "$p3c_out3" "P3-C/$p3c_case: and the third, so the per-prompt cost is genuinely constant rather than merely small on the prompts that happened to be sampled"
+
+  # SessionStart is unaffected: it injects the body unconditionally and
+  # has nothing to do with the stamp it could not write. Without this,
+  # the fix above could "pass" by breaking profile injection outright.
+  p3c_start_stdin=$(printf '{"session_id":"sess-p3c","cwd":"%s/proj-p3c","hook_event_name":"SessionStart","source":"startup"}' "$home_p3c")
+  assert_eq "0" "$(capture_exit "$load_profile_script" "$home_p3c" "$p3c_start_stdin")" "P3-C/$p3c_case: SessionStart must still exit 0 when the profile-seen stamp cannot be recorded"
+  assert_contains "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home_p3c" "$p3c_start_stdin")")" "$p3c_body_marker" "P3-C/$p3c_case: SessionStart must still inject the profile body in full - it never depended on the stamp, and the bound applies to the per-prompt path only"
+done
+
+# --- P3-C-SCALE. The claim is that the per-prompt cost no longer scales
+# with profile.md, so it is asserted as such: two homes, identical except
+# that one profile.md is a hundred times the size of the other, must
+# produce byte-for-byte identical UserPromptSubmit output. Before the fix
+# these differed by an order of magnitude, because the output WAS the
+# profile body.
+home_p3c_small=$(new_home)
+mkdir -p "$home_p3c_small/.squirrel"
+printf '%s\n' '# squirrel-mode profile' "language: $p3c_body_marker" >"$home_p3c_small/.squirrel/profile.md"
+printf 'not-a-directory\n' >"$home_p3c_small/.squirrel/profile-seen"
+
+home_p3c_big=$(new_home)
+mkdir -p "$home_p3c_big/.squirrel"
+{
+  printf '%s\n' '# squirrel-mode profile' "language: $p3c_body_marker"
+  awk 'BEGIN { s = ""; for (i = 0; i < 300; i++) { s = s "A" }; for (l = 0; l < 40; l++) { print s } }'
+} >"$home_p3c_big/.squirrel/profile.md"
+printf 'not-a-directory\n' >"$home_p3c_big/.squirrel/profile-seen"
+
+assert_eq "$(p3c_prompt "$home_p3c_small" "sess-p3c")" "$(p3c_prompt "$home_p3c_big" "sess-p3c")" "P3-C: with the stamp unrecordable, a 40-line profile.md must cost exactly what a 2-line one costs per prompt - the per-prompt payload must not scale with profile.md at all"
+
+# ==========================================================================
 # P3-B3. [B3 - MINOR, previously fixed with NO regression test] An EXACT
 #        mtime TIE between profile.md and this session's seen stamp must
 #        REINJECT.

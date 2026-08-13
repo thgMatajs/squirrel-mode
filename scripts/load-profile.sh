@@ -1919,19 +1919,73 @@ format_profile_framing() {
 
 # touch_profile_seen <home_dir> <raw_session_id>: after a real profile
 # inject, record that this session has seen the current profile.md.
-# Sanitize failure, empty HOME, or mkdir/touch problems are silent
-# no-ops - never fail the hook.
+# Returns 0 if and only if the stamp is now ON DISK; returns non-zero,
+# printing nothing and failing nothing, for every reason it might not
+# be - empty HOME, sanitize failure, or an unwritable ~/.squirrel.
+#
+# FIXED MEDIUM (audit): this used to swallow every failure
+# (`mkdir -p ... || return 0`, `touch ... || true`) and return 0
+# regardless, so a caller had no way to tell "recorded" from "silently
+# did not record". The consequence was not a lost stamp, it was an
+# unbounded, permanently silent per-prompt tax: handle_user_prompt_submit
+# reinjects whenever this session has no stamp NEWER than profile.md, an
+# unwritable ~/.squirrel means the stamp never appears, and so the full
+# profile body was reinjected on EVERY prompt, for the whole session,
+# forever, with nothing anywhere reporting why. Measured: 325 B/prompt
+# with a five-line profile.md, and 20 476 B/prompt with an oversized one
+# (before the PROFILE_MAX_BYTES fix above bounded that half).
+#
+# The `[ -f ]` re-test after `touch` is deliberate and is not belt and
+# braces for its own sake: the ONLY thing the caller can do with this
+# answer is decide whether the gate will find a stamp next prompt, and
+# that gate is itself `[ -f "$seen_file" ]`. Asking the same question
+# `touch`'s exit status is meant to imply is what makes a `touch` that
+# exits 0 without producing a file - some emulated and network
+# filesystems do exactly this - fail here rather than reopen the loop.
 touch_profile_seen() {
   home_dir=$1
   raw_session_id=$2
-  [ -n "$home_dir" ] || return 0
-  session_id=$(sanitize_session_id "$raw_session_id") || return 0
-  [ -n "$session_id" ] || return 0
+  [ -n "$home_dir" ] || return 1
+  session_id=$(sanitize_session_id "$raw_session_id") || return 1
+  [ -n "$session_id" ] || return 1
   seen_dir="$home_dir/.squirrel/profile-seen"
-  mkdir -p "$seen_dir" >/dev/null 2>&1 || return 0
-  touch -- "$seen_dir/$session_id" >/dev/null 2>&1 || true
+  mkdir -p "$seen_dir" >/dev/null 2>&1 || return 1
+  touch -- "$seen_dir/$session_id" >/dev/null 2>&1 || return 1
+  [ -f "$seen_dir/$session_id" ] || return 1
   return 0
 }
+
+# PROFILE_SEEN_UNAVAILABLE_NOTICE: what UserPromptSubmit emits INSTEAD of
+# the profile body when the stamp cannot be recorded. One line, addressed
+# to the model - the same idiom as the "no profile found yet" line
+# build_context uses - so the user learns what is wrong and can fix it.
+#
+# It names the directory the way this file's own header does, "~/.squirrel
+# /profile-seen", rather than interpolating $HOME. That is what makes it a
+# genuine CONSTANT: a $HOME of any length would otherwise be part of the
+# per-prompt cost this is supposed to bound, and on a long $HOME the
+# "bounded" notice measured LONGER than the small profile body it
+# replaced. It is also the one place in this file where an unexpanded "~"
+# is right - every other path emitted here is data the model must use
+# verbatim, whereas this is prose for the user to read.
+#
+# WHY A NOTICE RATHER THAN SILENCE. Emitting nothing would also bound the
+# cost (at zero), and it was considered and rejected: it would silently
+# drop /squirrel:tune propagation for the rest of the session, which is
+# the entire purpose of the reinjection path. This file has already ruled
+# on that exact trade once, in the opposite direction, and for the same
+# reason - see "AN EXACT MTIME TIE REINJECTS" in the header, where a gate
+# that could lose a tune permanently was replaced by one that can at
+# worst reinject redundantly. A condition that stops tune propagation
+# must be reported, not absorbed.
+#
+# WHAT IS BOUNDED, precisely: the per-prompt cost stops scaling with
+# profile.md and becomes this one fixed-length line. That is the whole
+# claim - it is NOT once-per-session, because there is nowhere to record
+# that it has been said (the missing stamp IS the thing that cannot be
+# recorded), and pretending otherwise would be the same swallowed failure
+# one level up.
+PROFILE_SEEN_UNAVAILABLE_NOTICE="squirrel-mode: cannot record profile state (~/.squirrel/profile-seen is not writable), so a /squirrel:tune made during this session will not reach you. Tell the user once, briefly."
 
 # handle_user_prompt_submit <input_json>: P3 reinjection path. Prints
 # plain-text profile framing UNLESS this session's seen stamp is
@@ -1978,10 +2032,20 @@ handle_user_prompt_submit() {
     [ -z "$seen_newer" ] || { printf ''; return 0; }
   fi
 
+  # The stamp is attempted BEFORE anything is emitted, and what gets
+  # emitted depends on whether it landed. See touch_profile_seen and
+  # format_profile_seen_unavailable above for why this path must not
+  # emit the body when it cannot record that it did: reinjecting a body
+  # this session can never mark as seen is the per-prompt tax that fix
+  # exists to remove, and it recurs for the whole session.
+  if ! touch_profile_seen "$home_dir" "$raw_session_id"; then
+    printf '%s' "$PROFILE_SEEN_UNAVAILABLE_NOTICE"
+    return 0
+  fi
+
   profile_body=$(cat "$profile_file" 2>/dev/null) || profile_body=""
   profile_body=$(cap_profile_body "$profile_body")
   format_profile_framing "$profile_file" "$profile_body"
-  touch_profile_seen "$home_dir" "$raw_session_id"
   return 0
 }
 
@@ -2080,7 +2144,13 @@ Resume available - run /squirrel:pickup"
   fi
 
   if [ "$injected_real_profile" -eq 1 ]; then
-    touch_profile_seen "$home_dir" "$raw_session_id"
+    # `|| true` because touch_profile_seen now REPORTS failure rather
+    # than swallowing it, and this file is `set -e`: an unwritable
+    # ~/.squirrel must not abort build_context half-assembled. There is
+    # nothing for SessionStart to do with the answer - it has already
+    # injected the profile body unconditionally, which is what makes a
+    # missing stamp a UserPromptSubmit concern only.
+    touch_profile_seen "$home_dir" "$raw_session_id" || true
   fi
 
   printf '%s' "$context"
