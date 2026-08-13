@@ -1135,17 +1135,28 @@ assert_eq "yes" "$rule14_d2_reintro_found" "FAILURE PROOF (D2, negative pin): re
 # shellcheck disable=SC2016 # single-quoted deliberately: literal
 # backtick-quoted section names searched for in the rules' own markdown,
 # not command substitution.
-RULE14_SHAPE_ORDER_PHRASE='`Doing` (one line), `Next` (the single startable step), `Done` (the finished items)'
-# shellcheck disable=SC2016
-RULE14_SHAPE_OPTIONAL_PHRASE='`Open decisions` (only when there are any)'
+RULE14_SHAPE_ORDER_PHRASE='`Doing` (one line), `Next` (the single startable step), `Open decisions` (only when there are any), `Done` (the finished items)'
 RULE14_SHAPE_NONEMPTY_PHRASE="a heading with nothing under it"
 
-assert_contains "$rule_14_body" "$RULE14_SHAPE_ORDER_PHRASE" "rule 14's canonical body must name the checkpoint's Doing/Next/Done sections in order - without it the rule mandates a file whose shape is left to each session to invent"
-assert_contains "$rule_14_body" "$RULE14_SHAPE_OPTIONAL_PHRASE" "rule 14's canonical body must mark Open decisions as the one conditional section, matching what /squirrel:pickup omits when nothing lists any"
+assert_contains "$rule_14_body" "$RULE14_SHAPE_ORDER_PHRASE" "rule 14's canonical body must name the checkpoint's four sections in order, with Open decisions marked conditional and Done last - without it the rule mandates a file whose shape is left to each session to invent"
 assert_contains "$rule_14_body" "$RULE14_SHAPE_NONEMPTY_PHRASE" "rule 14's canonical body must forbid a section heading with nothing under it - the empty '## Doing' is the exact failure observed live"
-assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_ORDER_PHRASE" "PLAN.md's rule-14 summary must name the same section order as rules/base-rules.md (cross-file agreement, invariant 6e)"
-assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_OPTIONAL_PHRASE" "PLAN.md's rule-14 summary must mark Open decisions conditional the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_ORDER_PHRASE" "PLAN.md's rule-14 summary must name the same four sections in the same order as rules/base-rules.md (cross-file agreement, invariant 6e)"
 assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_NONEMPTY_PHRASE" "PLAN.md's rule-14 summary must carry the same no-empty-heading requirement as rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# The order pinned above must also be the order PLAN.md's own worked
+# checkpoint template writes further down the file (Section 3's
+# "### Checkpoints and /squirrel:pickup" fenced block). That template
+# predates rule 14 carrying any shape at all, and is the concrete
+# artifact a reader copies; the two disagreeing is the same invariant-6e
+# drift as a rule summary going stale, one file further out.
+plan_checkpoint_template=$(awk '
+  /^### Checkpoints and/ { in_section = 1 }
+  in_section && /^```markdown$/ { grab = 1; next }
+  grab && /^```$/ { exit }
+  grab { print }
+' "$plan_file")
+plan_template_heading_order=$(printf '%s\n' "$plan_checkpoint_template" | sed -n 's/^## //p' | tr '\n' ' ' | sed 's/ *$//')
+assert_eq "Doing Next Open decisions Done" "$plan_template_heading_order" "PLAN.md's worked checkpoint template must use the same section order rule 14 now mandates"
 
 # FAILURE PROOF (35): delete the shape paragraph from an in-memory mutant
 # of the real file and confirm all three phrases disappear from rule 14's
@@ -1153,12 +1164,10 @@ assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_NONEMPTY_PHRASE" "PLAN.md's 
 # assertion 32's failure report, AD3's slot placement) stay put - so a
 # rewrite that fused the shape into an existing paragraph could not make
 # every rule-14 pin rise and fall together.
-RULE14_SHAPE_PARAGRAPH="Give the file these \`##\` sections, in this order: $RULE14_SHAPE_ORDER_PHRASE, and $RULE14_SHAPE_OPTIONAL_PHRASE. Never leave $RULE14_SHAPE_NONEMPTY_PHRASE: omit that section instead. \`/squirrel:pickup\` folds these files by heading across sessions, so a \`Doing\` left empty loses this session's state; anything above the first heading is free-form."
-
-rule14_shape_mutant_content=$(grep -vxF "$RULE14_SHAPE_PARAGRAPH" "$base_rules_file")
+rule14_shape_mutant_content=$(grep -v -F "Give the file these \`##\` sections" "$base_rules_file")
 rule14_shape_mutant_body=$(extract_rule_body_from_content "$rule14_shape_mutant_content" 14)
 
-for rule14_shape_phrase in "$RULE14_SHAPE_ORDER_PHRASE" "$RULE14_SHAPE_OPTIONAL_PHRASE" "$RULE14_SHAPE_NONEMPTY_PHRASE"; do
+for rule14_shape_phrase in "$RULE14_SHAPE_ORDER_PHRASE" "$RULE14_SHAPE_NONEMPTY_PHRASE"; do
   if printf '%s' "$rule14_shape_mutant_body" | grep -qF -- "$rule14_shape_phrase"; then
     rule14_shape_still_has=yes
   else
