@@ -710,11 +710,35 @@ assert_eq "identical" "$idem7u" "cursor install.sh must be idempotent: a second 
 home7d=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home7d"
 mkdir -p "$home7d/.codex" "$home7d/.cursor"
+# Seed real content at paths a dry run has to read but must not touch,
+# so "unchanged" below is a claim about a non-empty tree rather than
+# about two empty ones. The cksum in tree_snapshot is what would catch a
+# dry run that rewrote one of these in place.
+mkdir -p "$home7d/.cursor/skills/squirrel-digest"
+printf 'A pre-existing file at one of the managed paths.\n' >"$home7d/.cursor/skills/squirrel-digest/SKILL.md"
+printf 'Pre-existing user content.\n' >"$home7d/.codex/AGENTS.md"
 before7d=$(full_tree_listing "$home7d")
+before7d_contents=$(tree_snapshot "$home7d")
+# MTIME PROOF, alongside the path/content proof: a marker file created
+# immediately before the two dry runs, and `find -newer` afterwards.
+# `-newer` is POSIX and compares modification times exactly, so it sees
+# a rewrite that happened to reproduce identical bytes (which both
+# listings above would call unchanged) and a directory whose mtime was
+# bumped by a create-then-remove. The sleep is what makes the comparison
+# meaningful on a filesystem with one-second mtime granularity: without
+# it, a file written in the same second as the marker is not "newer"
+# than it.
+dry_run_marker=$(mktemp "${TMPDIR:-/tmp}/squirrel-dry-run-marker.XXXXXX")
+cleanup_dirs="$cleanup_dirs $dry_run_marker"
+sleep 1
 HOME="$home7d" "$codex_install" >/dev/null 2>&1
 HOME="$home7d" "$cursor_install" >/dev/null 2>&1
 after7d=$(full_tree_listing "$home7d")
+after7d_contents=$(tree_snapshot "$home7d")
 assert_eq "$before7d" "$after7d" "a dry run (no --yes) on either installer must change nothing at all under \$HOME - not even a directory (F1: files-only find was blind to this)"
+assert_eq "$before7d_contents" "$after7d_contents" "a dry run must leave every file under \$HOME byte-identical, including a pre-existing file sitting at one of the managed paths it had to read"
+touched7d=$(find "$home7d" -newer "$dry_run_marker" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ')
+assert_eq "" "$touched7d" "a dry run must not bump the MTIME of any file or directory under \$HOME - nothing may be newer than a marker created just before it ran (found: $touched7d)"
 
 # ==========================================================================
 # 8. Neither installer truncates an existing file: seed AGENTS.md with
@@ -797,6 +821,65 @@ fi
 assert_eq "yes" "$other_rule_survived" "cursor uninstall must leave an unrelated .mdc file in the same directory untouched"
 
 # ==========================================================================
+# 10c. Cursor's AGENT SKILLS: install puts both at the exact documented
+#      user-level paths, and uninstall removes both AND the directories
+#      install itself created - without ever removing ~/.cursor, which
+#      Cursor creates and this installer only ever adds to.
+# ==========================================================================
+home10c=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10c"
+mkdir -p "$home10c/.cursor"
+if out10c=$(HOME="$home10c" "$cursor_install" --yes 2>&1); then exit10c=0; else exit10c=$?; fi
+assert_eq "0" "$exit10c" "cursor install.sh --yes must exit 0 when installing the Agent Skills -- output: $out10c"
+for pair in $cursor_skill_pairs; do
+  folder=${pair#*:}
+  assert_file_exists "$home10c/.cursor/skills/$folder/SKILL.md" "cursor install must create \$HOME/.cursor/skills/$folder/SKILL.md - Cursor's documented user-level Agent Skill location"
+  if cmp -s "$repo_root/targets/cursor/skills/$folder/SKILL.md" "$home10c/.cursor/skills/$folder/SKILL.md"; then
+    installed_matches=identical
+  else
+    installed_matches=DIFFERS
+  fi
+  assert_eq "identical" "$installed_matches" "the installed \$HOME/.cursor/skills/$folder/SKILL.md must be byte-identical to the generated artifact it came from"
+done
+
+HOME="$home10c" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+for pair in $cursor_skill_pairs; do
+  folder=${pair#*:}
+  assert_file_absent "$home10c/.cursor/skills/$folder/SKILL.md" "cursor uninstall must remove \$HOME/.cursor/skills/$folder/SKILL.md"
+  assert_file_absent "$home10c/.cursor/skills/$folder" "cursor uninstall must remove the now-empty \$HOME/.cursor/skills/$folder directory it created"
+done
+assert_file_absent "$home10c/.cursor/skills" "cursor uninstall must remove the now-empty \$HOME/.cursor/skills directory it created"
+if [ -d "$home10c/.cursor" ]; then cursor_home_survived=yes; else cursor_home_survived=no; fi
+assert_eq "yes" "$cursor_home_survived" "cursor uninstall must NEVER remove \$HOME/.cursor itself - Cursor creates it, this installer only ever adds to it"
+
+# 10d. The directory cleanup must be gated on having actually removed
+#      one of OUR files. This is the exact bug targets/codex/install.sh
+#      fixed for ~/.agents/skills: an ungated rmdir deletes a
+#      ~/.cursor/skills the user made themselves and squirrel-mode never
+#      installed into. Two shapes, because they fail differently: a
+#      skills directory holding somebody else's skill (rmdir would fail
+#      anyway, so only the SIBLING assertion below discriminates), and an
+#      EMPTY user-made skills directory (rmdir would succeed - this is
+#      the one the gate exists for).
+home10d=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10d"
+mkdir -p "$home10d/.cursor/skills/my-own-skill"
+printf 'A skill of my own, nothing to do with squirrel-mode.\n' >"$home10d/.cursor/skills/my-own-skill/SKILL.md"
+foreign_sibling_ref=$(snapshot_file "$home10d/.cursor/skills/my-own-skill/SKILL.md")
+cleanup_dirs="$cleanup_dirs $foreign_sibling_ref"
+HOME="$home10d" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$foreign_sibling_ref" "$home10d/.cursor/skills/my-own-skill/SKILL.md")" "an unrelated skill sitting beside ours in \$HOME/.cursor/skills must survive --uninstall --yes byte-for-byte"
+if [ -d "$home10d/.cursor/skills" ]; then skills_dir_survived_10d=yes; else skills_dir_survived_10d=no; fi
+assert_eq "yes" "$skills_dir_survived_10d" "\$HOME/.cursor/skills must survive uninstall while it still holds somebody else's skill"
+
+home10e=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10e"
+mkdir -p "$home10e/.cursor/skills"
+HOME="$home10e" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+if [ -d "$home10e/.cursor/skills" ]; then skills_dir_survived_10e=yes; else skills_dir_survived_10e=no; fi
+assert_eq "yes" "$skills_dir_survived_10e" "an EMPTY \$HOME/.cursor/skills the user made themselves, that squirrel-mode never installed into, must survive --uninstall --yes - the cleanup rmdir is gated on this run having actually removed one of OUR files"
+
+# ==========================================================================
 # 11. Each installer reports, rather than fails, when its host
 #     directory is absent, and exits 0.
 # ==========================================================================
@@ -821,6 +904,16 @@ if out11u=$(HOME="$home11" "$cursor_install" --yes 2>&1); then exit11u=0; else e
 assert_eq "0" "$exit11u" "cursor install.sh must exit 0 when ~/.cursor does not exist -- output: $out11u"
 assert_contains "$out11u" "has not been run on this machine yet" "cursor install.sh must report that Cursor has not been run on this machine, not merely exit silently (same re-pinning as the codex assertion above)"
 assert_file_absent "$home11/.cursor" "cursor install.sh must not create ~/.cursor when it does not already exist"
+assert_file_absent "$home11/.cursor/skills" "cursor install.sh must not create ~/.cursor/skills when ~/.cursor is absent - the Agent Skills live INSIDE ~/.cursor, so the host gate covers them too"
+
+# The same gate covers uninstall, and for Cursor - unlike Codex, whose
+# skills live at the sibling path ~/.agents/skills and must still be
+# cleaned when ~/.codex is gone - nothing is stranded by it: every path
+# this installer manages is under ~/.cursor, so its absence really does
+# mean there is nothing left anywhere to remove.
+if out11u_un=$(HOME="$home11" "$cursor_install" --uninstall --yes 2>&1); then exit11u_un=0; else exit11u_un=$?; fi
+assert_eq "0" "$exit11u_un" "cursor install.sh --uninstall --yes must exit 0 when ~/.cursor does not exist -- output: $out11u_un"
+assert_file_absent "$home11/.cursor" "cursor install.sh --uninstall must not create ~/.cursor either"
 
 # ==========================================================================
 # 12. docs/OTHER-TOOLS.md exists, states what each target loses, and
@@ -979,6 +1072,19 @@ cleanup_dirs="$cleanup_dirs $home15d"
 mkdir -p "$home15d/.cursor/rules"
 substring_content_15d="This foreign .mdc quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's rules file."
 assert_foreign_survives_install_and_uninstall "$home15d" "$cursor_install" "$home15d/.cursor/rules/squirrel-mode.mdc" "$substring_content_15d" "Cursor ~/.cursor/rules/squirrel-mode.mdc, substring-only (not exact banner line)"
+
+# --- 15e: Cursor AGENT SKILL, no-marker foreign file at the exact path -
+home15e=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home15e"
+mkdir -p "$home15e/.cursor/skills/squirrel-digest"
+assert_foreign_survives_install_and_uninstall "$home15e" "$cursor_install" "$home15e/.cursor/skills/squirrel-digest/SKILL.md" "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact Cursor digest skill path." "Cursor ~/.cursor/skills/squirrel-digest/SKILL.md, no marker"
+
+# --- 15f: Cursor AGENT SKILL, substring-but-not-exact-banner foreign ---
+home15f=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home15f"
+mkdir -p "$home15f/.cursor/skills/squirrel-plan"
+substring_content_15f="This foreign skill quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's plan skill."
+assert_foreign_survives_install_and_uninstall "$home15f" "$cursor_install" "$home15f/.cursor/skills/squirrel-plan/SKILL.md" "$substring_content_15f" "Cursor ~/.cursor/skills/squirrel-plan/SKILL.md, substring-only (not exact banner line)"
 
 # ==========================================================================
 # 16 (C2). Fenced-code-block markers (A1): a BEGIN/END-shaped example
@@ -1591,6 +1697,22 @@ home28c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home28c"
 mkdir -p "$home28c/.cursor/rules"
 assert_symlink_refused "$home28c" "$cursor_install" "$home28c/.cursor/rules/squirrel-mode.mdc" "$home28c/real-mdc-target.md" "Decoy mdc content that must survive untouched." "Cursor ~/.cursor/rules/squirrel-mode.mdc symlink"
+
+# --- 28d: the same, for a Cursor AGENT SKILL destination ---------------
+#
+# This is 28b's argument transplanted to the Cursor installer, and it is
+# the assertion that actually proves the symlink pre-flight covers the
+# NEW paths rather than only the .mdc: the .mdc sits ABOVE the skills
+# loop in this installer's Execution section too, so a symlink check
+# that lived only inside the loop would let install --yes create the
+# .mdc first and refuse only afterwards - "refuses, changing nothing"
+# would already be false. The .mdc did not exist before this scenario
+# ran, so its continued absence is the direct proof.
+home28d=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home28d"
+mkdir -p "$home28d/.cursor/skills/squirrel-digest"
+assert_symlink_refused "$home28d" "$cursor_install" "$home28d/.cursor/skills/squirrel-digest/SKILL.md" "$home28d/real-cursor-skill-target.md" "Decoy Cursor skill content that must survive untouched." "Cursor ~/.cursor/skills/squirrel-digest/SKILL.md symlink"
+assert_file_absent "$home28d/.cursor/rules/squirrel-mode.mdc" "the symlink refusal for a Cursor AGENT SKILL destination must change NOTHING - the .mdc must not have been created as a side effect before the refusal fired"
 
 # ==========================================================================
 # 29 (F5). A READ-ONLY PARENT directory for the lock (EACCES) must be
