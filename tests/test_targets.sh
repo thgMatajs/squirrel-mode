@@ -1769,4 +1769,96 @@ if out37ok3=$(HOME="$home37ok" "$codex_install" --uninstall --yes 2>&1); then ex
 assert_eq "0" "$exit37ok3" "positive control: uninstalling squirrel-mode's own block must still exit 0 -- output: $out37ok3"
 assert_eq "identical" "$(files_byte_status "$snapshot37ok" "$home37ok/.codex/AGENTS.md")" "positive control: the ownership check must not disturb the byte-exact round trip of a genuine block"
 
+# ==========================================================================
+# 38. The BUNDLED block must be validated BEFORE it is inserted, so a
+#     future edit to rules/base-rules.md cannot permanently wedge a
+#     user's AGENTS.md.
+#
+#     render_agents_install validates the user's file thoroughly -
+#     marker shape, fence awareness, an unterminated fence at EOF - and
+#     validated the content it INSERTS not at all. targets/codex/AGENTS.md
+#     is generated from rules/base-rules.md, which is exactly the kind of
+#     file someone later quotes the markers in, or adds a fenced example
+#     to. Two shapes wedge the user's file permanently: a line equal to
+#     one of squirrel-mode's own marker lines (the installed file then has
+#     two ENDs, so markers_state reports "corrupt" forever) and a bundled
+#     file with no trailing newline (END is glued onto the last line, so
+#     the installed file has a BEGIN and no END). In both cases the first
+#     --yes succeeds, and from then on the user's own AGENTS.md can
+#     never be updated OR uninstalled by this script again.
+#
+#     Both are run against a SCRATCH copy of targets/codex/ - the real
+#     generated artifact is never modified, not even transiently.
+# ==========================================================================
+assert_bad_bundle_refused() {
+  # assert_bad_bundle_refused <label> <installer_scratch>: runs the
+  # scratch installer (whose bundled targets/codex/AGENTS.md the caller
+  # has already broken) against a fresh throwaway $HOME and asserts it
+  # refuses before writing anything, names the BUNDLED file as the
+  # problem, and leaves the user with a file that is still perfectly
+  # uninstallable - i.e. never wedged.
+  bb_label=$1
+  bb_scratch=$2
+  bb_home=$(make_temp_home)
+  cleanup_dirs="$cleanup_dirs $bb_home"
+  mkdir -p "$bb_home/.codex"
+  printf 'My own instructions.\n' >"$bb_home/.codex/AGENTS.md"
+  bb_snapshot=$(snapshot_file "$bb_home/.codex/AGENTS.md")
+  cleanup_dirs="$cleanup_dirs $bb_snapshot"
+  bb_before=$(full_tree_listing "$bb_home")
+
+  if bb_out=$(HOME="$bb_home" "$bb_scratch/targets/codex/install.sh" --yes 2>&1); then bb_exit=0; else bb_exit=$?; fi
+  assert_eq "1" "$bb_exit" "$bb_label: install --yes must refuse an unusable bundled block instead of writing it -- output: $bb_out"
+  # The installer resolves its own repo_root through `cd ... && pwd`,
+  # which expands symlinks - on macOS a mktemp -d under /var comes back
+  # as /private/var - so the expected path is resolved the same way
+  # rather than compared against the raw mktemp string.
+  bb_resolved=$(cd "$bb_scratch" && pwd)
+  assert_contains "$bb_out" "$bb_resolved/targets/codex/AGENTS.md" "$bb_label: the refusal must name the BUNDLED file that is wrong, not blame the user's own AGENTS.md"
+  assert_not_contains "$bb_out" "Installed:" "$bb_label: nothing may be reported as installed"
+  assert_eq "identical" "$(files_byte_status "$bb_snapshot" "$bb_home/.codex/AGENTS.md")" "$bb_label: the user's AGENTS.md must be byte-unchanged -- expected: $(od_dump "$bb_snapshot") / actual: $(od_dump "$bb_home/.codex/AGENTS.md")"
+  bb_after=$(full_tree_listing "$bb_home")
+  assert_eq "$bb_before" "$bb_after" "$bb_label: the whole \$HOME tree must be unchanged (no skill files written either)"
+
+  # The wedge itself: before this validation existed, the first install
+  # succeeded and every later install AND uninstall failed forever. A
+  # clean uninstall here is the direct proof that never happened.
+  if bb_un_out=$(HOME="$bb_home" "$bb_scratch/targets/codex/install.sh" --uninstall --yes 2>&1); then bb_un_exit=0; else bb_un_exit=$?; fi
+  assert_eq "0" "$bb_un_exit" "$bb_label: the user's AGENTS.md must not be wedged - --uninstall --yes must still exit 0 afterwards -- output: $bb_un_out"
+}
+
+# --- 38a: the bundled block quotes one of squirrel-mode's own markers ---
+installer_scratch_38a=$(make_codex_installer_scratch)
+cleanup_dirs="$cleanup_dirs $installer_scratch_38a"
+{
+  printf 'A quoted example of the closing marker:\n'
+  printf '%s\n' '<!-- END SQUIRREL-MODE -->'
+} >>"$installer_scratch_38a/targets/codex/AGENTS.md"
+assert_bad_bundle_refused "38a (bundled block quotes an END marker)" "$installer_scratch_38a"
+
+# --- 38b: the bundled block has no trailing newline --------------------
+installer_scratch_38b=$(make_codex_installer_scratch)
+cleanup_dirs="$cleanup_dirs $installer_scratch_38b"
+bundle38b=$(cat "$installer_scratch_38b/targets/codex/AGENTS.md")
+printf '%s' "$bundle38b" >"$installer_scratch_38b/targets/codex/AGENTS.md"
+assert_bad_bundle_refused "38b (bundled block has no trailing newline)" "$installer_scratch_38b"
+
+# --- 38c: positive control - an UNMODIFIED scratch bundle must still ----
+#     install and uninstall cleanly, or 38a/38b could be passing because
+#     the new validation rejects every bundle.
+installer_scratch_38c=$(make_codex_installer_scratch)
+cleanup_dirs="$cleanup_dirs $installer_scratch_38c"
+home38c=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home38c"
+mkdir -p "$home38c/.codex"
+printf 'My own instructions.\n' >"$home38c/.codex/AGENTS.md"
+snapshot38c=$(snapshot_file "$home38c/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $snapshot38c"
+if out38c1=$(HOME="$home38c" "$installer_scratch_38c/targets/codex/install.sh" --yes 2>&1); then exit38c1=0; else exit38c1=$?; fi
+assert_eq "0" "$exit38c1" "38c (positive control): the real, unmodified bundled block must still pass validation and install -- output: $out38c1"
+assert_contains "$out38c1" "Installed:" "38c (positive control): the unmodified bundle must actually be installed, not merely accepted"
+if out38c2=$(HOME="$home38c" "$installer_scratch_38c/targets/codex/install.sh" --uninstall --yes 2>&1); then exit38c2=0; else exit38c2=$?; fi
+assert_eq "0" "$exit38c2" "38c (positive control): uninstall must still exit 0 -- output: $out38c2"
+assert_eq "identical" "$(files_byte_status "$snapshot38c" "$home38c/.codex/AGENTS.md")" "38c (positive control): the round trip through a scratch installer copy must still be byte-exact"
+
 assert_report

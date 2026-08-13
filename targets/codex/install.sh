@@ -609,6 +609,61 @@ require_bundled_agents() {
   [ -f "$bundled_agents" ] || fail "the bundled source $bundled_agents is missing - this checkout looks incomplete. Re-run 'sh scripts/build.sh' from the repo root to regenerate it, then re-run this installer."
 }
 
+validate_bundled_block() {
+  # validate_bundled_block <scratch_path>: fail()s, before this script
+  # writes anything at all, unless the bundled block it is about to
+  # insert can actually be FOUND AGAIN afterwards.
+  #
+  # render_agents_install validates the USER's file thoroughly - marker
+  # shape, fence awareness, an unterminated fence at end of file - and
+  # used to validate the content it INSERTS not at all. That content is
+  # generated from rules/base-rules.md, which is exactly the sort of
+  # file a later contributor quotes the markers in ("here is what the
+  # installed block looks like") or adds a fenced example to. Two shapes
+  # wedge a user's AGENTS.md permanently, and both used to install
+  # cleanly the first time:
+  #   - a line equal to BEGIN_MARKER or END_MARKER outside a fence: the
+  #     installed file then has two of one marker, markers_state reports
+  #     "corrupt", and every later install AND uninstall refuses to
+  #     guess - forever;
+  #   - a bundled file whose last line is not newline-terminated, or
+  #     that ends inside an unterminated fence: the END marker appended
+  #     after it is glued onto that last line, or swallowed by the
+  #     fence, so the installed file has a BEGIN and no findable END.
+  # Either way the FIRST --yes succeeds and the user's own AGENTS.md can
+  # never be updated or uninstalled by this script again - a dead end
+  # squirrel-mode created in their file, which is the one outcome this
+  # script's whole design is meant to make impossible.
+  #
+  # The check is the real thing rather than a proxy for it: render the
+  # exact bytes that would be inserted, run the SAME marker_scan every
+  # other decision here is made with over them, and require the result
+  # to be precisely one block - BEGIN on the first line, END on the
+  # last, one of each, no fence left open. Any bundled content that
+  # survives that is content install and uninstall can both find again.
+  vbb_scratch=$1
+  {
+    printf '%s\n' "$BEGIN_MARKER"
+    cat "$bundled_agents"
+    printf '%s\n' "$END_MARKER"
+  } >"$vbb_scratch"
+  vbb_total=$(wc -l <"$vbb_scratch" | tr -d ' ')
+  # shellcheck disable=SC2046 # marker_scan's six-integer output,
+  # deliberately word-split - see find_marker_lines above.
+  set -- $(marker_scan "$vbb_scratch")
+  vbb_b=$1
+  vbb_e=$2
+  vbb_bc=$3
+  vbb_ec=$4
+  vbb_fence=$5
+  rm -f "$vbb_scratch"
+  if [ "$vbb_b" -eq 1 ] && [ "$vbb_e" -eq "$vbb_total" ] &&
+    [ "$vbb_bc" -eq 1 ] && [ "$vbb_ec" -eq 1 ] && [ "$vbb_fence" -eq 0 ]; then
+    return 0
+  fi
+  fail "the bundled block in $bundled_agents cannot be installed safely: wrapped in squirrel-mode's own BEGIN/END markers it does not come out as exactly one findable block (of $vbb_total lines: first BEGIN at $vbb_b, first END at $vbb_e, $vbb_bc BEGIN and $vbb_ec END lines outside any fence, ends inside an unterminated fence: $vbb_fence). Installing it would leave an AGENTS.md that no later install could update and no uninstall could remove. Nothing was written. This is a defect in what generated that file, not in your own AGENTS.md: check rules/base-rules.md for a line equal to one of squirrel-mode's marker lines, an unterminated \`\`\` or ~~~ fence, or a missing final newline, then re-run 'sh scripts/build.sh' from the repo root."
+}
+
 require_own_agents_block() {
   # require_own_agents_block <begin_line> <end_line> <gerund>: returns
   # normally when the block spanning <begin_line>..<end_line> (inclusive)
@@ -753,6 +808,10 @@ render_agents_install() {
   # a byte-exact round trip - only head/tail/cat on the file directly.
   out=$1
   require_bundled_agents
+  # Validated once, here, before any of the three branches below - all
+  # three insert this same bundled content, and none of them may write
+  # a block that can never be found again. See validate_bundled_block.
+  validate_bundled_block "$out.block"
   if [ ! -f "$agents_file" ]; then
     {
       printf '%s\n' "$BEGIN_MARKER"
