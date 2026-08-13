@@ -931,6 +931,25 @@ assert_contains "$other_tools_content" "No network calls" "docs/OTHER-TOOLS.md m
 assert_contains "$other_tools_content" "No telemetry" "docs/OTHER-TOOLS.md must carry the privacy note (no telemetry)"
 assert_contains "$other_tools_content" "$profile_path_needle" "docs/OTHER-TOOLS.md must state the shared profile path consequence"
 
+# Invariant 6e, digest's narrowed auto-trigger. The Cursor bullet in this
+# doc contrasts Cursor's explicit-invocation-only Agent Skills against
+# Claude Code's model-invocable digest, and to do that it describes what
+# that model invocation actually fires on. That trigger was NARROWED
+# (skills/digest/SKILL.md's description: the ordinary-language question
+# fires it only when the pasted content is recognisably a ticket, email
+# or note, never code/trace/log/diff/config/command output), so the same
+# fact now lives in two files. tests/test_skills.sh scenario 28 pins the
+# skill's end; these four pin BOTH ends against the same two needles, so
+# narrowing one file without the other fails here rather than leaving
+# this doc describing a trigger that no longer ships.
+digest_narrowing_needle="recognisably a ticket, an email, or a written note"
+digest_exclusion_needle="code, a stack trace, a log, a diff, a config, or command output"
+digest_skill_content=$(read_file "$repo_root/skills/digest/SKILL.md")
+assert_contains "$other_tools_content" "$digest_narrowing_needle" "docs/OTHER-TOOLS.md's Cursor contrast must describe Claude Code's digest trigger as NARROWED - it fires on the ordinary-language question only when what was pasted is recognisably a ticket, email or note"
+assert_contains "$other_tools_content" "$digest_exclusion_needle" "docs/OTHER-TOOLS.md's Cursor contrast must also name the content classes that never fire digest - without that half the narrowing is not stated, only hinted"
+assert_contains "$digest_skill_content" "$digest_narrowing_needle" "skills/digest/SKILL.md must carry the same narrowing wording docs/OTHER-TOOLS.md describes (cross-file agreement, invariant 6e)"
+assert_contains "$digest_skill_content" "$digest_exclusion_needle" "skills/digest/SKILL.md must carry the same exclusion list docs/OTHER-TOOLS.md describes (cross-file agreement, invariant 6e)"
+
 # F8 (invariant 6e - "when a fix propagates to two files, a test must
 # enforce it"): the lock is documented in FIVE places (both installer
 # headers, both usage() blocks, and this doc) - nothing pinned that

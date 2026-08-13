@@ -61,10 +61,13 @@ feature set; this page states the practical consequences plainly, with no hedgin
   **Agent Skills** at `~/.cursor/skills/squirrel-digest/` and `~/.cursor/skills/squirrel-plan/`,
   invoked explicitly as `/squirrel-digest` and `/squirrel-plan`. Both carry
   `disable-model-invocation: true`, so Cursor never applies them on its own the way Claude Code's
-  model-invocable `digest` can trigger on an ordinary-language "what should I do with this?" asked
-  alongside a pasted ticket. Cursor Agent Skills have no `alwaysApply` equivalent, so explicit
-  invocation is the only mode available; each one's "Trigger on…" description therefore describes
-  when *you* should reach for the command, not something Cursor will act on by itself. The
+  model-invocable `digest` still can — where "still can" is itself narrow, and worth stating as it
+  ships: there, an ordinary-language "what should I do with this?" fires `digest` unprompted **only**
+  when what was pasted alongside is recognisably a ticket, an email, or a written note, and never
+  when it is code, a stack trace, a log, a diff, a config, or command output. Narrow or not, that is
+  a mode Cursor does not have at all: Cursor Agent Skills have no `alwaysApply` equivalent, so
+  explicit invocation is the only mode available; each one's "Trigger on…" description therefore
+  describes when *you* should reach for the command, not something Cursor will act on by itself. The
   project-scoped `.cursor/commands/*.md` copies still exist for anyone who also wants `/digest` and
   `/plan` inside one specific repository.
 
