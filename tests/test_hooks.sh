@@ -2458,6 +2458,121 @@ decision19cr=$(printf '%s' "$out19cr" | jq -r '.hookSpecificOutput.permissionDec
 assert_eq "allow" "$decision19cr" "S10-1: a genuine non-symlinked nested checkpoint path must still be allowed for tool_name Read too, alongside the symlink fixtures in the same directory"
 
 # ==========================================================================
+# 19d. allow-checkpoint.sh - a ".." COMPONENT anywhere in file_path:
+#      "defer", before any other decision.
+#
+# THE DEFECT THIS CLOSES. normalize_path resolves ".." LEXICALLY, against
+# the path's own text. The OS resolves symlinks PHYSICALLY, as it walks,
+# and applies ".." to WHERE THE SYMLINK LANDED. So a ".." placed directly
+# after a symlink planted inside checkpoints/ CANCELLED that symlink out
+# of the string - and component_walk_has_symlink walks the NORMALISED
+# remainder, so by the time Layer 2 ran there was no symlink component
+# left for `[ -L ]` to find. The normalised text still began with the
+# checkpoints prefix, so Layer 1 was satisfied too, and `allow` came
+# back for a path the OS resolves to the user's private key.
+#
+# Reproduced against the shipped script before the fix, for Read and for
+# Write alike, with the exact fixture below: EVIL -> $HOME, then
+# "EVIL/../<home-basename>/.ssh/id_rsa" walks back into $HOME and out to
+# .ssh/. The direct "EVIL/x.md" path (no "..") deferred correctly the
+# whole time, which is what made this a gap rather than a missing layer -
+# scenario 19 above already covers that shape.
+#
+# ASSERTED IN BOTH DIRECTIONS, deliberately. A guard that rejects ".."
+# could trivially be made to over-reject by matching the two characters
+# rather than the path COMPONENT, and "my..file.md" is a perfectly
+# ordinary filename. The second half below is the guard-cannot-bar-
+# correct-work assertion, and it uses NESTED paths on purpose: a direct
+# child file of checkpoints/ defers on Write under the D1 flat-shape rule
+# (scenario 14d), which would look exactly like this fix over-blocking.
+# ==========================================================================
+home19d=$(new_home)
+mkdir -p "$home19d/.squirrel/checkpoints/proj-19d" "$home19d/.ssh"
+printf 'PRIVATE-KEY\n' >"$home19d/.ssh/id_rsa"
+ln -s "$home19d" "$home19d/.squirrel/checkpoints/EVIL"
+home19d_base=${home19d##*/}
+attack19d="$home19d/.squirrel/checkpoints/EVIL/../$home19d_base/.ssh/id_rsa"
+
+for tool19d in Write Edit Read; do
+  stdin19d=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "$tool19d" "$attack19d")
+  out19d=$(capture_stdout "$allow_checkpoint_script" "$home19d" "$stdin19d")
+  exit19d=$(capture_exit "$allow_checkpoint_script" "$home19d" "$stdin19d")
+  assert_no_opinion "$out19d" "$exit19d" "allow-checkpoint.sh must express NO OPINION for a $tool19d whose file_path uses '..' to cancel out a symlink planted inside checkpoints/ - the OS resolves that symlink physically before applying '..', so the lexical normalisation never sees the symlink Layer 2 is supposed to test"
+done
+
+# The other three spellings of a ".." COMPONENT, so the guard is proved
+# against the component and not against one arrangement of it.
+scenario19d_shapes="interior:$home19d/.squirrel/checkpoints/proj-19d/../proj-19d/a.md
+trailing:$home19d/.squirrel/checkpoints/proj-19d/..
+double:$home19d/.squirrel/checkpoints/proj-19d/../../checkpoints/proj-19d/a.md"
+
+old_ifs=$IFS
+IFS='
+'
+for case19d in $scenario19d_shapes; do
+  IFS=$old_ifs
+  case19d_name=${case19d%%:*}
+  case19d_path=${case19d#*:}
+  stdin19d_s=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$case19d_path")
+  out19d_s=$(capture_stdout "$allow_checkpoint_script" "$home19d" "$stdin19d_s")
+  exit19d_s=$(capture_exit "$allow_checkpoint_script" "$home19d" "$stdin19d_s")
+  assert_no_opinion "$out19d_s" "$exit19d_s" "allow-checkpoint.sh must express NO OPINION for a '..' component in the '$case19d_name' position, even where the path lexically normalises back inside checkpoints/"
+  IFS='
+'
+done
+IFS=$old_ifs
+
+# The regression half: two dots in a FILENAME are not a ".." component
+# and must still reach a normal decision. Nested paths, per the note
+# above, so D1's flat-shape defer cannot be mistaken for this guard.
+scenario19d_ok="my..file.md
+..hidden.md
+...
+a..b..c.md"
+
+old_ifs=$IFS
+IFS='
+'
+for name19d in $scenario19d_ok; do
+  IFS=$old_ifs
+  stdin19d_ok=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-19d/%s"}}' "$home19d" "$name19d")
+  out19d_ok=$(capture_stdout "$allow_checkpoint_script" "$home19d" "$stdin19d_ok")
+  decision19d_ok=$(printf '%s' "$out19d_ok" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision19d_ok="<jq error>"
+  assert_eq "allow" "$decision19d_ok" "a checkpoint filename that merely CONTAINS two dots ('$name19d') is not a '..' path component and must still be allowed - the guard rejects the component, never the two characters"
+  IFS='
+'
+done
+IFS=$old_ifs
+
+# --- FAILURE PROOF for scenario 19d, mutated against the CURRENT text of
+# allow-checkpoint.sh (not against the shape the bug was found in): the
+# one `case` pattern that implements the gate is replaced with a pattern
+# that can never match any path, leaving every other layer exactly as it
+# ships. If the attack still defers under that mutant, the assertions
+# above are being satisfied by some other layer and prove nothing about
+# this one.
+fp19d_script=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016 # literal source text of allow-checkpoint.sh.
+fp19d_line=$(line_of "$fp19d_script" '    */../*)')
+assert_eq "yes" "$(if [ -n "$fp19d_line" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (19d) must find the '..' gate's own case pattern in allow-checkpoint.sh - if this line was renamed, the mutant below silently stops mutating anything and every assertion under it goes vacuous"
+[ -n "$fp19d_line" ] || fp19d_line=0
+replace_line "$fp19d_script" "$fp19d_line" '    */..NEVER-MATCHES-ANY-REAL-PATH../*)'
+
+for tool19d_fp in Write Read; do
+  fp19d_stdin=$(printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "$tool19d_fp" "$attack19d")
+  fp19d_out=$(capture_stdout "$fp19d_script" "$home19d" "$fp19d_stdin")
+  fp19d_decision=$(printf '%s' "$fp19d_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp19d_decision="<jq error>"
+  assert_eq "allow" "$fp19d_decision" "FAILURE PROOF (19d): with ONLY the '..' gate disabled, allow-checkpoint.sh must incorrectly ALLOW the $tool19d_fp of the symlink-cancelling traversal path - proving 19d's defer assertions measure that gate and not Layer 1 or Layer 2"
+done
+
+# And the mutant must still allow the ordinary two-dot filenames, so the
+# proof above is isolating the gate rather than a script broken outright.
+fp19d_ok_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-19d/my..file.md"}}' "$home19d")
+fp19d_ok_out=$(capture_stdout "$fp19d_script" "$home19d" "$fp19d_ok_stdin")
+fp19d_ok_decision=$(printf '%s' "$fp19d_ok_out" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || fp19d_ok_decision="<jq error>"
+assert_eq "allow" "$fp19d_ok_decision" "FAILURE PROOF (19d): the mutant must still allow an ordinary two-dot filename - the mutation disabled exactly one gate, it did not break the script into deferring or allowing everything"
+
+# ==========================================================================
 # 20. allow-checkpoint.sh - tool_name other than Write/Edit/Read: "defer".
 # ==========================================================================
 home20=$(new_home)

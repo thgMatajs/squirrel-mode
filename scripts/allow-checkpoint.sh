@@ -85,7 +85,14 @@
 #
 # THIS SCRIPT IS A SECURITY BOUNDARY. `allow` must only ever come back
 # for a path that genuinely, after normalisation, resolves inside
-# $HOME/.squirrel/checkpoints/. Two layers enforce that:
+# $HOME/.squirrel/checkpoints/. A gate and two layers enforce that:
+#
+#   Layer 0 (the `..` gate, always active, no external tool): a
+#   file_path carrying a `..` PATH COMPONENT defers outright, before
+#   Layer 1 or Layer 2 ever runs on it. See "WHY A `..` COMPONENT IS
+#   REJECTED OUTRIGHT", immediately below, for the attack this closes
+#   and why it is closed by rejection rather than by making Layer 1
+#   cleverer.
 #
 #   Layer 1 (always active, pure POSIX sh, no external tool required):
 #   normalize_path() lexically resolves "." and ".." segments in the
@@ -96,15 +103,22 @@
 #   matters: quoting a variable inside a `${var#pattern}` pattern makes
 #   its glob-metacharacters (`*`, `?`, `[`) literal per POSIX, which a
 #   bare `case "$x" in $prefix*)` would not guarantee if $HOME ever
-#   contained one. This layer alone defeats both required attacks:
+#   contained one. What this layer defeats, stated for what it is:
+#     - prefix-escape: ".../checkpoints-evil/x" is rejected by the
+#       literal prefix strip because "checkpoints-evil" is not
+#       "checkpoints" followed by "/" - the boundary character is
+#       checked, not merely the substring. Layer 1 is the WHOLE defence
+#       here, and its `..` handling is not involved at all.
 #     - traversal: ".../checkpoints/../../../.ssh/id_rsa" normalizes to
 #       "/.../.ssh/id_rsa", which does not start with the checkpoints
-#       prefix at all.
-#     - prefix-escape: ".../checkpoints-evil/x" is never touched by the
-#       ".." logic (no such segment) and is rejected by the literal
-#       prefix strip because "checkpoints-evil" is not "checkpoints"
-#       followed by "/" - the boundary character is checked, not merely
-#       the substring.
+#       prefix at all - so this defers at Layer 1 too. But Layer 1 is NO
+#       LONGER what is relied on for it, and the paragraph that used to
+#       say "this layer alone defeats both required attacks" was wrong
+#       about exactly this case (see the `..` section below): Layer 0
+#       now rejects the traversal before Layer 1 is reached, and Layer
+#       1's `..` handling is left in place only because normalize_path
+#       is also applied to checkpoints_dir, whose own text this script
+#       does not control.
 #   Layer 1 has no symlink awareness at all - a symlink's target is a
 #   filesystem fact, not something present in the path's own text - so
 #   it cannot by itself defeat a symlink planted AT or BELOW
@@ -118,6 +132,53 @@
 #   command) finds ANY of them, INCLUDING checkpoints_dir, to be a
 #   symlink, regardless of where it points. It never calls `realpath`
 #   or `readlink` at all, so it works identically with an empty PATH.
+#   Layer 2 walks the NORMALISED remainder, which is only the same set
+#   of components the OS will actually traverse because Layer 0 has
+#   already removed every `..` from the string - see below.
+#
+# WHY A `..` COMPONENT IS REJECTED OUTRIGHT (Layer 0). Layer 1 resolves
+# `..` LEXICALLY - against the path's own text, with no filesystem
+# access. The OS does not: it resolves symlinks PHYSICALLY, as it walks,
+# and applies `..` to WHERE THE SYMLINK LANDED, not to the name that
+# preceded it. Those two readings of the same string disagree the moment
+# a symlink sits in front of a `..`, and the disagreement erased the
+# symlink from the text before Layer 2 could ever `[ -L ]` it:
+#
+#   ln -s "$HOME" "$HOME/.squirrel/checkpoints/EVIL"
+#   file_path = "$HOME/.squirrel/checkpoints/EVIL/../<home-basename>/.ssh/id_rsa"
+#
+# Layer 1 cancelled "EVIL" against the following ".." and handed Layer 2
+# a remainder with no EVIL component left in it, so the component walk
+# had nothing to test and returned "no symlink found"; the normalised
+# text still began with the checkpoints prefix, so Layer 1 was satisfied
+# too, and `allow` came back. The OS, asked to open the same string,
+# would have followed EVIL to $HOME first and then applied ".." to
+# $HOME's PARENT - reading (or writing) the user's private key with a
+# permission prompt the plugin had just suppressed. Reproduced for Read
+# and for Write alike.
+#
+# The fix is REJECTION, not a cleverer Layer 1. Making normalize_path
+# "symlink-aware" means resolving the filesystem, which is (a) a
+# `realpath`/`readlink` dependency this file deliberately removed once
+# already (see "LAYER 3 WAS REMOVED" below) and (b) TOCTOU-exposed
+# regardless: whatever this script resolves, the symlink can be
+# repointed between that resolution and the tool call it approved.
+# Rejecting the `..` COMPONENT closes the whole class instead of
+# narrowing it, and it is a guard that cannot bar correct work: nothing
+# this plugin ships ever emits a `..` segment in a checkpoint path. The
+# model is handed the absolute checkpoint path verbatim, on the
+# "Project checkpoint path:" line load-profile.sh injects, and every
+# path in the injected file-list block is absolute and already
+# normalised. The cost when this does fire is one ordinary permission
+# prompt - never a denial - which is this script's cost for every
+# no-opinion answer.
+#
+# It is the COMPONENT that is rejected, never the two characters. A
+# filename may contain any number of dots and is unaffected:
+# "my..file.md", "..hidden.md" and "..." are all handled exactly as they
+# were before this gate existed. See tests/test_hooks.sh scenario 19d
+# for both halves - the attack deferring, and those three names still
+# reaching a normal decision.
 #
 # FIXED BLOCKER (cycle 3): before this fix, `component_walk_has_symlink`
 # set `current=$base` and only tested `[ -L "$current" ]` AFTER
@@ -640,6 +701,29 @@ decide() {
     printf 'defer'
     return 0
   fi
+
+  # DOTDOT REJECTION (see "WHY A `..` COMPONENT IS REJECTED OUTRIGHT" in
+  # the header). Any `..` PATH COMPONENT defers, before normalize_path or
+  # component_walk_has_symlink ever see this string. Wrapping both ends
+  # in "/" is what makes ONE pattern cover all four spellings - a bare
+  # "..", a leading "../x", a trailing "x/..", and an interior "/../" -
+  # while a filename that merely CONTAINS two dots ("my..file.md",
+  # "..hidden.md", "...") never produces the literal four-byte sequence
+  # "/../" and is handled normally, exactly as before.
+  #
+  # Placed AFTER the length cap directly above, deliberately: the cap is
+  # not a decision about what the path MEANS, it is the bound on
+  # attacker-controlled input that the "FIXED MAJOR" paragraph above
+  # exists for, and it must stay first so no unbounded string is ever
+  # pattern-matched here either. Both arms defer, so the order between
+  # them cannot change any decision - and no `allow` is reachable past
+  # either of them.
+  case "/$file_path/" in
+    */../*)
+      printf 'defer'
+      return 0
+      ;;
+  esac
 
   case "$file_path" in
     /*) ;;
