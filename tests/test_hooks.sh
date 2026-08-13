@@ -4125,7 +4125,42 @@ assert_eq "allow" "$fp2930_decision_r" "S10-1 FAILURE PROOF (scenarios 29/30 Rea
 # some accidental early exit elsewhere. Removes exactly the
 # MAX_FILE_PATH_LEN check, so normalize_path and
 # component_walk_has_symlink run their full quadratic cost on the same
-# 3000-segment file_path scenario 33 uses.
+# file_path scenario 33 uses.
+#
+# WHY THE INPUT GROWS INSTEAD OF THE CLOCK THRESHOLD MOVING. A fixed
+# "must take more than 2 seconds" reads the MACHINE, not the code. At
+# 3000 segments the uncapped walk costs ~6.1s on the reference macOS
+# machine but only ~67ms on an ubuntu-24.04 runner - so the same
+# assertion that proves the blowup on one concluded "there is no
+# blowup" on the other, and the failure proof went red on CI while
+# proving nothing about the code either way. A wall-clock threshold
+# cannot be made portable by picking a better number; the number is the
+# problem.
+#
+# What IS machine-independent is the SHAPE of the cost. The walk is
+# quadratic, so doubling the segment count quadruples the time on any
+# machine. This escalates the input - by self-concatenating the segment
+# string, which doubles it in one assignment instead of a 2N-iteration
+# append loop - until the mutant is unambiguously slow HERE, then
+# reports the size it needed. Measured inside an ubuntu-24.04 container:
+# 3000 -> 67ms, 6000 -> 248ms, 12000 -> 944ms, 24000 -> 3869ms, a clean
+# 4x per doubling. macOS is slow enough to stop at the first size and
+# pays exactly what it paid before.
+#
+# The doubling bound is a backstop, not a tuning knob: 5 doublings is
+# 96000 segments and 1024x the base cost, so it is reached only by a
+# machine more than an order of magnitude faster than the container
+# above - and if the blowup genuinely were absent (say the mutation
+# stopped applying because its anchor line moved), the loop would run
+# out cheaply and the assertion below would go RED, which is the honest
+# outcome.
+#
+# The measurement is then closed with the other half of the comparison:
+# the REAL, capped script, on the SAME machine, at the SAME grown input,
+# must still be fast. That ordering - mutant slow, real script fast, one
+# machine, one input - is what actually proves the cap is the cause,
+# rather than the reader having to trust two numbers taken on different
+# machines at different times.
 # ==========================================================================
 fp33_script=$(make_script_scratch "$allow_checkpoint_script")
 # shellcheck disable=SC2016
@@ -4142,22 +4177,61 @@ while [ "$fp33_n" -lt 3000 ]; do
   fp33_seg="${fp33_seg}/a"
   fp33_n=$((fp33_n + 1))
 done
+fp33_segments=3000
 fp33_path="/tmp/unrelated-to-checkpoints$fp33_seg"
 fp33_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$fp33_path")
 
-fp33_t0=$(date +%s)
+# Sanity at the BASE size only. It runs the mutant twice more (stdout and
+# exit status are captured by separate helpers), and at an escalated size
+# that would be three quadratic runs instead of one for no extra proof -
+# the decision this checks does not change with the segment count.
 fp33_out=$(capture_stdout "$fp33_script" "$fp33_home" "$fp33_stdin")
-fp33_t1=$(date +%s)
-fp33_delta=$((fp33_t1 - fp33_t0))
 fp33_exit=$(capture_exit "$fp33_script" "$fp33_home" "$fp33_stdin")
 assert_no_opinion "$fp33_out" "$fp33_exit" "FAILURE PROOF (scenario 33) sanity: the cap-removed mutant must still eventually defer this unrelated path (only its SPEED is the regression under test)"
+
+fp33_delta=0
+fp33_doublings=0
+while :; do
+  fp33_t0=$(date +%s)
+  capture_stdout "$fp33_script" "$fp33_home" "$fp33_stdin" >/dev/null
+  fp33_t1=$(date +%s)
+  fp33_delta=$((fp33_t1 - fp33_t0))
+  if [ "$fp33_delta" -gt 2 ]; then
+    break
+  fi
+  if [ "$fp33_doublings" -ge 5 ]; then
+    break
+  fi
+  fp33_seg="$fp33_seg$fp33_seg"
+  fp33_segments=$((fp33_segments * 2))
+  fp33_doublings=$((fp33_doublings + 1))
+  fp33_path="/tmp/unrelated-to-checkpoints$fp33_seg"
+  fp33_stdin=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$fp33_path")
+done
 
 if [ "$fp33_delta" -gt 2 ]; then
   fp33_slow=yes
 else
   fp33_slow=no
 fi
-assert_eq "yes" "$fp33_slow" "FAILURE PROOF (scenario 33): a mutant with the MAX_FILE_PATH_LEN cap removed must reproduce the multi-second quadratic blowup on the same 3000-segment file_path (took ${fp33_delta}s) - proving scenario 33's fast-rejection assertion is not vacuous"
+assert_eq "yes" "$fp33_slow" "FAILURE PROOF (scenario 33): a mutant with the MAX_FILE_PATH_LEN cap removed must reproduce the multi-second quadratic blowup once the file_path is large enough for this machine to show it (took ${fp33_delta}s at $fp33_segments segments, after $fp33_doublings doubling(s) from 3000) - proving scenario 33's fast-rejection assertion is not vacuous"
+
+# The other half of the same comparison, and the reason this proof is
+# about the CAP rather than about the machine: same machine, same
+# ~$fp33_segments-segment input the mutant just crawled on, the real
+# script must still answer inside the same couple of seconds scenario 33
+# allows. Only the length cap can account for that difference - it is the
+# one line between the two scripts.
+fp33_real_t0=$(date +%s)
+capture_stdout "$allow_checkpoint_script" "$fp33_home" "$fp33_stdin" >/dev/null
+fp33_real_t1=$(date +%s)
+fp33_real_delta=$((fp33_real_t1 - fp33_real_t0))
+if [ "$fp33_real_delta" -le 2 ]; then
+  fp33_real_fast=yes
+else
+  fp33_real_fast=no
+fi
+assert_eq "yes" "$fp33_real_fast" "FAILURE PROOF (scenario 33), the ordering that names the cause: at the SAME $fp33_segments-segment file_path where the cap-removed mutant took ${fp33_delta}s, the real capped script must still answer in a couple of seconds or less (took ${fp33_real_delta}s) - one machine, one input, one line of difference, so the speed can only be attributed to MAX_FILE_PATH_LEN"
 
 # --- Failure proof for scenario 34 (the cycle-3 MINOR UTF-8 fix):
 # removes exactly the strip_incomplete_utf8_tail call, so the byte cap
