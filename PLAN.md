@@ -185,12 +185,16 @@ ranges from 15 to 60 minutes. It is a **design choice**, labelled as one, not a 
 → **Rules:** every Phase-1 step in `/squirrel:plan` carries a concrete estimate and must be ≤45 min;
 concrete time language everywhere.
 
-**Prior academic validation that this tool category works.** `ADHD`
-*Tether: A Personalized Support Assistant for Software Engineers with ADHD* — Shah, Magalhaes, Gama &
-de Souza Santos, arXiv:2509.01946 (verified) — validates LLMs as personalized support for
-neurodivergent developers. It uses local activity monitoring, RAG, and gamification. squirrel-mode
-covers the communication layer of the same space with zero infrastructure; link Tether in README as
-the heavier, complementary direction.
+**Related work — the category is explored, not validated.** No population tag, deliberately: nobody
+was measured.
+⚠ *Tether: A Personalized Support Assistant for Software Engineers with ADHD* — Shah, Magalhaes,
+Gama & de Souza Santos, arXiv:2509.01946 (verified) — was described here as **validating** LLMs as
+personalized support for neurodivergent developers, under an `ADHD` tag. Its own abstract reports
+"preliminary validation through self-use" and states, "While not yet evaluated by target users". A
+tool built *for* a population is not a measurement *in* one, so the tag is removed rather than
+swapped for a nearer-fitting one. Tether *explores* the category, with local activity monitoring,
+RAG, and gamification. squirrel-mode covers the communication layer of the same space with zero
+infrastructure; link Tether in README as the heavier, complementary direction. It justifies no rule.
 
 **During the build**, run 2–3 additional searches to enrich `docs/RESEARCH.md` (e.g. "ADHD text
 comprehension formatting study", "plain language accessibility neurodivergent readers"). Verify

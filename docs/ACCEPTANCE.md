@@ -1316,9 +1316,17 @@ zero hits.
   corroborating, not the primary evidence — the automated, mutation-proved scan above is what will
   catch a future regression — but it is a genuine second pass over the actual command-position
   tokens in these six files, not a repetition of the same fixed list read twice.
-- **Disclosure:** `README.md`'s "Privacy and what it writes" section states the auto-approval
-  (lines 130–136), the symlink trust boundary (lines 138–140), and the one-write-per-turn cap (line
-  147). **New in this sweep:** `tests/test_targets.sh` scenario 35 pins both the symlink-boundary
+- **Disclosure:** `README.md`'s "Privacy and what it writes" section states the auto-approval (the
+  paragraph opening `One exception to the normal permission flow:`), the symlink trust boundary (the
+  paragraph opening `The auto-approval only covers paths that genuinely resolve inside that
+  directory`), and the one-write-per-turn cap (the sentence `The base rules that trigger these writes
+  also cap them at one checkpoint write per turn.`). Cited by section heading and quoted opening
+  rather than by line number: this bullet used to say lines 130–136, 138–140 and 147, all three of
+  which had drifted off the paragraphs they named, and any line number written here rots the next
+  time anything above them is edited. The second and third of those three spans are the ones
+  scenario 35 already pins by exact substring, so those two pointers cannot go stale without a test
+  failing; the first is not pinned, and is a plain citation.
+  **New in this sweep:** `tests/test_targets.sh` scenario 35 pins both the symlink-boundary
   and per-turn-cap sentences by exact substring, as an S8-5 regression guard (that fix had landed in
   prose with nothing pinning it afterward). Mutation-proved against the real README text: deleting
   the per-turn-cap sentence in a scratch copy turned the suite from 328 pass / 0 fail to 326 pass / 2
