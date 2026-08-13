@@ -189,9 +189,14 @@
 #      catch this alone: `ADHD` is a valid tag string, it is simply not a true one here, which is
 #      why this check is structural (how many tags are in that section) rather than a tag-spelling
 #      check.
+#  35. [THIRD VERIFICATION PASS] Finding 1 records that Cowan's discrete-chunk account is contested
+#      rather than settled, and Finding 2 no longer leans on a specific "~4-chunk" figure. Cowan
+#      (2010) is not retracted and has not failed replication, so this is a "note the contest" fix,
+#      not a removal — the competing continuous-resource account is stated in its own source's words
+#      and cited to Ma, Husain & Bays (2014).
 #
 # Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-# 30, 31, 32, 33, and 34 are
+# 30, 31, 32, 33, 34, and 35 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -2211,5 +2216,29 @@ awk '
 ' "$research_file" >"$tether_fixture"
 fixture_tether_pop=$(check_tether_population_lines "$tether_fixture")
 assert_eq "1" "$fixture_tether_pop" "FAILURE PROOF (scenario 34): re-adding an ADHD population tag to the Tether entry must be caught"
+
+# ================================================================================================
+# 35. Finding 1 records that Cowan's discrete-chunk account is contested rather than settled (third
+#     verification pass). Cowan (2010) is not retracted and has not failed replication, so nothing
+#     was removed — but a competing family of continuous-resource models disputes the discrete-slot
+#     framing, and this file's whole value is being trustworthy about its own limits. Pinned two
+#     ways: the competing account must be stated in the source's own words, and Finding 2 must no
+#     longer lean on a specific "~4-chunk" number that only one side of the dispute asserts.
+# ================================================================================================
+assert_contains "$research_flat_28" "limited resource that is distributed flexibly among all items" "Finding 1 must state the competing continuous-resource account in its source's own words"
+assert_contains "$research_flat_28" "Ma, W. J., Husain, M., & Bays, P. M. (2014)" "Finding 1 must cite Ma, Husain & Bays (2014) for the dispute over Cowan's discrete-chunk account"
+assert_not_contains "$research_flat_28" "~4-chunk capacity" "Finding 2 must not lean on a specific ~4-chunk number — that figure is exactly what the competing account disputes"
+
+proof_output=$( (
+  ASSERT_PASS_COUNT=0
+  ASSERT_FAIL_COUNT=0
+  fixture_body="$research_flat_28 below the ~4-chunk capacity Finding 1 establishes, rather than adding to it."
+  assert_not_contains "$fixture_body" "~4-chunk capacity" "proof check"
+) )
+case "$proof_output" in
+  *"FAIL:"*) fixture_cowan_caught=yes ;;
+  *) fixture_cowan_caught=no ;;
+esac
+assert_eq "yes" "$fixture_cowan_caught" "FAILURE PROOF (scenario 35): restoring the undisputed '~4-chunk capacity' framing must be caught"
 
 assert_report

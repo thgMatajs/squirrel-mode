@@ -111,6 +111,26 @@ folding them into one sentence was overreach corrected below (see Corrections).
   Learning and Motivation*, Vol. 8, pp. 47–89. Academic Press.
   <https://www.sciencedirect.com/science/article/abs/pii/S0079742108604521>
 
+⚠ Cowan's discrete-chunk account is not settled science, and this document previously presented it
+as though it were. A competing family of models treats working memory as a continuous resource
+shared out across items, with no fixed limit on how many are held — on that view it is the *quality*
+of each representation, not a count of slots, that sets performance. This is a live dispute, not a
+retraction: no replication failure, two accounts that each fit substantial evidence, and no
+resolution to report. Nothing built on Cowan here needs the number to be four, or to be a count of
+discrete items at all. What the rules below actually lean on is that concurrent capacity is small and
+is exceeded easily — common ground between both accounts, and all that is claimed.
+
+**Population:** general working memory
+
+**Citations:**
+- Ma, W. J., Husain, M., & Bays, P. M. (2014). *Changing concepts of working memory*. Nature
+  Neuroscience, 17(3), 347–356. <https://pubmed.ncbi.nlm.nih.gov/24569831/> — cited for the
+  existence of the dispute, not to settle it. Its own abstract names the account under contest
+  ("Working memory is widely considered to be limited in capacity, holding a fixed, small number of
+  items, such as Miller's 'magical number' seven or Cowan's four") and states the alternative in its
+  own voice: "It has recently been proposed that working memory might better be conceptualized as a
+  limited resource that is distributed flexibly among all items to be maintained in memory."
+
 Adolescents and young adults with ADHD show a disproportionate drop in working-memory accuracy as
 load increases, specifically more so than neurotypical peers at the same load levels.
 
@@ -134,8 +154,9 @@ once (6).
 ## Finding 2: Incremental presentation and external cues reduce load — inference, not a direct ADHD-population test
 
 External storage, explicit cues, and incrementally delivered information keep the amount of
-information held open at any one moment below the ~4-chunk capacity Finding 1 establishes, rather
-than adding to it. No source found tests cues or incremental presentation directly in an ADHD
+information held open at any one moment below the small concurrent capacity Finding 1 establishes,
+rather than adding to it — "small," not "four," because Finding 1 records that the exact form of that
+limit is disputed. No source found tests cues or incremental presentation directly in an ADHD
 sample: the two citations previously attached to this finding do not support it on inspection.
 Mukherjee et al. (2021)'s sentence about external storage and cues sits in its Introduction,
 explicitly attributed there to "earlier work," not to its own experiment — its own result is the
@@ -816,6 +837,16 @@ source that never mentions that population.
    population tag is **removed rather than swapped** — none of the three tags fits a paper that
    measured nobody, and the entry now says so in place of the tag. Low severity, since this entry
    justifies no rule, but the tag system is only worth anything if it is not applied by vibe.
+9. **Cowan's discrete-chunk account was presented as settled.** Finding 1 stated the small-chunk
+   capacity limit flatly, and Finding 2 leaned on it by naming a specific four-chunk figure as
+   something Finding 1 had established. Cowan (2010) is not retracted and has not failed replication,
+   so nothing is removed
+   here — but a competing family of continuous-resource models disputes the discrete-slot framing,
+   and a document whose whole value is being trustworthy about its own limits should say so rather
+   than let a reader assume consensus. Finding 1 now records the dispute, cited to Ma, Husain & Bays
+   (2014), which names Cowan's four as the account under contest and states the alternative in its
+   own abstract. Finding 2's specific-number wording is replaced with "small concurrent capacity,"
+   which is what its argument actually needs and what both accounts agree on.
 
 ---
 
