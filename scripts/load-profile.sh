@@ -818,6 +818,37 @@ CHECKPOINT_PRUNE_MAX_CANDIDATES=100
 # that is thirty absolute paths injected into every session start.
 CHECKPOINT_LIST_MAX_FILES=$CHECKPOINT_PRUNE_KEEP_NEWEST
 
+# CHECKPOINT_LIST_CHUNK: the largest number of operands checkpoint_file_lines
+# will hand a single `ls` call.
+#
+# FIXED MEDIUM (audit): past roughly ten thousand checkpoint files the
+# `ls -td -- "$@"` in that function died with E2BIG ("Argument list too
+# long", `ls exit=127` through the shell), and because the retry loop
+# there correctly declines to keep a FAILING `ls`'s partial, possibly
+# mis-ordered output, the whole block vanished. Reproduced with 10 000
+# real files: 20.6 s at SessionStart, "Resume available - run
+# /squirrel:pickup" still injected, and no list block at all - so
+# /squirrel:pickup fell back to enumerating the directory itself, which
+# is exactly the permission prompt this block exists to remove.
+#
+# The fix is a reduction pass, not a bigger buffer: the block only ever
+# names CHECKPOINT_LIST_MAX_FILES files, so the operand list is reduced
+# in rounds - each round slices the candidates into chunks of at most
+# CHECKPOINT_LIST_CHUNK, sorts each chunk on its own, and keeps only that
+# chunk's newest CHECKPOINT_LIST_MAX_FILES - until what is left fits in
+# one call. That is a tournament, and it is exactly correct for "the
+# newest K overall": any file in the global newest K is also in its own
+# chunk's newest K, because its chunk holds at most K of them. 10 000
+# candidates become 20 chunks, 200 finalists, one final sorted call.
+#
+# 500 is chosen to be an order of magnitude below the smallest ARG_MAX
+# this plugin could meet while still collapsing any realistic directory
+# in a single round. The whole pass is SKIPPED when there are no more
+# candidates than this, so every ordinary directory - and every existing
+# scenario in tests/test_hooks.sh - reaches the same single `ls` call it
+# always did, byte for byte.
+CHECKPOINT_LIST_CHUNK=500
+
 # checkpoint_slug_dir_untrusted <slug_dir>: returns 0 (true) when
 # <slug_dir> must NOT be pruned or read as resume data, because either
 # it or the checkpoints/ directory it sits in is a SYMLINK. `[ -L ]` is
@@ -1438,6 +1469,89 @@ checkpoint_file_lines() {
     # literal "1" is "not omitted", so no value of this variable can
     # reach the arithmetic test below and fail it.
     [ "$list_omitted" = "1" ] || list_omitted=0
+
+    # Pass 1b - REDUCE the operand list until one `ls` can take it. See
+    # CHECKPOINT_LIST_CHUNK above for the E2BIG failure this closes, for
+    # why a tournament is exactly correct for "the newest K overall", and
+    # for why 500 is the chunk size.
+    #
+    # A NO-OP AT ORDINARY SIZES, deliberately and checkably: the outer
+    # `while` never runs unless there are MORE than CHECKPOINT_LIST_CHUNK
+    # candidates, so a directory with anything short of 501 checkpoint
+    # files reaches the split below with `list_cands` untouched and gets
+    # the identical single `ls` call it always did. That is what keeps
+    # this addition off the path every existing scenario exercises.
+    #
+    # A CHUNK WHOSE `ls` FAILS RAISES THE MARKER RATHER THAN GOING
+    # QUIET. Its candidates are dropped - keeping a failing `ls`'s
+    # partial output would reintroduce the mis-ordering the Pass 2
+    # comment below rejects at length - so real memory goes unnamed, and
+    # that is precisely the condition the incompleteness marker exists to
+    # report. If EVERY chunk fails, `list_cands` ends up empty, the
+    # `[ "$#" -gt 0 ]` guard below emits no block at all, and
+    # /squirrel:pickup reads the absent block plus the "Resume available"
+    # line as its case 2 and enumerates the directory itself. Both
+    # degradations are honest; neither can present a short list as
+    # complete.
+    if [ -n "$list_cands" ]; then
+      list_total=$(printf '%s\n' "$list_cands" | wc -l | awk '{print $1}')
+    else
+      list_total=0
+    fi
+    while [ "$list_total" -gt "$CHECKPOINT_LIST_CHUNK" ]; do
+      list_round=""
+      list_start=1
+      while [ "$list_start" -le "$list_total" ]; do
+        list_end=$((list_start + CHECKPOINT_LIST_CHUNK - 1))
+        list_chunk=$(printf '%s\n' "$list_cands" | sed -n "${list_start},${list_end}p")
+        # The subshell is what makes this safe to nest: `set --` inside
+        # it rebinds only its own positional parameters, so the outer
+        # list is untouched, and `set -f` / IFS are restored by the
+        # subshell ending rather than by hand. It exits non-zero - and so
+        # leaves list_top empty - whenever `ls` itself failed, so a
+        # failing call's partial output is never piped onward.
+        list_top=$(
+          set -f
+          IFS=$list_nl
+          # shellcheck disable=SC2086
+          # Splitting on newline IS the conversion; `set -f` above
+          # removes the globbing half of the hazard. Same idiom, same
+          # reasons, as the one split just below.
+          set -- $list_chunk
+          # No IFS/`set +f` restore: this subshell exits a few lines
+          # below, and nothing between here and there reads either. The
+          # split at the end of this function DOES restore both, because
+          # the rest of build_context runs after it.
+          [ "$#" -gt 0 ] || exit 1
+          # shellcheck disable=SC2012
+          # SC2012 (prefer find over ls) is disabled for the reason given
+          # at the Pass 2 call below: `find` has no portable mtime SORT.
+          if list_chunk_out=$(ls -td -- "$@" 2>/dev/null); then
+            printf '%s\n' "$list_chunk_out" | head -n "$CHECKPOINT_LIST_MAX_FILES"
+          else
+            exit 1
+          fi
+        ) || list_top=""
+        if [ -n "$list_top" ]; then
+          list_round="$list_round$list_top$list_nl"
+        else
+          list_omitted=1
+        fi
+        list_start=$((list_end + 1))
+      done
+      list_cands=${list_round%"$list_nl"}
+      if [ -n "$list_cands" ]; then
+        list_new_total=$(printf '%s\n' "$list_cands" | wc -l | awk '{print $1}')
+      else
+        list_new_total=0
+      fi
+      # Termination is guarded on ACTUAL progress rather than on the
+      # arithmetic being obviously convergent: a round that failed to
+      # shrink the list (every chunk lost, or a chunk size at or below
+      # CHECKPOINT_LIST_MAX_FILES) must end the loop, not spin in it.
+      [ "$list_new_total" -lt "$list_total" ] || break
+      list_total=$list_new_total
+    done
 
     # The one split. `set -f` for the whole of it: a $HOME holding "*",
     # "?" or "[" would otherwise make the shell glob these words on the

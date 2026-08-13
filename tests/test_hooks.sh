@@ -6756,8 +6756,24 @@ assert_eq "" "$(checkpoint_list_marker "$fpL11_ctx")" "FAILURE PROOF (6h8): with
 # --- fpL11b: never raise the marker's CAP trigger. Proves 6h7's marker
 # assertion measures the cap branch, which is a different line from the
 # one fpL11 removes.
+#
+# ANCHORED, NOT FIRST-MATCH. This used to be a bare
+# `line_of ... "          list_omitted=1"`, which takes the FIRST
+# whole-line match in the file. There is now more than one line spelled
+# exactly that way - the ARG_MAX chunk-reduction pass (scenario 6h14)
+# raises the same flag when a chunk is lost - and it sits EARLIER in
+# load-profile.sh, so the bare form silently began mutating that line
+# instead. The cap trigger stayed live, the marker still appeared, and
+# this proof failed while pointing at the wrong code. Anchoring on the
+# cap test itself is what makes the mutant hit the branch this proof is
+# named for; the assert below fails loudly if that anchor ever moves,
+# rather than letting the mutant quietly degrade into a no-op.
 fpL11b_script=$(make_script_scratch "$load_profile_script")
-fpL11b_line=$(line_of "$fpL11b_script" "          list_omitted=1")
+# shellcheck disable=SC2016 # literal source text of load-profile.sh.
+fpL11b_anchor=$(line_of "$fpL11b_script" '        if [ "$emitted" -ge "$CHECKPOINT_LIST_MAX_FILES" ]; then')
+assert_eq "yes" "$(if [ -n "$fpL11b_anchor" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (6h7) must find the emit loop's cap test in load-profile.sh to anchor its mutation - without the anchor the mutant hits the first \`list_omitted=1\` in the file, which is a different branch entirely"
+[ -n "$fpL11b_anchor" ] || fpL11b_anchor=1
+fpL11b_line=$(line_of_after "$fpL11b_script" "$fpL11b_anchor" "          list_omitted=1")
 [ -n "$fpL11b_line" ] || fpL11b_line=0
 replace_line "$fpL11b_script" "$fpL11b_line" "          list_omitted=0"
 
@@ -6916,5 +6932,113 @@ if [ "$(ls_splits_run_on_missing_operand)" = "yes" ]; then
 else
   assert_eq "$fpL13b_expected" "$(extract_checkpoint_list_block "$fpL13b_ctx")" "FAILURE PROOF (6h9): this machine's ls returns one correct run for a missing MIDDLE operand, so keeping its partial output is equivalent to retrying for this fixture and the mutant must produce the same block - the ordering hazard the retry exists for is BSD ls's and is proved there, not here"
 fi
+
+# ==========================================================================
+# 6h14. load-profile.sh - the checkpoint list must survive an operand
+#       list too long for one `ls` call.
+#
+# THE DEFECT. `ls -td -- "$@"` was handed every eligible candidate at
+# once. Past roughly ten thousand checkpoint files that exceeds ARG_MAX
+# and `ls` dies with E2BIG, and because the retry loop correctly refuses
+# to keep a FAILING `ls`'s partial, possibly mis-ordered output, the
+# entire block vanished. Reproduced with 10 000 real files: 20.6 s at
+# SessionStart, "Resume available - run /squirrel:pickup" still
+# injected, and no list block and no marker anywhere - so
+# /squirrel:pickup fell back to enumerating the directory itself, which
+# is the exact permission prompt this block exists to remove.
+#
+# ARG_MAX IS EMULATED WITH A SHIM, NOT REACHED WITH REAL FILES. The real
+# limit needs ~10 000 operands and 20 s per invocation, which is not
+# something to put in this suite; and the property under test is "one
+# `ls` call was handed more operands than it would accept", which a shim
+# reproduces exactly and deterministically on every machine, rather than
+# only on machines whose ARG_MAX happens to sit where the fixture
+# assumes. The fixture still crosses the REAL CHECKPOINT_LIST_CHUNK
+# boundary with real files (501 of them, one more than the chunk size),
+# so the reduction pass under test is the shipped one at its shipped
+# setting - no constant is mutated to make this fire.
+# ==========================================================================
+home6h14=$(new_home)
+stdin6h14=$(printf '{"session_id":"sess-6h14","cwd":"%s/argmax-project","hook_event_name":"SessionStart"}' "$home6h14")
+dir6h14=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6h14" "$stdin6h14")")")
+mkdir -p "$dir6h14"
+
+# 501 bulk files: enough that, with the ten named ones, the candidate
+# list is comfortably past CHECKPOINT_LIST_CHUNK and the reduction pass
+# engages at its shipped setting. All 501 share one timestamp, set in a
+# single `touch` call rather than 501 of them.
+#
+# TODAY'S DATE, NOT AN ARBITRARY OLD ONE - this fixture was written with
+# a 2020 timestamp first and it made the whole scenario measure nothing:
+# prune_stale_session_checkpoints runs at every SessionStart and deletes
+# checkpoints older than CHECKPOINT_PRUNE_MIN_AGE_DAYS (30), so the bulk
+# files were being deleted, a hundred per invocation, before `ls` was
+# ever handed them. The shim recorded argc=113 where the fixture claimed
+# 513. Dated today, they are never prune candidates, and the operand
+# count reaching `ls` is the one this scenario is about. The same reason
+# make_dated_checkpoints above uses `date +%Y%m%d`.
+today6h14=$(date +%Y%m%d)
+i6h14=1
+while [ "$i6h14" -le 501 ]; do
+  printf 'x\n' >"$dir6h14/bulk-$(printf '%03d' "$i6h14").md"
+  i6h14=$((i6h14 + 1))
+done
+touch -t "${today6h14}0001" "$dir6h14"/bulk-*.md
+
+expected6h14=""
+i6h14=1
+while [ "$i6h14" -le 10 ]; do
+  # newest-first order: newest-01 is the newest, so it gets the latest
+  # timestamp (12:10 down to 12:01 as i increases), and every one of
+  # them is newer than the 00:01 the bulk files share.
+  touch -t "${today6h14}12$(printf '%02d' $((11 - i6h14)))" "$dir6h14/newest-$(printf '%02d' "$i6h14").md"
+  expected6h14="$expected6h14$dir6h14/newest-$(printf '%02d' "$i6h14").md
+"
+  i6h14=$((i6h14 + 1))
+done
+expected6h14=${expected6h14%
+}
+
+# The fixture is only meaningful if the candidate list really does cross
+# the chunk boundary at the moment the hook reads it. Asserted, not
+# assumed - that is exactly what the pruner silently broke above.
+count6h14=0
+for f6h14 in "$dir6h14"/*; do
+  [ -f "$f6h14" ] || continue
+  count6h14=$((count6h14 + 1))
+done
+assert_eq "511" "$count6h14" "6h14 fixture sanity: all 511 checkpoint files must still be on disk when the hook runs - a fixture the pruner has eaten would exercise a single small \`ls\` call and prove nothing about the chunk boundary"
+
+# An `ls` that refuses an over-long argument list, the way the real one
+# does at ARG_MAX. `ls -td -- "$@"` spends two argv slots on "-td" and
+# "--", so the threshold is stated in total argc: 501 operands is 503
+# and must fail; a 500-operand chunk is 502 and must not.
+shimdir6h14=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-shim.XXXXXX")
+cleanup_paths="$cleanup_paths $shimdir6h14"
+realls6h14=$(command -v ls)
+cat >"$shimdir6h14/ls" <<SHIM6H14
+#!/bin/sh
+n=0
+for a in "\$@"; do
+  n=\$((n + 1))
+done
+if [ "\$n" -gt 502 ]; then
+  exit 1
+fi
+exec "$realls6h14" "\$@"
+SHIM6H14
+chmod +x "$shimdir6h14/ls"
+
+ctx6h14=$(extract_ctx "$(capture_stdout_with_path "$load_profile_script" "$home6h14" "$shimdir6h14:$PATH" "$stdin6h14")")
+assert_eq "$expected6h14" "$(extract_checkpoint_list_block "$ctx6h14")" "6h14: with more candidates than one \`ls\` will accept, the block must still name the ten newest checkpoint files, newest first - the operand list is reduced in chunks until one call can take it, not handed over whole and lost"
+assert_contains "$ctx6h14" "(more checkpoint files exist in that directory than are listed here - session sess-6h14)" "6h14: and it must still carry the incompleteness marker, because 501 files were eligible and ten were named"
+
+# The reduction must not CHANGE the answer, only the number of calls it
+# takes to reach it: the same fixture with a real `ls` (no shim, so the
+# single call would have succeeded anyway) must produce the identical
+# block. Without this, a reduction that quietly returned the wrong ten
+# files would satisfy the assertion above.
+ctx6h14_real=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6h14" "$stdin6h14")")
+assert_eq "$expected6h14" "$(extract_checkpoint_list_block "$ctx6h14_real")" "6h14: the chunked reduction must return exactly what an unrestricted single \`ls\` returns for the same directory - a tournament on mtime, not an approximation of one"
 
 assert_report
