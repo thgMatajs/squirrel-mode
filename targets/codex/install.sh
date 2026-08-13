@@ -9,7 +9,13 @@
 #      Content OUTSIDE the block - the user's own AGENTS.md instructions,
 #      almost certainly already there - is never touched, never
 #      truncated, and is byte-exact after both an install and an
-#      uninstall. Marker detection is FENCE-AWARE: a BEGIN/END-shaped
+#      uninstall. A BEGIN/END pair is not by itself proof that this
+#      script wrote what is between them - those two lines are ordinary
+#      text anyone can paste in - so the content between them must
+#      carry the bundled block's own GENERATED banner line, by the same
+#      exact-full-line rule item 2 applies to the skill files, or this
+#      script refuses and changes nothing (see require_own_agents_block
+#      below). Marker detection is FENCE-AWARE: a BEGIN/END-shaped
 #      line inside a ``` or ~~~ fenced code block (for example, a user's
 #      own example of what this block looks like) is never mistaken for
 #      the real thing - see marker_scan below.
@@ -110,6 +116,14 @@ repo_root=$(cd "$script_dir/../.." && pwd)
 BEGIN_MARKER="<!-- BEGIN SQUIRREL-MODE (generated - do not edit by hand; re-run targets/codex/install.sh instead) -->"
 END_MARKER="<!-- END SQUIRREL-MODE -->"
 GENERATED_TAG="<!-- GENERATED FILE. Source:"
+
+# The bundled block this installer inserts, and the single source of
+# truth for what "squirrel-mode's own AGENTS.md block" means - both for
+# what gets written (render_agents_install) and for deciding whether an
+# existing block in the user's file is ours at all
+# (require_own_agents_block). Named once, here, so those two answers can
+# never come from different files.
+bundled_agents="$repo_root/targets/codex/AGENTS.md"
 
 fail() {
   echo "install.sh: ERROR: $1" >&2
@@ -581,6 +595,59 @@ classify_dedicated_file() {
   fi
 }
 
+require_bundled_agents() {
+  # require_bundled_agents: fail()s unless the bundled block this
+  # installer inserts is actually present next to this script. Called by
+  # every path that needs it - the three render_agents_install branches
+  # that insert it, and require_own_agents_block below, which needs its
+  # banner line to tell squirrel-mode's own block apart from a foreign
+  # one. Uninstall therefore now needs the bundled file too, and says so
+  # loudly if it is missing rather than silently treating an unverifiable
+  # block as ours (the skills loop's `continue` on a missing source is
+  # safe precisely because skipping a skill destroys nothing; skipping
+  # this check would license deleting the user's content).
+  [ -f "$bundled_agents" ] || fail "the bundled source $bundled_agents is missing - this checkout looks incomplete. Re-run 'sh scripts/build.sh' from the repo root to regenerate it, then re-run this installer."
+}
+
+require_own_agents_block() {
+  # require_own_agents_block <begin_line> <end_line> <gerund>: returns
+  # normally when the block spanning <begin_line>..<end_line> (inclusive)
+  # of $agents_file contains a line that is an EXACT, FULL-LINE match for
+  # the bundled targets/codex/AGENTS.md's own GENERATED banner - i.e.
+  # this installer, or scripts/build.sh's output through it, really did
+  # write what is in there. fail()s otherwise, changing nothing.
+  #
+  # This is the AGENTS.md-block equivalent of classify_dedicated_file
+  # above, and exists for the same reason, applied to the one path that
+  # used to lack it. The four skill files and Cursor's .mdc decide
+  # ownership by an exact banner-line match and are "biased toward
+  # foreign whenever there is any doubt"; the AGENTS.md block decided it
+  # purely from the presence of a BEGIN and an END line outside a fence.
+  # Those two lines are ordinary text in an ordinary Markdown file:
+  # anyone can paste them in (they appear verbatim in this repo's own
+  # docs), and once they are there, install REPLACED and uninstall
+  # DELETED whatever sat between them, whoever wrote it. Reproduced
+  # before this check existed: a hand-made "MY OWN NOTES" between a
+  # hand-pasted marker pair was deleted outright by --uninstall --yes,
+  # exit 0, reported as "leaving the rest of the file byte-identical to
+  # before it was ever installed".
+  #
+  # The asymmetry that justifies erring toward "foreign" is the same one
+  # classify_dedicated_file records: a false "foreign" only refuses,
+  # loudly, with the user's file untouched and one line telling them
+  # exactly what to remove by hand; a false "ours" destroys content this
+  # installer never wrote.
+  blk_b=$1
+  blk_e=$2
+  blk_gerund=$3
+  require_bundled_agents
+  blk_expected=$(banner_line_for "$bundled_agents")
+  if sed -n "${blk_b},${blk_e}p" "$agents_file" | grep -qFx -- "$blk_expected"; then
+    return 0
+  fi
+  fail "$agents_file has a matching pair of squirrel-mode marker lines, but what sits BETWEEN them is not squirrel-mode's own generated block - it does not contain that block's exact banner line ('$blk_expected'). Something other than this installer put those markers there, around content this installer never wrote, and $blk_gerund it would destroy that content. Refusing, changing nothing. If you do want squirrel-mode's block in this file, remove the '$BEGIN_MARKER' and '$END_MARKER' lines by hand - keeping whatever is between them - and re-run."
+}
+
 write_destination() {
   # write_destination <destination> <content_file>: atomically replaces
   # <destination>'s content with <content_file>'s content - a temp file
@@ -685,8 +752,7 @@ render_agents_install() {
   # substitution strips trailing newlines, which would silently corrupt
   # a byte-exact round trip - only head/tail/cat on the file directly.
   out=$1
-  bundled_agents="$repo_root/targets/codex/AGENTS.md"
-  [ -f "$bundled_agents" ] || fail "the bundled source $bundled_agents is missing - this checkout looks incomplete. Re-run 'sh scripts/build.sh' from the repo root to regenerate it, then re-run this installer."
+  require_bundled_agents
   if [ ! -f "$agents_file" ]; then
     {
       printf '%s\n' "$BEGIN_MARKER"
@@ -766,6 +832,11 @@ render_agents_install() {
       set -- $(find_marker_lines "$agents_file")
       b=$1
       e=$2
+      # A marker pair alone is NOT proof this installer wrote what is
+      # between them - see require_own_agents_block. Checked before a
+      # single byte of <out> is rendered, so a refusal here leaves the
+      # user's file exactly as it was.
+      require_own_agents_block "$b" "$e" "replacing"
       before_n=$((b - 1))
       print_first_n_lines "$agents_file" "$before_n" >"$out"
       printf '%s\n' "$BEGIN_MARKER" >>"$out"
@@ -834,6 +905,12 @@ render_agents_uninstall() {
   set -- $(find_marker_lines "$agents_file")
   b=$1
   e=$2
+  # Same ownership gate as install's replace branch, and for the
+  # stronger reason: a marker pair this installer never wrote is the one
+  # case where "remove everything between the markers" means deleting
+  # content that was only ever the user's. Checked before anything is
+  # rendered - see require_own_agents_block.
+  require_own_agents_block "$b" "$e" "removing"
   before_n=$((b - 1))
   line_before=""
   if [ "$before_n" -gt 0 ]; then

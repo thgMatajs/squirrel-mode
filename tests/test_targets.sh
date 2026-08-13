@@ -1629,8 +1629,10 @@ od_dump() {
   # od_dump <file>: a compact one-line byte dump for failure messages.
   # "expected: identical / actual: DIFFERS" does not say WHICH bytes
   # moved, and for a trailing-newline defect that is the entire content
-  # of the finding.
-  od -An -c "$1" 2>/dev/null | tr '\n' ' ' | tr -s ' '
+  # of the finding. Truncated to the first 300 characters: these
+  # messages are built eagerly, pass or fail, and a whole installed
+  # AGENTS.md dumped in full would bury every other line of output.
+  od -An -c "$1" 2>/dev/null | tr '\n' ' ' | tr -s ' ' | cut -c1-300
 }
 
 assert_agents_roundtrip() {
@@ -1696,5 +1698,75 @@ assert_agents_roundtrip "36A (trailing newline, nothing below the block)" "$fixt
 assert_agents_roundtrip "36B (trailing newline, user content below the block)" "$fixtures36/seed-with-newline" "$fixtures36/trailer" "$fixtures36/expect-b"
 assert_agents_roundtrip "36C (no trailing newline, nothing below the block)" "$fixtures36/seed-no-newline" "$fixtures36/no-trailer" "$fixtures36/expect-c"
 assert_agents_roundtrip "36D (no trailing newline, user content below the block)" "$fixtures36/seed-no-newline" "$fixtures36/trailer" "$fixtures36/expect-d"
+
+# ==========================================================================
+# 37. A pair of squirrel-mode marker lines the INSTALLER never wrote -
+#     placed by hand around the user's own notes, e.g. copied out of
+#     docs/OTHER-TOOLS.md and pasted into their own AGENTS.md - must not
+#     hand this script ownership of whatever sits between them.
+#
+#     Everywhere else the installer decides ownership by an exact,
+#     full-line match against the artifact's own GENERATED banner, read
+#     fresh from the bundled source, and is "biased toward foreign
+#     whenever there is any doubt" (classify_dedicated_file's own
+#     comment). The AGENTS.md block was the one path with no such check
+#     at all: matching BEGIN and END lines outside a fence were taken as
+#     proof of ownership, so install REPLACED and uninstall DELETED
+#     whatever was between them, whoever wrote it. Reproduced: a file of
+#     "top / <BEGIN> / MY OWN NOTES / <END> / bottom" came back from
+#     --uninstall --yes as "top / bottom", exit 0, reported as "leaving
+#     the rest of the file byte-identical to before it was ever
+#     installed".
+#
+#     Both directions are pinned - install must not overwrite it,
+#     uninstall must not delete it - each with the whole $HOME tree
+#     asserted unchanged, because "refuses, changing nothing" has to
+#     mean the skill files were not written either.
+# ==========================================================================
+home37=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home37"
+mkdir -p "$home37/.codex"
+cat >"$home37/.codex/AGENTS.md" <<'HAND_MARKERS_EOF'
+My own instructions, above the markers.
+<!-- BEGIN SQUIRREL-MODE (generated - do not edit by hand; re-run targets/codex/install.sh instead) -->
+MY OWN NOTES, between markers I placed here by hand. This installer never wrote them.
+<!-- END SQUIRREL-MODE -->
+My own instructions, below the markers.
+HAND_MARKERS_EOF
+snapshot37=$(snapshot_file "$home37/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $snapshot37"
+
+before37install=$(full_tree_listing "$home37")
+if out37install=$(HOME="$home37" "$codex_install" --yes 2>&1); then exit37install=0; else exit37install=$?; fi
+assert_eq "1" "$exit37install" "install --yes must REFUSE a marker pair whose content is not squirrel-mode's own generated block, never silently overwrite it -- output: $out37install"
+assert_contains "$out37install" "not squirrel-mode's own generated block" "install's refusal must say plainly that what is between the markers is not squirrel-mode's own block"
+assert_eq "identical" "$(files_byte_status "$snapshot37" "$home37/.codex/AGENTS.md")" "AGENTS.md must be byte-unchanged after install refuses a foreign marker pair -- expected: $(od_dump "$snapshot37") / actual: $(od_dump "$home37/.codex/AGENTS.md")"
+after37install=$(full_tree_listing "$home37")
+assert_eq "$before37install" "$after37install" "37: the whole \$HOME tree must be unchanged after install refuses a foreign marker pair (no skill files written either)"
+
+before37uninstall=$(full_tree_listing "$home37")
+if out37uninstall=$(HOME="$home37" "$codex_install" --uninstall --yes 2>&1); then exit37uninstall=0; else exit37uninstall=$?; fi
+assert_eq "1" "$exit37uninstall" "--uninstall --yes must REFUSE to delete the content between a marker pair squirrel-mode never wrote -- output: $out37uninstall"
+assert_contains "$out37uninstall" "not squirrel-mode's own generated block" "uninstall's refusal must say plainly that what is between the markers is not squirrel-mode's own block"
+assert_eq "identical" "$(files_byte_status "$snapshot37" "$home37/.codex/AGENTS.md")" "AGENTS.md must be byte-unchanged after uninstall refuses a foreign marker pair -- expected: $(od_dump "$snapshot37") / actual: $(od_dump "$home37/.codex/AGENTS.md")"
+after37uninstall=$(full_tree_listing "$home37")
+assert_eq "$before37uninstall" "$after37uninstall" "37: the whole \$HOME tree must be unchanged after uninstall refuses a foreign marker pair"
+
+# Positive control: the identical code path must still recognise a block
+# this installer really did write - otherwise the refusals above could be
+# passing simply because the ownership check rejects everything.
+home37ok=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home37ok"
+mkdir -p "$home37ok/.codex"
+printf 'My own instructions.\n' >"$home37ok/.codex/AGENTS.md"
+snapshot37ok=$(snapshot_file "$home37ok/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $snapshot37ok"
+if out37ok1=$(HOME="$home37ok" "$codex_install" --yes 2>&1); then exit37ok1=0; else exit37ok1=$?; fi
+assert_eq "0" "$exit37ok1" "positive control: a real install must still exit 0 with the ownership check in place -- output: $out37ok1"
+if out37ok2=$(HOME="$home37ok" "$codex_install" --yes 2>&1); then exit37ok2=0; else exit37ok2=$?; fi
+assert_eq "0" "$exit37ok2" "positive control: RE-installing over squirrel-mode's own block must still be recognised as ours and exit 0 -- output: $out37ok2"
+if out37ok3=$(HOME="$home37ok" "$codex_install" --uninstall --yes 2>&1); then exit37ok3=0; else exit37ok3=$?; fi
+assert_eq "0" "$exit37ok3" "positive control: uninstalling squirrel-mode's own block must still exit 0 -- output: $out37ok3"
+assert_eq "identical" "$(files_byte_status "$snapshot37ok" "$home37ok/.codex/AGENTS.md")" "positive control: the ownership check must not disturb the byte-exact round trip of a genuine block"
 
 assert_report
