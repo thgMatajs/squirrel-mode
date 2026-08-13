@@ -156,8 +156,16 @@
 #      conflict between its own two citations (Hulsbosch et al. 2025 builds on the direction Kofler
 #      et al. rejected) — a finding can state the right direction and still hide that its sources
 #      disagree.
+#  29. [THIRD VERIFICATION PASS] Finding 5's Meltzer & Basho citation does not sit under an `ADHD`
+#      population tag. The chapter was downloaded and searched in full: "ADHD", "attention deficit"
+#      and "attention-deficit" occur zero times, and it addresses "All students" in a
+#      general-education classroom, so the `ADHD` tag asserted a population the source does not
+#      have. Checked STRUCTURALLY (which tag is in force at that citation bullet) rather than by
+#      phrase, because a substring check cannot distinguish "this source is about ADHD" from "this
+#      source is not about ADHD" — both contain the token.
 #
-# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, and 28 are
+# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, and 29
+# are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -584,6 +592,25 @@ check_finding3_directionality_ok() {
   else
     echo no
   fi
+}
+
+# check_finding5_meltzer_tag <file> — prints the population tag in force at the Meltzer & Basho
+# citation bullet inside the "## Finding 5" section, or "none" if that bullet is not found there.
+#
+# Structural rather than phrase-based on purpose. Finding 5's defect was a TAG resting on a source
+# that never mentions the tagged population: the Meltzer & Basho chapter's full text contains zero
+# occurrences of "ADHD". A prose-substring check could not tell "this chapter is about ADHD" from
+# "this chapter is not about ADHD" — both sentences contain the token — so this walks the section,
+# tracks the `**Population:**` tag currently in force, and reports the one the Meltzer bullet
+# actually sits under. That is the thing that was wrong, stated in the file's own structure.
+check_finding5_meltzer_tag() {
+  file=$1
+  awk '
+    /^## / { in_f5 = ($0 ~ /^## Finding 5:/) ? 1 : 0; next }
+    in_f5 && /^\*\*Population:\*\* / { tag = substr($0, 17); next }
+    in_f5 && /^- Meltzer, L\., & Basho, S\./ { print tag; found = 1; exit }
+    END { if (!found) print "none" }
+  ' "$file" 2>/dev/null || true
 }
 
 # check_corrections_records_failures <file> — prints the count of required markers MISSING from
@@ -1940,5 +1967,32 @@ assert_eq "no" "$fixture_finding3_ok" "FAILURE PROOF (scenario 28): restoring th
 
 research_flat_28=$(tr '\n' ' ' <"$research_file" | tr -s ' ')
 assert_contains "$research_flat_28" "These two citations disagree with each other" "Finding 3 must declare the contradiction between Kofler et al. (2020) and Hulsbosch et al. (2025) rather than presenting them as agreeing"
+
+# ================================================================================================
+# 29. Finding 5's Meltzer & Basho citation does not sit under an `ADHD` population tag (third
+#     verification pass). The chapter's full text was downloaded and searched: "ADHD", "attention
+#     deficit" and "attention-deficit" occur zero times in it, and it addresses "All students" in a
+#     general-education classroom — so tagging it `ADHD` broke this file's own definition of that
+#     tag ("measured in an ADHD population"). Checked against the real file (expect "general working
+#     memory"), then against a fixture that flips Finding 5's tag back to `ADHD` (expect "ADHD").
+#     The companion assertion pins that the retired ADHD-convergence sentence stays retired.
+# ================================================================================================
+real_finding5_tag=$(check_finding5_meltzer_tag "$research_file")
+assert_eq "general working memory" "$real_finding5_tag" "Finding 5's Meltzer & Basho citation must sit under 'general working memory' — its full text never mentions ADHD, so an 'ADHD' tag would assert a population the source does not have"
+
+finding5_fixture="$scratch_dir/bad_finding5.md"
+awk '
+  /^## / { in_f5 = ($0 ~ /^## Finding 5:/) ? 1 : 0 }
+  in_f5 && !flipped && $0 == "**Population:** general working memory" {
+    print "**Population:** ADHD"
+    flipped = 1
+    next
+  }
+  { print }
+' "$research_file" >"$finding5_fixture"
+fixture_finding5_tag=$(check_finding5_meltzer_tag "$finding5_fixture")
+assert_eq "ADHD" "$fixture_finding5_tag" "FAILURE PROOF (scenario 29): re-tagging Finding 5's Meltzer & Basho citation as an ADHD-population source must be caught"
+
+assert_not_contains "$research_flat_28" "Educational guidance for ADHD converges" "the retired claim that ADHD guidance converges on three specific accommodations must stay retired — only the chunking one is in the source, and the source is general-education"
 
 assert_report

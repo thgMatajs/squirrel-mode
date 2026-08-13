@@ -275,25 +275,52 @@ that was not asked for is not free," applied to the assistant's own output.
 
 ---
 
-## Finding 5: Instructional accommodations for ADHD are widely recommended
+## Finding 5: Chunking instructions is ordinary classroom guidance — general-education, not ADHD-measured
 
-Educational guidance for ADHD converges on reducing working-memory demand directly: one topic at a
-time, staying goal-oriented, and chunking instructions into smaller pieces.
+⚠ This finding used to claim that guidance for ADHD converges on three specific accommodations —
+one topic at a time, staying goal-oriented, and chunking instructions into smaller pieces — under an
+`ADHD` population tag. Reading both sources' own text retired most of that claim and the tag with it
+(see Corrections). Meltzer & Basho (2010), the only source of the three recommendations, is a
+general-education chapter whose full text contains zero occurrences of "ADHD," "attention deficit"
+or "attention-deficit."
+
+Of the three recommendations, one survives, in the chapter's own words: "Information should be
+broken down into manageable chunks or steps." A second is weaker than it was made to sound — the
+chapter asks teachers to make the classroom *environment* "goal-oriented," which is a claim about
+classroom culture, not about sequencing instruction. The third, "one topic at a time," appears
+nowhere in the chapter and is retired outright. The chapter addresses every student in a
+general-education classroom — "All students—including high achievers, low achievers, and students
+with diagnosed learning and attention problems" — which is general guidance that happens to include
+students with attention problems, not guidance measured in an ADHD population.
+
+**Population:** general working memory
+
+**Citations:**
+- Meltzer, L., & Basho, S. (2010). *Creating a Classroomwide Executive Function Culture That Fosters
+  Strategy Use, Motivation, and Resilience*. In L. Meltzer (Ed.), *Promoting Executive Function in
+  the Classroom*. Guilford Press. <https://www.guilford.com/excerpts/meltzer2.pdf> — a
+  practitioner-oriented classroom chapter, not an empirical trial; cited for the chunking
+  recommendation quoted above and for nothing else.
+
+Guidance written specifically for students with ADHD does exist, and does discuss working-memory
+weakness in the classroom. Its own abstract carries none of the three recommendations above, and its
+full text is paywalled, so this document does not attribute them to it:
 
 **Population:** ADHD
 
 **Citations:**
 - Martinussen, R., & Major, A. (2011). *Working Memory Weaknesses in Students With ADHD:
   Implications for Instruction*. Theory Into Practice, 50(1), 68–75.
-  <https://www.tandfonline.com/doi/abs/10.1080/00405841.2011.534943>
-- Meltzer, L., & Basho, S. (2010). *Creating a classroom-wide executive function culture that
-  fosters strategy use, motivation, and resilience*. In L. Meltzer (Ed.), *Promoting Executive
-  Function in the Classroom*. Guilford Press. <https://www.guilford.com/excerpts/meltzer2.pdf> —
-  a practitioner-oriented classroom chapter, not an empirical trial; cited for its instructional
-  recommendations, not as a controlled study.
+  <https://www.tandfonline.com/doi/abs/10.1080/00405841.2011.534943> — a review article, not a new
+  measurement. Its own abstract states that it "highlights recent studies examining working memory
+  functioning in students with ADHD" and that "the authors discuss how educators can address working
+  memory weaknesses in the classroom." Per check 3, the studies it highlights are third parties' and
+  are not evidence here; per check 2, none of the three recommendations appears in its abstract.
 
 **Rules justified:** 3 — multi-step work is always chunked and enumerated, one phase visible at a
-time.
+time. This now rests on the Meltzer & Basho chunking recommendation, which is `general working
+memory`, not `ADHD`. Rule 3 does not depend on this finding at all: Findings 1, 2 and 10 reach it
+independently, and two of those three are ADHD-population results.
 
 ---
 
@@ -682,6 +709,20 @@ source that never mentions that population.
    on working memory. This file flags exactly this kind of tension for Baddeley & Hitch above, and
    now flags it here too: the finding states plainly that the direction is contested and that nothing
    in this document rests on settling it.
+3. **Finding 5's `ADHD` population tag rested on a source that never mentions ADHD.** The finding
+   attributed three recommendations — one topic at a time, staying goal-oriented, chunking
+   instructions — to Martinussen & Major (2011) and Meltzer & Basho (2010) jointly, under a single
+   `ADHD` tag. The Meltzer & Basho chapter was downloaded and searched in full: "ADHD," "attention
+   deficit" and "attention-deficit" occur zero times in it, and it addresses "All students" in a
+   general-education classroom. Only the chunking recommendation is actually in it ("Information
+   should be broken down into manageable chunks or steps"); "goal-oriented" is there but describes
+   the classroom environment rather than instructional sequencing; "one topic at a time" is not
+   there at all. Martinussen & Major (2011) genuinely is about students with ADHD, but it is a review
+   article whose abstract carries none of the three recommendations, and whose full text is paywalled
+   — so per check 2 it cannot carry them either. The finding is split into two correctly tagged
+   blocks, the chunking claim is retagged `general working memory`, and "one topic at a time" is
+   retired. The chapter's title was also mis-transcribed as "classroom-wide"; the printed title reads
+   "Classroomwide," and is corrected.
 
 ---
 
