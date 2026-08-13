@@ -35,6 +35,38 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   exit 1
 fi
 
+# python3 + PyYAML is the THIRD hard prerequisite, gated here for the
+# same reason jq and shellcheck are, and for one more specific to it.
+#
+# tests/test_build.sh and tests/test_skills.sh each detect PyYAML at
+# runtime and wrap their structural-YAML assertions - roughly a dozen
+# between them, the only ones that parse frontmatter as YAML rather than
+# pattern-matching it with sed/awk - in `if [ "$have_yaml_parser" =
+# "yes" ]`. Nothing asserted the parser was found, nothing warned, and
+# nothing pinned an expected assertion count, so on a machine without
+# PyYAML those assertions simply did not exist: the files still printed
+# "SUMMARY pass=N fail=0" and the run was still green. A skipped
+# assertion that is indistinguishable from a passing one is worse than
+# no assertion, because the green tells you something it did not check.
+#
+# Made a hard prerequisite rather than a warning: the alternative -
+# tolerating its absence - is exactly the state that produced a green
+# run nobody could interpret.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: 'python3' is required to run the test suite but was not found on PATH." >&2
+  echo "It provides the structural YAML frontmatter checks in tests/test_build.sh and tests/test_skills.sh." >&2
+  echo "Install python3 (e.g. 'brew install python3' or 'apt-get install python3') and re-run." >&2
+  exit 1
+fi
+
+if ! python3 -c "import yaml" >/dev/null 2>&1; then
+  echo "ERROR: the PyYAML module is required to run the test suite but 'python3 -c \"import yaml\"' failed." >&2
+  echo "It provides the structural YAML frontmatter checks in tests/test_build.sh and tests/test_skills.sh," >&2
+  echo "which are SILENTLY SKIPPED without it - a green run would not mean they passed." >&2
+  echo "Install PyYAML (e.g. 'pip3 install pyyaml' or 'apt-get install python3-yaml') and re-run." >&2
+  exit 1
+fi
+
 target=${1:-}
 
 if [ -n "$target" ]; then

@@ -431,14 +431,25 @@ fi
 assert_eq "yes" "$skill_description_present" "skills/rules/SKILL.md must have a description field"
 assert_eq "disable-model-invocation: true" "$skill_disable_invocation_line" "skills/rules/SKILL.md must set disable-model-invocation: true"
 
-# Structural YAML validity, using python3+PyYAML when available. This is
-# additive to the sed/awk checks above, never a replacement for them.
+# Structural YAML validity, using python3+PyYAML. This is additive to
+# the sed/awk checks above, never a replacement for them.
+#
+# The detection below is kept, but its result is now ASSERTED rather
+# than used as a silent skip condition. Before, a machine without
+# PyYAML ran none of the nine assertions guarded by have_yaml_parser and
+# this file still printed "SUMMARY pass=N fail=0" - a green that told
+# you nothing about whether the frontmatter actually parses. tests/run.sh
+# now gates python3+PyYAML as a hard prerequisite, alongside the other
+# two the harness already required, and .github/workflows/ci.yml
+# installs it; the assertion here covers the other way in, running this
+# file directly, where run.sh's gate never executes.
 have_yaml_parser=no
 if command -v python3 >/dev/null 2>&1; then
   if python3 -c "import yaml" >/dev/null 2>&1; then
     have_yaml_parser=yes
   fi
 fi
+assert_eq "yes" "$have_yaml_parser" "python3 with PyYAML must be importable: the nine structural YAML assertions below are skipped without it, and a skipped assertion is indistinguishable from a passing one in this file's SUMMARY line. Install it (e.g. 'pip3 install pyyaml' or 'apt-get install python3-yaml'), or run the suite through tests/run.sh, which gates it as a hard prerequisite"
 
 yaml_check_file() {
   # yaml_check_file <path> - prints "PARSES=<yes|no>" then one
