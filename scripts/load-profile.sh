@@ -2176,11 +2176,24 @@ build_context() {
   off_dir="$squirrel_dir/off"
   seen_prune_dir="$squirrel_dir/profile-seen"
 
-  prune_stale_off_flags "$off_dir"
-  # Same call site as the other two pruners, and SessionStart-only for
-  # the same reason: handle_user_prompt_submit's contract is explicitly
-  # "Never prunes" (it runs on the hot path of every message).
-  prune_stale_profile_seen "$seen_prune_dir"
+  # THE EMPTY-$HOME GUARD (audit fix, LOW). Every read and emit site in
+  # this function already tests `[ -n "$home_dir" ]` before using a path
+  # derived from it; the three pruners did not, and they are the only
+  # sites here that DELETE. With $HOME unset, `$squirrel_dir` is
+  # "/.squirrel" and each pruner would aim a `find ... -exec rm -f` at a
+  # path rooted at "/". Nothing was reachable in practice - each pruner
+  # opens with `[ -d ]`, and "/.squirrel/off" does not exist - but that is
+  # an accident of the filesystem, not a decision this file made, and it
+  # is the wrong thing for a delete to depend on. Stated once, here,
+  # rather than three times inside the pruners: they take a directory,
+  # not a $HOME, and this is the only place that knows the difference.
+  if [ -n "$home_dir" ]; then
+    prune_stale_off_flags "$off_dir"
+    # Same call site as the other two pruners, and SessionStart-only for
+    # the same reason: handle_user_prompt_submit's contract is explicitly
+    # "Never prunes" (it runs on the hot path of every message).
+    prune_stale_profile_seen "$seen_prune_dir"
+  fi
 
   slug=$(project_slug "$cwd")
   session_dir="$checkpoints_dir/$slug"
@@ -2196,7 +2209,12 @@ build_context() {
   off_token=$(session_off_token "$raw_session_id") || off_token=""
   [ -n "$off_token" ] || off_token="anon-$$"
 
-  prune_stale_session_checkpoints "$session_dir"
+  # The third pruner, guarded for the reason given at the other two
+  # above. Separate `if` rather than folded in with them because it has
+  # to run after $session_dir is computed, and that needs $slug.
+  if [ -n "$home_dir" ]; then
+    prune_stale_session_checkpoints "$session_dir"
+  fi
 
   injected_real_profile=0
   if [ -n "$home_dir" ] && [ -f "$profile_file" ]; then

@@ -5558,10 +5558,11 @@ assert_not_contains "$fpP1e_ctx" "Project checkpoint directory:" "FAILURE PROOF 
 # because nothing in the test ever asked for the directory.
 fpP1f_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016
-fpP1f_line=$(line_of "$fpP1f_script" '  prune_stale_session_checkpoints "$session_dir"')
+fpP1f_line=$(line_of "$fpP1f_script" '    prune_stale_session_checkpoints "$session_dir"')
+assert_eq "yes" "$(if [ -n "$fpP1f_line" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (scenario 6d) must find the prune_stale_session_checkpoints call in load-profile.sh - \`line_of\` matches a whole line INCLUDING its indentation, so a call that moves inside a new block silently stops being mutated and this proof passes for the wrong reason (it did exactly that when the empty-\$HOME guard was added)"
 [ -n "$fpP1f_line" ] || fpP1f_line=0
 # shellcheck disable=SC2016
-replace_line "$fpP1f_script" "$fpP1f_line" '  mkdir -p "$session_dir" 2>/dev/null || true'
+replace_line "$fpP1f_script" "$fpP1f_line" '    mkdir -p "$session_dir" 2>/dev/null || true'
 
 fpP1f_home=$(new_home)
 fpP1f_stdin=$(printf '{"session_id":"sess-fpP1f","cwd":"%s/never-used"}' "$fpP1f_home")
@@ -6402,7 +6403,8 @@ assert_contains "$fpB3_out_strict" "FP_B3_MARKER" "FAILURE PROOF (B3) isolation:
 # stale stamp survives, i.e. the directory grows without bound again.
 fpFix7_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016
-fpFix7_line=$(line_of "$fpFix7_script" '  prune_stale_profile_seen "$seen_prune_dir"')
+fpFix7_line=$(line_of "$fpFix7_script" '    prune_stale_profile_seen "$seen_prune_dir"')
+assert_eq "yes" "$(if [ -n "$fpFix7_line" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (FIX 7) must find the prune_stale_profile_seen call in load-profile.sh - \`line_of\` matches a whole line INCLUDING its indentation, so a call that moves inside a new block silently stops being mutated and this proof passes for the wrong reason (it did exactly that when the empty-\$HOME guard was added)"
 [ -n "$fpFix7_line" ] || fpFix7_line=0
 replace_line "$fpFix7_script" "$fpFix7_line" ''
 
@@ -6967,6 +6969,35 @@ mkdir -p "$home13z_real/.squirrel/off"
 printf 'x\n' >"$home13z_real/.squirrel/off/sess-13z"
 stdin13z_real=$(printf '{"session_id":"sess-13z","cwd":"%s/proj-13z","hook_event_name":"UserPromptSubmit"}' "$home13z_real")
 assert_contains "$(capture_stdout "$check_off_flag_script" "$home13z_real" "$stdin13z_real")" "squirrel-mode is OFF for this session" "a real (non-symlinked) off/ holding the same flag file must still turn the session off - the symlink guard must not have become a refusal to read off/ at all"
+
+# ==========================================================================
+# 6h15. load-profile.sh - AUDIT FIX (LOW): the three pruners must not run
+#       with an EMPTY $HOME.
+#
+# Every read and emit site in build_context already tests
+# `[ -n "$home_dir" ]`; the three pruners did not, and they are the only
+# sites there that DELETE. With $HOME unset each would aim a
+# `find ... -exec rm -f` at a path rooted at "/" ("/.squirrel/off" and
+# friends). Nothing was reachable in practice, because each pruner opens
+# with `[ -d ]` and those paths do not exist - but that is an accident of
+# the filesystem, not a decision the code made.
+#
+# Asserted as "still a well-formed, successful SessionStart with $HOME
+# empty", which is the property the guard must not have broken; the
+# deletion itself is not observable precisely because the paths do not
+# exist, and a test that pretended otherwise would be theatre. The
+# guard's real regression cover is the two mutant-anchor assertions
+# added above, which fail loudly if either pruner call moves again.
+# ==========================================================================
+stdin6h15='{"session_id":"sess-6h15","cwd":"/tmp/proj-6h15","hook_event_name":"SessionStart"}'
+out6h15=$(printf '%s' "$stdin6h15" | HOME="" "$load_profile_script" 2>/dev/null) || out6h15=""
+assert_eq "yes" "$(printf '%s' "$out6h15" | jq empty >/dev/null 2>&1 && echo yes || echo no)" "load-profile.sh must still emit valid SessionStart JSON with an EMPTY \$HOME - the pruner guard must not have turned an empty \$HOME into a crash"
+if printf '%s' "$stdin6h15" | HOME="" "$load_profile_script" >/dev/null 2>&1; then
+  exit6h15=0
+else
+  exit6h15=$?
+fi
+assert_eq "0" "$exit6h15" "load-profile.sh must exit 0 with an EMPTY \$HOME"
 
 # ==========================================================================
 # 6h14. load-profile.sh - the checkpoint list must survive an operand
