@@ -169,9 +169,15 @@
 #      plausible enough to survive two passes. Both retired phrasings are banned file-wide, which is
 #      affordable only because Finding 12's ⚠ note and Corrections entry were written to DESCRIBE
 #      the retired conditional rather than quote it.
+#  31. [THIRD VERIFICATION PASS] Finding 4 does not describe arXiv:2511.14636 as an empirical study.
+#      It has no participants — it identifies aspects of cognitive load and proposes initial design
+#      recommendations. Correction #2 in docs/RESEARCH.md had already re-examined this same citation
+#      and fixed its POPULATION while leaving the verb beside it untouched, so the verb is what this
+#      pins, with a companion vacuous-pass guard that the population fact scenario 6 checks was not
+#      deleted instead.
 #
 # Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-# and 30 are
+# 30, and 31 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -2034,5 +2040,33 @@ case "$proof_output" in
   *) fixture_finding12_caught=no ;;
 esac
 assert_eq "yes" "$fixture_finding12_caught" "FAILURE PROOF (scenario 30): restoring Finding 12's retired interaction conditional must be caught"
+
+# ================================================================================================
+# 31. Finding 4 does not describe arXiv:2511.14636 as an empirical study (third verification pass).
+#     Speicher & Chandrasekar (2025) has no participants: it identifies aspects of cognitive load
+#     and proposes initial design recommendations for blind and low-vision developers. Correction #2
+#     in docs/RESEARCH.md had already re-examined this same citation and fixed its POPULATION while
+#     leaving the verb "studies" beside it untouched, so this check pins the verb specifically.
+#     Both retired phrasings are banned file-wide; Finding 4's ⚠ note and its Corrections entry
+#     describe the mistake rather than quoting it, exactly as scenario 30's do.
+# ================================================================================================
+assert_not_contains "$research_flat_28" "studies **blind and low-vision developers**" "Finding 4 must not describe arXiv:2511.14636 as studying blind and low-vision developers — it has no participants"
+assert_not_contains "$research_flat_28" "it was studied in blind and low-vision developers" "Finding 4 must not describe arXiv:2511.14636's reasoning as having been studied in blind and low-vision developers"
+assert_contains "$research_flat_28" "no participants" "Finding 4 must state that arXiv:2511.14636 has no participants, so its population tag is not mistaken for a measured sample"
+
+# Sanity check: the correction must not have removed the population fact scenario 6 already pins.
+assert_contains "$research_flat_28" "blind and low-vision" "the corrected Finding 4 must still identify arXiv:2511.14636's subject population as blind and low-vision (vacuous-pass guard: the bans above must not be satisfied by deleting the population instead of the verb)"
+
+proof_output=$( (
+  ASSERT_PASS_COUNT=0
+  ASSERT_FAIL_COUNT=0
+  fixture_body="$research_flat_28 arXiv:2511.14636 studies **blind and low-vision developers**, per its own framing."
+  assert_not_contains "$fixture_body" "studies **blind and low-vision developers**" "proof check"
+) )
+case "$proof_output" in
+  *"FAIL:"*) fixture_finding4_caught=yes ;;
+  *) fixture_finding4_caught=no ;;
+esac
+assert_eq "yes" "$fixture_finding4_caught" "FAILURE PROOF (scenario 31): restoring the claim that arXiv:2511.14636 studied a population must be caught"
 
 assert_report

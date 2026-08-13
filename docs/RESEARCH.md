@@ -258,17 +258,28 @@ correctly below (see Corrections).
   of presentation," concluding that "analysis of both intrinsic and extraneous cognitive load can
   lead to instructional designs generating spectacular gains in learning efficiency."
 
-A code-presentation application of this reasoning exists, but it was studied in blind and
-low-vision developers, not ADHD. It is included as sound cognitive-load reasoning applied by
-inference to a different population, and it is labelled that way, not as ADHD evidence.
+A code-presentation application of this reasoning exists, aimed at blind and low-vision developers
+rather than ADHD. It is included as sound cognitive-load reasoning applied by inference to a
+different population, and it is labelled that way, not as ADHD evidence.
+
+⚠ It is also not a study, and this file twice said it was. Correction #2 below already re-examined
+this citation and fixed its population framing, while leaving the claim that it *studied* that
+population untouched — a good illustration of how a correction can fix the error it went looking for
+and walk past the one beside it. The paper has no participants. Its own abstract states what it
+does: "we identify aspects of CL that impact performance and learning in programming," and "We
+propose an initial design 'recommendations' for presentation of code." Nobody was recruited,
+interviewed, or tested. It is a theoretical paper proposing design recommendations *for* a
+population, not a measurement *of* one, which makes the inference this document draws from it one
+step longer than the population tag alone suggests.
 
 **Population:** borrowed from adjacent accessibility work
 
 **Citations:**
 - Speicher, N., & Chandrasekar, P. (2025). *Theoretical basis for code presentation: A case for
-  cognitive load*. arXiv:2511.14636 [cs.HC]. <https://arxiv.org/abs/2511.14636> — studies **blind
-  and low-vision developers**; the paper itself frames its recommendations as reducing cognitive
-  load for that population, not for ADHD.
+  cognitive load*. arXiv:2511.14636 [cs.HC]. <https://arxiv.org/abs/2511.14636> — a theoretical
+  paper about **blind and low-vision developers**, with no participants and no empirical
+  measurement; it frames its proposed recommendations as reducing cognitive load for that
+  population, not for ADHD.
 
 **Rules justified:** 2, 7 — no preamble/postamble and no tangents are both instances of "content
 that was not asked for is not free," applied to the assistant's own output.
@@ -749,6 +760,15 @@ source that never mentions that population.
    2 and 7 than it was written to be. Rules 2 and 7 do not fall: they rest on Finding 4's general
    cognitive-load reasoning, which is where the "unrequested content is not free" step actually
    lives.
+5. **Finding 4 called a theory paper an empirical study.** Speicher & Chandrasekar (2025) was
+   described as having *studied* blind and low-vision developers. It has no participants: its own
+   abstract says the authors identify aspects of cognitive load and propose an initial set of design
+   recommendations for presenting code. Nobody was recruited, interviewed, or tested. This one is
+   worth naming twice, because Correction #2 above is a correction that already looked at this exact
+   citation, fixed its population framing, and left the "studied" claim standing right next to what
+   it was fixing. The population tag was never wrong after #2; the verb was. Finding 4 now describes
+   it as a theoretical paper proposing recommendations for that population, and says explicitly that
+   this makes the inference one step longer than the tag alone implies.
 
 ---
 
