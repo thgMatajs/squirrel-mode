@@ -64,7 +64,7 @@ on the same dry-run-by-default terms. `/digest` and `/plan` still need copying b
 each project's `.cursor/commands/` — [docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md) has the two
 file paths and why Cursor can't install them once for every project.
 
-## The seven commands
+## The eight commands
 
 | Command | What it does |
 | :-- | :-- |
@@ -75,15 +75,25 @@ file paths and why Cursor can't install them once for every project.
 | `/squirrel:pickup` | Shows recent wins, what you were doing, the next action, and open decisions from this project's checkpoint, then stops. |
 | `/squirrel:off` | Turns the base rules off for the rest of the current session. |
 | `/squirrel:on` | Turns them back on in the current session. |
+| `/squirrel:rules` | Pulls the base rules into the current conversation by hand. A recovery path only — see below. |
 
-All seven exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`. Cursor gets
+All eight exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`. Cursor gets
 `digest` and `plan` only — see the parity table below for why.
+
+**`/squirrel:rules` is a recovery path, not part of the normal flow.** The base rules are already in
+the system prompt on every turn, carried by the forced output style
+([ADR-0001](./docs/adr/0001-output-style-not-skill.md)) — so there is normally nothing to load. This
+command exists for the case where that style has been turned off and you want the rules back in one
+conversation without turning it on again. Typed while the style is still active, it loads a second
+copy of the same ~12 KB of rules and tells Claude nothing it did not already have. It never fires on
+its own: `disable-model-invocation: true` stops Claude from reaching for it, so it runs only when you
+type it.
 
 ## Parity across targets
 
 | Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
 | :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | **7** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
+| Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
 | Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
 

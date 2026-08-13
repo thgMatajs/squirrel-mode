@@ -590,7 +590,7 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 
 | Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
 | :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | **7** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
+| Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
 | Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
 

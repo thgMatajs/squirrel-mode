@@ -9,11 +9,11 @@ feature set; this page states the practical consequences plainly, with no hedgin
 
 | Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
 | :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | **7** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
+| Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
 | Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
 
-## Which commands port, and why the other three cannot
+## Which commands port, and why the other four cannot
 
 | Command | Claude Code | Codex | Cursor | Reason |
 | :-- | :-- | :-- | :-- | :-- |
@@ -23,6 +23,7 @@ feature set; this page states the practical consequences plainly, with no hedgin
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |
 | `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
 | `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
+| `rules` | ✅ | ❌ | ❌ | Pulls the base rules back into one conversation after Claude Code's forced output style has been turned off. Neither other target has an output style to turn off, so there is nothing for this to recover from: on Codex the rules are a block in `AGENTS.md`, on Cursor a `.mdc` rules file, and both are re-applied by restoring the file rather than by a command. |
 
 ## What each target loses, explicitly
 

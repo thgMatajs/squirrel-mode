@@ -1906,13 +1906,16 @@ assert_file_absent "$home32f/.cursor/.squirrel-install.lock" "the lock must be a
 #    in PLAN.md Section 3 ("Codex and Cursor (ADR-0004)") - pinned here
 #    too, as a third copy of the identical table. It is NOT extended to
 #    docs/adr/0004-tiered-parity-across-targets.md's own copy: that one
-#    is a deliberately different rendering (unbolded "7 namespaced
+#    is a deliberately different rendering (unbolded "8 namespaced
 #    skills", "skills in `~/.agents/skills/`" instead of the specific
 #    per-file path, "instructed file read only" without ", best-effort",
 #    no `**N**` counts) written when the ADR was drafted, before the
-#    counts and paths were finalized - a design-history record, not a
+#    paths were finalized - a design-history record, not a
 #    live copy meant to track later edits, so forcing it to match would
-#    misrepresent what that document is. Checked against the real files
+#    misrepresent what that document is. Its command COUNT is kept in
+#    step by hand, unlike the rest of that rendering: a count that
+#    disagrees with the three pinned tables is a factual error about how
+#    many commands ship, not a stale draft rendering. Checked against the real files
 #    (expect identical, line for line, for README.md/OTHER-TOOLS.md/
 #    PLAN.md), then against a scratch copy of README.md with one cell of
 #    its table edited (expect the tables to differ).

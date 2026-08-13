@@ -4,7 +4,7 @@ squirrel-mode installs into Claude Code, Codex, and Cursor, but the three cannot
 
 | Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
 | :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | 7 namespaced skills | `SessionStart` hook | `PreToolUse` hook |
+| Claude Code | output style, `force-for-plugin` | 8 namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | skills in `~/.agents/skills/` | instructed file read only | no |
 | Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | `.cursor/commands/*.md`, project-scoped | no | no |
 
