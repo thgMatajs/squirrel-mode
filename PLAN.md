@@ -428,7 +428,7 @@ choice**, not a research finding: "one topic at a time" is the recommendation Se
 
 - Exactly **one question per message**. Never batch.
 - Every question is **multiple-choice (2–4 options)**, labeled A/B/C/D, plus "type your own".
-- **7 questions maximum.** Show progress: "Question 3 of 7".
+- **Exactly 7 questions**, never fewer. Show progress: "Question 3 of 7".
 - After the last question: show the resulting profile as a compact block, ask a single confirm
   ("Save this? y/n"), write the file, then demonstrate immediately by answering the user's next
   message in the new style.
