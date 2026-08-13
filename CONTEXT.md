@@ -29,7 +29,7 @@ A user's personal calibration of the base rules — their language, tolerance fo
 _Avoid_: config, settings, preferences, user config
 
 **Calibration**:
-The guided interview that produces a profile: one multiple-choice question per message, seven maximum. The interview's shape obeys the base rules it is configuring.
+The guided interview that produces a profile: one multiple-choice question per message, always exactly seven of them — a fixed count, not a maximum. `/squirrel:init` numbers each one in the literal form `Question N of 7` and assembles all 11 profile fields at the end, unconditionally. The interview's shape obeys the base rules it is configuring.
 _Avoid_: onboarding, setup, wizard, init
 
 ### What survives interruption
