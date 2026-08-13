@@ -182,9 +182,16 @@
 #  33. [THIRD VERIFICATION PASS] Finding 10 reports Parks et al. (2022)'s most prominent effect
 #      where the review puts it — studies asking participants to retell or pick out central ideas,
 #      an OUTPUT demand — rather than on text volume, which is where this file had quietly moved it.
+#  34. [THIRD VERIFICATION PASS] The Tether related-work entry carries NO population tag, and does
+#      not claim Tether validates anything. Shah et al. (2025) reports "preliminary validation
+#      through self-use" and states "While not yet evaluated by target users" — it measured nobody,
+#      so none of the three tags applies and the entry says so in prose instead. Scenario 2 cannot
+#      catch this alone: `ADHD` is a valid tag string, it is simply not a true one here, which is
+#      why this check is structural (how many tags are in that section) rather than a tag-spelling
+#      check.
 #
 # Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-# 30, 31, 32, and 33 are
+# 30, 31, 32, 33, and 34 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -611,6 +618,23 @@ check_finding3_directionality_ok() {
   else
     echo no
   fi
+}
+
+# check_tether_population_lines <file> — prints the number of "**Population:**" lines inside the
+# "## Related work: Tether" section. Must be 0: Shah et al. (2025) reports "preliminary validation
+# through self-use" and states "While not yet evaluated by target users," so it measured nobody, and
+# none of the three tags — each of which names a population something was MEASURED in — applies. The
+# entry says that in prose instead of carrying a tag.
+#
+# Counted structurally rather than by phrase because the failure was a tag applied by vibe (the tool
+# is FOR people with ADHD, so it got the `ADHD` tag) and scenario 2 cannot catch that: `ADHD` is a
+# perfectly valid tag string, just not a true one here.
+check_tether_population_lines() {
+  file=$1
+  section=$(extract_section "$file" "## Related work: Tether")
+  n=$(printf '%s\n' "$section" | grep -c '^\*\*Population:\*\* ' 2>/dev/null || true)
+  n=${n:-0}
+  echo "$n"
 }
 
 # check_wrong_bower_initial_citation_entries <file> — prints the count of logical citation bullets
@@ -2158,5 +2182,34 @@ case "$proof_output" in
   *) fixture_finding10_caught=no ;;
 esac
 assert_eq "yes" "$fixture_finding10_caught" "FAILURE PROOF (scenario 33): restoring Finding 10's retired text-volume framing must be caught"
+
+# ================================================================================================
+# 34. The Tether related-work entry carries no population tag and does not claim Tether validates
+#     anything (third verification pass). Shah et al. (2025) reports "preliminary validation through
+#     self-use" and states "While not yet evaluated by target users" — it measured nobody, so none
+#     of the three tags applies. Checked against the real file (expect 0 tags in that section, and
+#     the paper's own two statements quoted), then against a fixture with an `ADHD` tag put back
+#     into that section (expect 1). Scenario 2 cannot catch this on its own: `ADHD` is a valid tag
+#     string, it is simply not a true one here.
+# ================================================================================================
+real_tether_pop=$(check_tether_population_lines "$research_file")
+assert_eq "0" "$real_tether_pop" "the Tether related-work entry must carry no population tag — the paper reports no evaluation in any population"
+assert_contains "$research_flat_28" "While not yet evaluated by target users" "the Tether entry must quote the paper's own statement that it has not been evaluated by target users"
+assert_contains "$research_flat_28" "preliminary validation through self-use" "the Tether entry must quote the paper's own description of the only validation it reports"
+assert_not_contains "$research_flat_28" "validates the broader category" "the Tether entry must not claim the paper validates the category — its abstract says it has not been evaluated by target users"
+
+tether_fixture="$scratch_dir/bad_tether.md"
+awk '
+  /^## / { in_tether = ($0 == "## Related work: Tether") ? 1 : 0 }
+  { print }
+  in_tether && !added && /^\*\*Citations:\*\*$/ { }
+  in_tether && !added && /^\*Tether\* explores/ {
+    print ""
+    print "**Population:** ADHD"
+    added = 1
+  }
+' "$research_file" >"$tether_fixture"
+fixture_tether_pop=$(check_tether_population_lines "$tether_fixture")
+assert_eq "1" "$fixture_tether_pop" "FAILURE PROOF (scenario 34): re-adding an ADHD population tag to the Tether entry must be caught"
 
 assert_report

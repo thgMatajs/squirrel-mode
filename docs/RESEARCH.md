@@ -577,10 +577,17 @@ population — and no more than that.
 
 ## Related work: Tether
 
-*Tether* validates the broader category — an LLM-based personalized assistant for developers with
-ADHD — with local activity monitoring, retrieval-augmented generation, and gamification.
+*Tether* explores the broader category — an LLM-based personalized assistant for developers with
+ADHD — combining local activity monitoring, retrieval-augmented generation, and gamification. It
+does not validate that category, and does not claim to: its only reported evaluation is "preliminary
+validation through self-use," and its abstract states plainly, "While not yet evaluated by target
+users."
 
-**Population:** ADHD
+**No population tag, deliberately.** The three tags in this document name a population a citation was
+*measured* in. Tether reports no evaluation in any population — no sample, no participants, self-use
+only — so there is nothing to tag, and reaching for `ADHD` because the tool is aimed at people with
+ADHD is precisely the slip the tag system exists to catch. This entry justifies no rule in
+`rules/base-rules.md`; it is here as related work, not as evidence.
 
 **Citations:**
 - Shah, A., Magalhaes, C., Gama, K., & de Souza Santos, R. (2025). *Tether: A Personalized Support
@@ -800,6 +807,15 @@ source that never mentions that population.
    which is the point its title makes and which the old framing quietly replaced with a different,
    more convenient one. Restated to the review's own wording. The rule linkage is unaffected: rules
    3 and 4 rest on Moussaoui et al. (2025)'s serial-presentation result, and Finding 10 now says so.
+8. **Tether was described as validating a category it explicitly has not.** The related-work entry
+   credited *Tether* with validating the broader category of ADHD assistants, and carried an `ADHD`
+   population tag with no sample behind it. Shah et al. (2025)'s own abstract reports "preliminary validation through
+   self-use" and states, "While not yet evaluated by target users." A tool built for people with
+   ADHD is not a measurement in an ADHD population, and the tag said it was. The verb is corrected to
+   "explores," the paper's own two statements about its evaluation status are quoted, and the
+   population tag is **removed rather than swapped** — none of the three tags fits a paper that
+   measured nobody, and the entry now says so in place of the tag. Low severity, since this entry
+   justifies no rule, but the tag system is only worth anything if it is not applied by vibe.
 
 ---
 
