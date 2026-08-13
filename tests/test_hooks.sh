@@ -306,6 +306,59 @@ loose_utf8_locale() {
   return 0
 }
 
+lossy_utf8_escape_locale() {
+  # lossy_utf8_escape_locale - the first locale on this machine under
+  # which the PRE-FIX, locale-unaware `sed | awk` escaping pipeline LOSES
+  # the bytes that follow an invalid UTF-8 sequence; empty when no locale
+  # on this machine makes that pipeline lossy at all.
+  #
+  # WHY A PROBE RATHER THAN A PINNED LOCALE, and why not simply generate
+  # pt_BR.UTF-8 on the CI runner. The defect scenario 24 fixes is real,
+  # but its MANIFESTATION is libc-specific, not merely locale-specific.
+  # Measured directly on both platforms:
+  #
+  #   macOS (BSD sed), same bytes on a pipe, the mutant's own sed program:
+  #     LC_ALL=C          -> 38 bytes out, tail intact
+  #     LC_ALL=POSIX      -> 38 bytes out, tail intact
+  #     LC_ALL=C.UTF-8    -> 15 bytes out, "sed: RE error: illegal byte sequence"
+  #     LC_ALL=pt_BR.UTF-8 -> 15 bytes out, same abort
+  #     LC_ALL=en_US.UTF-8 -> 15 bytes out, same abort
+  #
+  #   ubuntu-24.04 (GNU sed), inside a container, with pt_BR.UTF-8
+  #   ACTUALLY generated via locale-gen and confirmed present in
+  #   `locale -a`: the tail marker survives under C.UTF-8 AND under
+  #   pt_BR.UTF-8, and sed exits 0. GNU sed does not abort on an invalid
+  #   multibyte sequence; it passes the bytes through.
+  #
+  # So "generate the missing locale in .github/workflows/ci.yml" would
+  # NOT have made the mutant misbehave on CI - it was measured, not
+  # assumed, and it does not work. There is no locale on GNU/Linux that
+  # reproduces this abort, because the abort is BSD sed's behaviour.
+  # Rather than hide that behind a silent skip, this probe asks the
+  # machine, and the proof below asserts the honest thing on whichever
+  # branch it lands in - exactly the shape loose_utf8_locale/fpL10 above
+  # already use for the other platform-limited proof in this file.
+  #
+  # The whole `sed | awk` pipeline is probed, not sed alone, so the probe
+  # stays a faithful predictor of the mutant even where the byte loss
+  # would come from the OTHER tool (mawk vs gawk differ, and the CI
+  # runner image need not agree with a bare ubuntu base image about which
+  # one `awk` is).
+  #
+  # The env prefix is `LANG=... LC_ALL=''`, byte-identical to how the
+  # mutant itself is invoked below, so probe and mutant cannot disagree
+  # about which locale is actually in force.
+  lue_tail="LOSSY_ESCAPE_PROBE_TAIL_776655"
+  for lue_loc in pt_BR.UTF-8 en_US.UTF-8 de_DE.UTF-8 fr_FR.UTF-8 C.UTF-8; do
+    lue_out=$(printf 'field01: value\n\377\376\200\201 %s\n' "$lue_tail" | LANG="$lue_loc" LC_ALL='' sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' 2>/dev/null | LANG="$lue_loc" LC_ALL='' awk '{ if (NR>1) printf "\\n"; printf "%s", $0 }' 2>/dev/null) || lue_out=""
+    if ! printf '%s' "$lue_out" | LC_ALL=C grep -aq "$lue_tail"; then
+      printf '%s' "$lue_loc"
+      return 0
+    fi
+  done
+  return 0
+}
+
 ls_splits_run_on_missing_operand() {
   # ls_splits_run_on_missing_operand - "yes" when THIS machine's `ls`,
   # handed N operands of which the MIDDLE one no longer exists, returns
@@ -3943,7 +3996,26 @@ printf '\377\376\200\201 TAIL_MARKER_SURVIVES_998877\n' >>"$fp24_home/.squirrel/
 fp24_stdin=$(printf '{"cwd":"%s/project-utf8-fp"}' "$fp24_home")
 fp24_nojq_path=$(make_tool_path "jq")
 
-fp24_out=$(printf '%s' "$fp24_stdin" | LANG=pt_BR.UTF-8 LC_ALL='' HOME="$fp24_home" PATH="$fp24_nojq_path" "$fp24_script" 2>/dev/null) || true
+# REACH, stated rather than assumed - see lossy_utf8_escape_locale for
+# the measurements. This mutant is only observable where the C library's
+# sed ABORTS on an invalid multibyte sequence (BSD sed does; GNU sed does
+# not, under any locale, including a pt_BR.UTF-8 genuinely generated with
+# locale-gen). lossy_utf8_escape_locale finds a locale that makes the
+# pre-fix pipeline lossy or returns empty; when it returns empty the
+# mutation is genuinely a no-op on this machine, and this proof asserts
+# the honest thing instead: that the mutant and the real hook agree,
+# which is what "the fix is inert on this libc" means. The proof that
+# json_escape's LC_ALL=C byte scan does something is therefore a LOCAL
+# one, on a BSD-sed machine. It is written this way rather than skipped
+# so the reason is in the output on every platform.
+fp24_lossy_loc=$(lossy_utf8_escape_locale)
+if [ -n "$fp24_lossy_loc" ]; then
+  fp24_loc=$fp24_lossy_loc
+else
+  fp24_loc=C.UTF-8
+fi
+
+fp24_out=$(printf '%s' "$fp24_stdin" | LANG="$fp24_loc" LC_ALL='' HOME="$fp24_home" PATH="$fp24_nojq_path" "$fp24_script" 2>/dev/null) || true
 fp24_ctx=$(extract_ctx "$fp24_out")
 fp24_marker_count=$(printf '%s' "$fp24_ctx" | LC_ALL=C grep -a -c 'TAIL_MARKER_SURVIVES_998877') || fp24_marker_count=0
 if [ "$fp24_marker_count" -eq 0 ]; then
@@ -3951,7 +4023,11 @@ if [ "$fp24_marker_count" -eq 0 ]; then
 else
   fp24_dropped=no
 fi
-assert_eq "yes" "$fp24_dropped" "FAILURE PROOF (scenario 24): a sed-based, locale-unaware json_escape mutant must silently drop content after an invalid UTF-8 byte under LANG=pt_BR.UTF-8 - proving scenario 24's survival assertion is not vacuous"
+if [ -n "$fp24_lossy_loc" ]; then
+  assert_eq "yes" "$fp24_dropped" "FAILURE PROOF (scenario 24) under $fp24_lossy_loc: a sed-based, locale-unaware json_escape mutant must silently drop content after an invalid UTF-8 byte - proving scenario 24's survival assertion is not vacuous"
+else
+  assert_eq "no" "$fp24_dropped" "FAILURE PROOF (scenario 24): no locale on this machine makes the pre-fix sed|awk escaping pipeline lossy on invalid UTF-8 (GNU sed passes those bytes through under every locale, including a generated pt_BR.UTF-8), so the sed mutant is provably INERT here and must survive the tail marker exactly like the real hook - the discriminating half of this proof requires a libc whose sed aborts mid-stream on an illegal byte sequence (BSD sed) and is run there, not in CI"
+fi
 
 # --- Failure proof for scenario 26: an under-cap profile must not be
 # marked truncated. Forces `truncated=1` unconditionally regardless of
