@@ -90,8 +90,9 @@ reader finds first, and it is worse than an uncited claim, because it *looks* ve
 identity misattributions from the first pass, every substance failure the second pass turned up, and
 the ten corrections a third pass found on top of both — among them a finding that asserted the
 reverse of its own source's result, and a population tag resting on a source that never mentions
-that population — are recorded in full in "Corrections" below. Two passes had already read those
-same two citations and let both through.
+that population — are recorded in full in "Corrections" below. Both of those had sat in this file
+since it was written, through both earlier passes, because neither pass was scoped to re-read a
+citation nobody had flagged. Being checked once is not the same as being checked.
 
 ---
 
@@ -323,8 +324,9 @@ that was not asked for is not free," applied to the assistant's own output.
 one topic at a time, staying goal-oriented, and chunking instructions into smaller pieces — under an
 `ADHD` population tag. Reading both sources' own text retired most of that claim and the tag with it
 (see Corrections). Meltzer & Basho (2010), the only source of the three recommendations, is a
-general-education chapter whose full text contains zero occurrences of "ADHD," "attention deficit"
-or "attention-deficit."
+general-education chapter: across the publisher's posted chapter text — the whole chapter body,
+running through its own concluding section, though not the book's consolidated reference list —
+"ADHD," "attention deficit" and "attention-deficit" occur zero times.
 
 Of the three recommendations, one survives, in the chapter's own words: "Information should be
 broken down into manageable chunks or steps." A second is weaker than it was made to sound — the
@@ -776,8 +778,10 @@ source that never mentions that population.
    "experimentally reducing children's information processing speed did not significantly change
    their working memory performance." Its conclusion is that the two "appear to be relatively
    independent impairments in ADHD." The retired clause was not a loose paraphrase of that result;
-   it was its reverse, and it had survived two prior verification passes because both checked that
-   the paper was real rather than checking what it said. Finding 3 is rewritten to state only the
+   it was its reverse, and it had survived two prior verification passes: the first checked identity
+   only, and the second — a genuine substance pass — re-read the citations a reviewer had flagged,
+   which did not include this one. An unflagged citation was therefore never substance-checked at
+   all, which is a gap in how the passes were scoped, not in what either pass did. Finding 3 is rewritten to state only the
    verified direction (memory → speed) plus the ADHD-specific encoding-versus-recall result, and its
    heading, which asserted the same retired direction, is rewritten with it.
 2. **Finding 3's two citations contradict each other, and the finding did not say so.** Hulsbosch et
@@ -790,9 +794,10 @@ source that never mentions that population.
 3. **Finding 5's `ADHD` population tag rested on a source that never mentions ADHD.** The finding
    attributed three recommendations — one topic at a time, staying goal-oriented, chunking
    instructions — to Martinussen & Major (2011) and Meltzer & Basho (2010) jointly, under a single
-   `ADHD` tag. The Meltzer & Basho chapter was downloaded and searched in full: "ADHD," "attention
-   deficit" and "attention-deficit" occur zero times in it, and it addresses "All students" in a
-   general-education classroom. Only the chunking recommendation is actually in it ("Information
+   `ADHD` tag. The Meltzer & Basho chapter was downloaded and searched — the publisher's posted
+   chapter text, covering the whole chapter body through its concluding section, though not the
+   book's consolidated reference list: "ADHD," "attention deficit" and "attention-deficit" occur
+   zero times in it, and it addresses "All students" in a general-education classroom. Only the chunking recommendation is actually in it ("Information
    should be broken down into manageable chunks or steps"); "goal-oriented" is there but describes
    the classroom environment rather than instructional sequencing; "one topic at a time" is not
    there at all. Martinussen & Major (2011) genuinely is about students with ADHD, but it is a review

@@ -157,7 +157,7 @@
 #      et al. rejected) — a finding can state the right direction and still hide that its sources
 #      disagree.
 #  29. [THIRD VERIFICATION PASS] Finding 5's Meltzer & Basho citation does not sit under an `ADHD`
-#      population tag. The chapter was downloaded and searched in full: "ADHD", "attention deficit"
+#      population tag. The publisher's posted chapter text was searched: "ADHD", "attention deficit"
 #      and "attention-deficit" occur zero times, and it addresses "All students" in a
 #      general-education classroom, so the `ADHD` tag asserted a population the source does not
 #      have. Checked STRUCTURALLY (which tag is in force at that citation bullet) rather than by
@@ -594,8 +594,9 @@ check_finding1_adhd_claim_ok() {
 # the reverse manipulation produced no significant change) AND the retired reverse assertion is
 # absent; prints "no" otherwise. Scenario 13's counterpart for the third verification pass: the
 # retired sentence claimed "slower processing keeps capacity occupied by ongoing work," which is the
-# opposite of its own citation's result, and it survived two earlier passes because both checked
-# that the paper was real rather than what it said.
+# opposite of its own citation's result. It survived two earlier passes because of how they were
+# SCOPED, not because either was careless — the first checked identity only, and the second checked
+# substance for the citations a reviewer had flagged, which did not include this one.
 #
 # The retired needle is deliberately the CONJUNCTION "impairments in ADHD, and slower processing
 # keeps capacity occupied", not the bare clause "slower processing keeps capacity occupied". The
@@ -2085,7 +2086,7 @@ assert_contains "$research_flat_28" "These two citations disagree with each othe
 
 # ================================================================================================
 # 29. Finding 5's Meltzer & Basho citation does not sit under an `ADHD` population tag (third
-#     verification pass). The chapter's full text was downloaded and searched: "ADHD", "attention
+#     verification pass). The publisher's posted chapter text was downloaded and searched: "ADHD", "attention
 #     deficit" and "attention-deficit" occur zero times in it, and it addresses "All students" in a
 #     general-education classroom — so tagging it `ADHD` broke this file's own definition of that
 #     tag ("measured in an ADHD population"). Checked against the real file (expect "general working
