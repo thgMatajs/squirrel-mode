@@ -902,6 +902,65 @@ assert_not_contains "$off_body_lower" "pwd" "off must not contain 'pwd' anywhere
 assert_not_contains "$on_body_lower" "pwd" "on must not contain 'pwd' anywhere - the session's working directory must come from the injected context line, never from running a command"
 
 # ==========================================================================
+# 23b. AUDIT FIX: off and on must both recognise an `anon-` off-token and
+#      say the session cannot be switched, instead of confirming a change
+#      that can never happen.
+#
+# THE DEFECT. scripts/load-profile.sh emits an off-token of the form
+# `anon-<hex>` whenever this session's id is missing or fails
+# sanitisation. That value is neither missing nor empty, so the existing
+# guard just above - "missing entirely, or present but empty after the
+# colon" - does not fire: both skills went on to write
+# `PENDING.anon-<hex>` / `CLEAR.anon-<hex>` and told the user, in the
+# confident one-liner step 4 prescribes, that the change starts with
+# their next message. It never does. scripts/check-off-flag.sh returns
+# early for that same session, because its own sanitize_session_id fails
+# on the id the token was derived from, so nothing ever claims the
+# sentinel and nothing anywhere reports the failure. load-profile.sh
+# already says as much in its own comment: an anon token is
+# "documentation-and-exclusivity only, not a second claiming channel".
+#
+# Asserted on the LITERAL token prefix each skill must test for, and on
+# the instruction not to write a sentinel, because those two together are
+# the fix; a skill that recognised the shape but still wrote the file
+# would be the same defect with a better explanation.
+# ==========================================================================
+# shellcheck disable=SC2016
+# SC2016 (expressions don't expand in single quotes) is exactly what this
+# needle wants: the backticks are literal Markdown code fencing as the
+# two SKILL.md files spell it, not command substitution. Bound once here
+# rather than at each of the three use sites below.
+anon_needle='`anon-`'
+assert_contains "$off_body" "$anon_needle" "off must recognise an off-token of the \`anon-\` shape - it is neither missing nor empty, so the existing missing/empty guard never fires on it"
+assert_contains "$on_body" "$anon_needle" "on must recognise an off-token of the \`anon-\` shape - it is neither missing nor empty, so the existing missing/empty guard never fires on it"
+assert_contains "$off_body" "cannot be turned off" "off must tell the user in one line that this session cannot be turned off, rather than confirming a change no hook can ever apply"
+assert_contains "$on_body" "cannot be turned back on" "on must tell the user in one line that this session cannot be turned back on, rather than confirming a change no hook can ever apply"
+
+# The anon- guard has to STOP, not merely explain: bound each assertion
+# to the paragraph that introduces the shape, so a "do not write a
+# sentinel" sentence belonging to the missing/empty guard above cannot
+# satisfy it.
+# `|| true` is not decoration: this file is `set -e`, and a `grep` that
+# matches nothing exits 1, which inside a `$( )` assignment aborts the
+# whole test file before assert_report ever runs. Verified by reverting
+# the fix - the run died after four failures with no SUMMARY line at
+# all, which is the vacuous-harness failure mode tests/run.sh has to
+# special-case. A missing paragraph must produce a FAILED ASSERTION, not
+# a dead test file.
+off_anon_para=$(printf '%s' "$off_body" | grep -F "$anon_needle") || off_anon_para=""
+on_anon_para=$(printf '%s' "$on_body" | grep -F "$anon_needle") || on_anon_para=""
+assert_contains "$off_anon_para" "Do not write a sentinel" "off's anon- guard must say to write no sentinel - an unclaimable PENDING.anon-... left on disk is the defect, not a lesser form of it"
+assert_contains "$on_anon_para" "Do not write a sentinel" "on's anon- guard must say to write no sentinel - an unclaimable CLEAR.anon-... left on disk is the defect, not a lesser form of it"
+assert_contains "$off_anon_para" "and stop" "off's anon- guard must stop, not fall through into the PENDING.<token> steps below it"
+assert_contains "$on_anon_para" "and stop" "on's anon- guard must stop, not fall through into the CLEAR.<token> steps below it"
+
+# The token shape the skills test for must be the one the hook actually
+# emits. Read out of scripts/load-profile.sh rather than restated here,
+# so a future change to session_off_token's fallback cannot leave these
+# skills guarding a prefix nothing produces any more.
+assert_contains "$(cat "$repo_root/scripts/load-profile.sh")" "printf 'anon-%s' \"\$suffix\"" "the anon- prefix the two skills guard against must still be the one scripts/load-profile.sh's session_off_token emits - if that fallback is ever respelled, the guards above are protecting against a shape that no longer exists"
+
+# ==========================================================================
 # 24. cycle-1 item 7 fix, now actually enforced: plan's Step 3 fallback
 #     (picking the likeliest reading itself once all 3 clarifying
 #     questions from Step 2 are spent) draws from the SAME question

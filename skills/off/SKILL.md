@@ -20,6 +20,8 @@ Your context already contains two lines, injected at the start of this session:
 
 If the off-token line is missing entirely, or present but empty after the colon, tell the user in one line that the session off-token cannot be determined and stop. Do not write a sentinel in that case.
 
+If the token begins with `anon-`, tell the user in one line that this session cannot be turned off - for example: "This session cannot be turned off: squirrel-mode was not given a session id for it. A new session restores /squirrel:off." - and stop. Do not write a sentinel in that case either. An `anon-` token is what squirrel-mode emits when this session's id was missing or unusable, and it is documentation only: the `UserPromptSubmit` hook that claims sentinels recomputes the token from that same session id, so it can never arrive at an `anon-` one. A `PENDING.anon-...` file would sit there unclaimed for the whole session while the user had been told the change was coming - the one outcome worse than saying plainly that it cannot be done.
+
 If the working-directory line is missing entirely, or present but empty after the colon, tell the user in one line that the session's working directory cannot be determined and stop. Do not write a sentinel in that case: a sentinel that can never be claimed on the legacy path, and whose token binding you also cannot confirm, is worse than none at all.
 
 ## Turning off
