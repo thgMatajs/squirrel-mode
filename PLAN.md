@@ -135,11 +135,19 @@ labelled as such.
 → **Rules:** zero tangents, zero "by the way", zero unsolicited alternatives; no preamble or
 postamble; one optional `Extra` section at the very end if something genuinely matters.
 
-**Instructional accommodations for ADHD are well-documented.** `ADHD`
-Reduce WM demands: one topic at a time, stay goal-oriented, chunk instructions (Martinussen & Major,
-2011, *Working Memory Weaknesses in Students With ADHD*; Meltzer & Basho, 2010).
-→ **Rules:** the interview asks one multiple-choice question at a time; multi-step tasks always
-numbered; each step independently actionable.
+**Chunking instructions is ordinary classroom guidance.** `general working memory`
+⚠ **Retagged, and two of its three recommendations retired.** Only chunking survives, in the source's
+own words — "Information should be broken down into manageable chunks or steps" (Meltzer & Basho,
+2010) — and that chapter is general-education: it addresses "All students", and "ADHD" occurs in it
+zero times, so the old `ADHD` tag rested on a source that never mentions the population. "One topic
+at a time" appears nowhere in the chapter and is retired outright; "goal-oriented" is there, but
+describes the classroom *environment*, not instructional sequencing. Martinussen & Major (2011),
+*Working Memory Weaknesses in Students With ADHD*, genuinely is about students with ADHD — but it is
+a paywalled review whose abstract carries none of the three recommendations, so it cannot carry them
+either.
+→ **Rules:** multi-step tasks are always numbered and chunked; each step independently actionable.
+The interview's one-question-per-message shape is a **design choice**, not this finding's: "one topic
+at a time" is precisely the recommendation retired above.
 
 **Context switching destroys the mental model; recovery is expensive.** `ADHD`
 ⚠ Working-memory weaknesses in ADHD manifest as context-switching problems and difficulty
@@ -411,7 +419,8 @@ tone: neutral              # neutral | warm | terse
 
 ### `/squirrel:init` — calibration
 
-Hard requirements, from the research (one topic at a time, chunked, low WM demand):
+Hard requirements (chunked, low WM demand — Section 2). One question per message is a **design
+choice**, not a research finding: "one topic at a time" is the recommendation Section 2 retires.
 
 - Exactly **one question per message**. Never batch.
 - Every question is **multiple-choice (2–4 options)**, labeled A/B/C/D, plus "type your own".
