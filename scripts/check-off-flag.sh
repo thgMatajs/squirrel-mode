@@ -629,6 +629,30 @@ decide() {
 
   off_dir="$home_dir/.squirrel/off"
 
+  # THE CONTAINER GUARD (audit fix, LOW). checkpoints/ and profile-seen/
+  # both refuse to be operated on through a symlink AT the directory
+  # itself - see checkpoint_slug_dir_untrusted and prune_stale_profile_seen
+  # in load-profile.sh, and component_walk_has_symlink's `[ -L "$base" ]`
+  # in allow-checkpoint.sh. off/ had no such guard, so a symlink planted
+  # there let every step below - the champion scans, both claims, and the
+  # final flag read - operate inside whatever it pointed at: a sentinel
+  # claimed through it, a file `mv`d into it, an `rm -f` aimed into it.
+  #
+  # off/ is created by /squirrel:off and /squirrel:on alone, so a symlink
+  # AT it is never legitimate and returning early costs nothing correct.
+  # This deliberately does NOT look above off/: a dotfile manager
+  # symlinking ~/.squirrel itself is ordinary, supported, and left
+  # working, exactly as the other two guards leave it - the trust
+  # boundary is this directory, not its ancestry.
+  #
+  # `[ -L ]` is a POSIX shell builtin: no realpath, no readlink, no
+  # external command, so this holds with an empty PATH like every other
+  # symlink check in this plugin.
+  if [ -L "$off_dir" ]; then
+    printf ''
+    return 0
+  fi
+
   # CYCLE-3 MAJOR FIX: before claiming anything, decide - ONCE, so the
   # answer cannot depend on which of steps 3/4 happens to run first -
   # which sentinel type wins when a matching PENDING and a matching

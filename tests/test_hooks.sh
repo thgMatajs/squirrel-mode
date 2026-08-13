@@ -6934,6 +6934,41 @@ else
 fi
 
 # ==========================================================================
+# 13z. check-off-flag.sh - AUDIT FIX (LOW): a SYMLINKED off/ must be
+#      refused outright, the way checkpoints/ and profile-seen/ already
+#      are.
+#
+# checkpoints/ has component_walk_has_symlink's `[ -L "$base" ]` test,
+# profile-seen/ has prune_stale_profile_seen's, and off/ had nothing - so
+# a symlink planted at ~/.squirrel/off let every step of decide() operate
+# inside whatever it pointed at: the champion scans read through it, both
+# claims wrote through it (`mv` into it, `rm -f` aimed into it), and the
+# final flag read answered from it. off/ is created by /squirrel:off and
+# /squirrel:on alone, so a symlink AT it is never legitimate.
+#
+# Asserted on the OBSERVABLE consequence - the counter-instruction that a
+# claimed flag produces - rather than on the guard's existence, so this
+# measures behaviour and not source text.
+# ==========================================================================
+home13z=$(new_home)
+mkdir -p "$home13z/.squirrel" "$home13z/planted-elsewhere"
+ln -s "$home13z/planted-elsewhere" "$home13z/.squirrel/off"
+printf 'x\n' >"$home13z/planted-elsewhere/sess-13z"
+stdin13z=$(printf '{"session_id":"sess-13z","cwd":"%s/proj-13z","hook_event_name":"UserPromptSubmit"}' "$home13z")
+out13z=$(capture_stdout "$check_off_flag_script" "$home13z" "$stdin13z")
+assert_eq "" "$out13z" "check-off-flag.sh must ignore an off/ directory that is a SYMLINK - a flag file reachable only through it is not this plugin's, and reading one through a planted symlink is how an unrelated file becomes this session's off switch"
+assert_eq "0" "$(capture_exit "$check_off_flag_script" "$home13z" "$stdin13z")" "check-off-flag.sh must still exit 0 when off/ is a symlink"
+
+# Isolation: a REAL off/ directory holding the identical flag file must
+# still produce the counter-instruction, so the guard above is rejecting
+# the symlink and not the flag.
+home13z_real=$(new_home)
+mkdir -p "$home13z_real/.squirrel/off"
+printf 'x\n' >"$home13z_real/.squirrel/off/sess-13z"
+stdin13z_real=$(printf '{"session_id":"sess-13z","cwd":"%s/proj-13z","hook_event_name":"UserPromptSubmit"}' "$home13z_real")
+assert_contains "$(capture_stdout "$check_off_flag_script" "$home13z_real" "$stdin13z_real")" "squirrel-mode is OFF for this session" "a real (non-symlinked) off/ holding the same flag file must still turn the session off - the symlink guard must not have become a refusal to read off/ at all"
+
+# ==========================================================================
 # 6h14. load-profile.sh - the checkpoint list must survive an operand
 #       list too long for one `ls` call.
 #
