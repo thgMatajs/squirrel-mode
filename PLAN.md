@@ -70,7 +70,7 @@ will drift — which is exactly how the errors below got in.
    `borrowed from adjacent accessibility work`, and never inflate.
 
 **Item 2 is the one that gets skipped, and skipping it is worse than a typo.** The first verification
-pass on this section checked identity only and passed four citations that were bibliographically
+pass on this section checked identity only and passed five citations that were bibliographically
 pristine and substantively wrong — including the opening claim, whose flagship source states in its own
 abstract that it found *no* ADHD-specific working-memory-by-load effect. A correctly cited paper used
 to support something it does not say is the failure a hostile reader finds first.
