@@ -302,9 +302,19 @@ depend on a `UserPromptSubmit` hook that only Claude Code has. There is nothing 
 automatically there — turn it off by removing or disabling the thing that is actually applying it:
 
 - **Codex:** run `targets/codex/install.sh --uninstall --yes` to remove the block from `AGENTS.md`
-  entirely, or open `~/.codex/AGENTS.md` yourself and delete everything between the
-  `<!-- BEGIN SQUIRREL-MODE -->` / `<!-- END SQUIRREL-MODE -->` markers. Either way takes effect the
-  next time Codex reads `AGENTS.md` (its next session).
+  entirely, or open `~/.codex/AGENTS.md` yourself and delete these two lines *and* everything between
+  them:
+
+  ```
+  <!-- BEGIN SQUIRREL-MODE (generated - do not edit by hand; re-run targets/codex/install.sh instead) -->
+  <!-- END SQUIRREL-MODE -->
+  ```
+
+  The BEGIN line is that whole string, parenthetical included — searching for a bare
+  `<!-- BEGIN SQUIRREL-MODE -->` finds nothing. Delete the marker lines themselves, not only the text
+  between them: a marker pair left sitting around content squirrel-mode did not write is exactly what
+  the installer refuses to touch afterwards. Either way takes effect the next time Codex reads
+  `AGENTS.md` (its next session).
 - **Cursor:** open `~/.cursor/rules/squirrel-mode.mdc` and change `alwaysApply: true` to
   `alwaysApply: false` in the frontmatter (Cursor stops applying it automatically, but you can still
   invoke it manually), or delete the file entirely (`targets/cursor/install.sh --uninstall --yes`), or
