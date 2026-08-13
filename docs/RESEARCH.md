@@ -3,8 +3,9 @@
 ## What this document is
 
 This is the evidence log for `squirrel-mode`. 10 of the 16 base rules in `rules/base-rules.md`
-trace to at least one finding below; every finding carries the citations behind it and the
-population those citations were actually measured in. The other 6 rules are stated design
+trace to at least one finding below; every finding carries the citations behind it, tagged with the
+population they rest on — measured, where the citation measured anyone, and marked as borrowed
+reasoning where it did not. The other 6 rules are stated design
 decisions with no research claim behind them — named plainly in "Rules with no research claim
 behind them" below, not folded into the findings as if they had citations they do not have.
 
@@ -41,7 +42,12 @@ The population tags exist so a reader can weigh each claim's category of evidenc
 without reading every paper. That promise is about category, not about every distinction within
 one: the tag alone cannot separate a clinical diagnosis from an ADHD-symptom-severity score in a
 non-clinical sample — both sit under the same `ADHD` label, and telling them apart means reading
-the finding's prose (Findings 8 and 12 are the dimensional case, and say so there). A rule
+the finding's prose (Findings 8 and 12 are the dimensional case, and say so there). Nor can the tag
+separate a population a paper *measured* from one it merely writes *for*: Speicher & Chandrasekar
+(2025), under Finding 4, carries `borrowed from adjacent accessibility work` but recruited nobody,
+and Finding 4 states that in prose because the tag cannot. Where a citation measured no one in any
+population, the honest move is no tag at all rather than the nearest-fitting one — the *Tether*
+entry under "Related work" carries none, and says why in place of it. A rule
 justified by a large ADHD-population finding and a rule justified by sound reasoning borrowed from
 a different disability population are not the same strength of evidence, and this document never
 lets them look the same.
