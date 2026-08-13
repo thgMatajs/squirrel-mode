@@ -168,24 +168,71 @@ finding were removed entirely.
 
 ---
 
-## Finding 3: Slower processing speed compounds the problem
+## Finding 3: Working memory and processing speed are separable, and the load runs memory → speed
 
-Working memory and processing speed are at least partly independent impairments in ADHD, and slower
-processing keeps capacity occupied by ongoing work rather than freeing it up, which measurably hurts
-academic performance in children with ADHD.
+⚠ The planning draft, and both earlier verification passes, asserted that "slower processing keeps
+capacity occupied by ongoing work rather than freeing it up." That is the *reverse* of what this
+finding's own flagship citation reports. Kofler et al. (2020) carries the subtitle *Evidence for
+directionality of effects* precisely because it tested that direction and did not find it. The
+clause is retired here rather than softened (see Corrections).
+
+Increasing working-memory demand measurably slows information processing. Experimentally slowing
+information processing does *not* measurably change working-memory performance. In an ADHD sample
+the two behave like separable impairments rather than one driving the other, and children with ADHD
+fall behind specifically when a task requires holding and recalling material rather than merely
+taking it in.
 
 **Population:** ADHD
 
 **Citations:**
 - Kofler, M. J., Soto, E. F., Fosco, W. D., Irwin, L. N., Wells, E. L., & Sarver, D. E. (2020).
   *Working memory and information processing in ADHD: Evidence for directionality of effects*.
-  Neuropsychology, 34(2), 127–143. <https://doi.org/10.1037/neu0000598>
+  Neuropsychology, 34(2), 127–143. <https://doi.org/10.1037/neu0000598> — 86 children (45 with
+  ADHD, 41 without), eight fully crossed experimental tasks. Its own Results state that "increasing
+  working memory demands produced significant reductions in information processing speed," while
+  "experimentally reducing children's information processing speed did not significantly change
+  their working memory performance." The ADHD and non-ADHD groups "showed equivalently high accuracy
+  under the encoding-only conditions" but "differed significantly under high working memory
+  conditions (encoding + recall)." Its stated conclusion: working-memory deficits and slowed
+  information processing speed "appear to be relatively independent impairments in ADHD."
+
+Both functions do track academic outcomes in children with ADHD — the part of the original claim
+that survives intact:
+
+**Population:** ADHD
+
+**Citations:**
 - Hulsbosch, A.-K., Van der Oord, S., & Tripp, G. (2025). *Academic Achievement in Children with
   ADHD: the Role of Processing Speed and Working Memory*. Research on Child and Adolescent
-  Psychopathology, 53(10), 1469–1484. <https://doi.org/10.1007/s10802-025-01346-6>
+  Psychopathology, 53(10), 1469–1484. <https://doi.org/10.1007/s10802-025-01346-6> — 504 children
+  aged 6–12 diagnosed with ADHD; its own abstract reports that the association between inattention
+  symptom severity and achievement across mathematics, reading and spelling "is statistically
+  mediated by PS and WM sequentially."
 
-**Rules justified:** 1, 4 — front-load the answer so it doesn't compete with processing the setup
-around it, and keep paragraphs short so there is less to process per unit.
+**These two citations disagree with each other, and this document does not paper over it.** Hulsbosch
+et al. build on "recent evidence [that] suggests both cognitive functions are related, where slower
+PS underlies WM deficits," and their own mediation analysis reports that processing speed
+"statistically mediated the relation between inattention symptom severity and WM performance" —
+processing speed acting *on* working memory. Kofler et al. manipulated processing speed
+experimentally and found no such effect on working memory, concluding the two are relatively
+independent. A correlational mediation path and a null experimental manipulation are not the same
+kind of evidence, and they do not resolve each other here. What both support — and all this finding
+claims — is that working memory and processing speed are separable contributors in ADHD and that
+both track academic outcomes. The *direction* between them is contested, and nothing in this
+document rests on settling it. This is the same tension the Baddeley & Hitch tightening records in
+Corrections, surfaced here rather than left for a reader to discover.
+
+**Rules justified:** 1, 4 — **applied inference, not a measured effect**, flagged the way Findings 2,
+4 and 7 flag theirs. Neither paper studies answer position, paragraph length, or reading order; they
+measured laboratory tasks and school achievement. The step taken here starts from Kofler et al.'s
+own ADHD-population result that encoding *plus recall* is where the ADHD group fell behind while
+encoding alone was not: a response stating its answer first is closer to the encoding-only case,
+where the groups performed equivalently, whereas a response that buries the answer behind setup asks
+the reader to hold that setup and recall it when the answer finally arrives (1). Shorter paragraphs
+reduce how much must be held at once, for the same reason (4). Rule 4 does not depend on this
+finding — Findings 1, 10 and 11 reach it independently — but rule 1 rests on this finding alone, so
+the inferential step above is the whole of rule 1's support, and is stated plainly rather than
+implied.
 
 ---
 
@@ -606,6 +653,35 @@ accurate:
   broader than rule 3's actual text (multi-step task work specifically; rule 9's multiple-question
   handling is explicitly exempt). Tightened to match. Finding 11's rule-linkage to rule 11 (concrete
   time estimates) did not fit a claim about jargon-free prose either; dropped, keeping only rule 4.
+
+### Corrections found in a third verification pass
+
+A third pass re-read every remaining citation against its own primary source. The failures below are
+recorded in the same style as the two passes above. Two of them are the worst class this file
+defines — a citation asserting the reverse of its source's result, and a population tag resting on a
+source that never mentions that population.
+
+1. **Finding 3 asserted the mechanism its own citation tested and rejected.** The finding paired a
+   defensible first clause — that working memory and processing speed are at least partly
+   independent impairments in ADHD — with a second one reading "slower processing keeps capacity
+   occupied by ongoing work rather than freeing it up." That second clause is processing speed
+   acting on working memory. Kofler et al. (2020) — subtitled *Evidence
+   for directionality of effects* — tested exactly that and reports the opposite: increasing
+   working-memory demand "produced significant reductions in information processing speed," whereas
+   "experimentally reducing children's information processing speed did not significantly change
+   their working memory performance." Its conclusion is that the two "appear to be relatively
+   independent impairments in ADHD." The retired clause was not a loose paraphrase of that result;
+   it was its reverse, and it had survived two prior verification passes because both checked that
+   the paper was real rather than checking what it said. Finding 3 is rewritten to state only the
+   verified direction (memory → speed) plus the ADHD-specific encoding-versus-recall result, and its
+   heading, which asserted the same retired direction, is rewritten with it.
+2. **Finding 3's two citations contradict each other, and the finding did not say so.** Hulsbosch et
+   al. (2025) builds on "recent evidence [that] suggests both cognitive functions are related, where
+   slower PS underlies WM deficits" and reports processing speed statistically mediating the path to
+   working-memory performance; Kofler et al. (2020) manipulated processing speed and found no effect
+   on working memory. This file flags exactly this kind of tension for Baddeley & Hitch above, and
+   now flags it here too: the finding states plainly that the direction is contested and that nothing
+   in this document rests on settling it.
 
 ---
 

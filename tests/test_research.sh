@@ -147,8 +147,17 @@
 #      backing for the README half. Checked against the real file (expect 0 missing, and a
 #      non-zero bullet count so this cannot pass vacuously if the section were ever emptied), then
 #      against a scratch copy with one bullet's tag deleted (expect 1).
+#  28. [THIRD VERIFICATION PASS] Finding 3 states the directionality its own citation MEASURED, not
+#      the reverse. Kofler et al. (2020) carries the subtitle "Evidence for directionality of
+#      effects" because it tested whether slowed processing degrades working memory and found it did
+#      not — yet this file asserted that rejected direction for two review cycles, because both
+#      earlier passes checked that the paper was real rather than what it said. Pinned as specific
+#      text, exactly like scenario 13, plus a companion assertion that the finding DECLARES the
+#      conflict between its own two citations (Hulsbosch et al. 2025 builds on the direction Kofler
+#      et al. rejected) — a finding can state the right direction and still hide that its sources
+#      disagree.
 #
-# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, and 27 are
+# Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, and 28 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -529,6 +538,48 @@ check_finding1_adhd_claim_ok() {
     *"Adults with ADHD show reduced working-memory accuracy across load conditions, and that reduction"*) has_old=yes ;;
   esac
   if [ "$has_new" = yes ] && [ "$has_old" = no ]; then
+    echo yes
+  else
+    echo no
+  fi
+}
+
+# check_finding3_directionality_ok <file> — prints "yes" if Finding 3 states the direction Kofler et
+# al. (2020) ACTUALLY measured (increasing working-memory demand slows information processing, while
+# the reverse manipulation produced no significant change) AND the retired reverse assertion is
+# absent; prints "no" otherwise. Scenario 13's counterpart for the third verification pass: the
+# retired sentence claimed "slower processing keeps capacity occupied by ongoing work," which is the
+# opposite of its own citation's result, and it survived two earlier passes because both checked
+# that the paper was real rather than what it said.
+#
+# The retired needle is deliberately the CONJUNCTION "impairments in ADHD, and slower processing
+# keeps capacity occupied", not the bare clause "slower processing keeps capacity occupied". The
+# CORRECTED Finding 3, and the Corrections entry recording the fix, both QUOTE that bare clause in
+# order to retire it — the same structural problem check_retired_success_amnesia_phrasing's comment
+# describes for Finding 8 — so banning the bare clause would fail the correct file. The conjunction
+# only ever appeared in the live assertion, never in prose rejecting it.
+#
+# Matched against a FLATTENED body (newlines to spaces, runs of spaces squeezed) because this
+# document hard-wraps its prose, so any needle longer than a few words straddles a line break. Same
+# reason scenario 26 flattens before matching.
+check_finding3_directionality_ok() {
+  file=$1
+  flat=$(tr '\n' ' ' <"$file" 2>/dev/null | tr -s ' ')
+  has_measured_direction=no
+  case "$flat" in
+    *"experimentally reducing children's information processing speed did not significantly change"*)
+      has_measured_direction=yes
+      ;;
+  esac
+  has_independence=no
+  case "$flat" in
+    *"relatively independent impairments in ADHD"*) has_independence=yes ;;
+  esac
+  has_retired=no
+  case "$flat" in
+    *"impairments in ADHD, and slower processing keeps capacity occupied"*) has_retired=yes ;;
+  esac
+  if [ "$has_measured_direction" = yes ] && [ "$has_independence" = yes ] && [ "$has_retired" = no ]; then
     echo yes
   else
     echo no
@@ -1866,5 +1917,28 @@ sed 's/ `general working memory`//' "$readme_file" >"$readme_pop_fixture"
 fixture_pop_result=$(check_readme_finding_bullets_missing_population "$readme_pop_fixture")
 fixture_pop_missing=$(printf '%s\n' "$fixture_pop_result" | awk '{print $1}')
 assert_eq "1" "$fixture_pop_missing" "FAILURE PROOF (scenario 27): stripping one bullet's population tag from README.md must be caught"
+
+# ================================================================================================
+# 28. Finding 3 states the directionality its own citation measured, not the reverse (third
+#     verification pass). Kofler et al. (2020) is subtitled "Evidence for directionality of
+#     effects" because it tested whether slowed processing degrades working memory and found it did
+#     not; the retired sentence asserted exactly that rejected direction. Checked against the real
+#     file (expect "yes"), then against a fixture with the retired sentence restored (expect "no").
+#     The companion assertion pins that the finding DECLARES the disagreement between its own two
+#     citations — Hulsbosch et al. (2025) builds on processing speed underlying working-memory
+#     deficits, which is the direction Kofler et al. rejected — since a finding can state the right
+#     direction and still hide that its own sources conflict.
+# ================================================================================================
+real_finding3_ok=$(check_finding3_directionality_ok "$research_file")
+assert_eq "yes" "$real_finding3_ok" "Finding 3 must state the direction Kofler et al. (2020) actually measured (working-memory demand slows processing; the reverse manipulation did not), with the retired reverse assertion absent"
+
+finding3_fixture="$scratch_dir/bad_finding3.md"
+cp "$research_file" "$finding3_fixture"
+printf '\nWorking memory and processing speed are at least partly independent impairments in ADHD, and slower processing keeps capacity occupied by ongoing work rather than freeing it up.\n' >>"$finding3_fixture"
+fixture_finding3_ok=$(check_finding3_directionality_ok "$finding3_fixture")
+assert_eq "no" "$fixture_finding3_ok" "FAILURE PROOF (scenario 28): restoring the retired 'slower processing keeps capacity occupied' assertion must be caught"
+
+research_flat_28=$(tr '\n' ' ' <"$research_file" | tr -s ' ')
+assert_contains "$research_flat_28" "These two citations disagree with each other" "Finding 3 must declare the contradiction between Kofler et al. (2020) and Hulsbosch et al. (2025) rather than presenting them as agreeing"
 
 assert_report
