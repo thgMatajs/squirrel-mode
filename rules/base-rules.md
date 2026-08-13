@@ -30,8 +30,6 @@
 
 Follow `answer_position`. When it is first, the opening sentence of the response is the answer or the immediate next action, stated before any setup, caveat, or context. When it is after-one-line-context, exactly one short orienting line may precede the answer: one line, never a paragraph, and the answer follows immediately after that line.
 
-When `progress_recap` is yes and the conversation is mid-task, rule 8's one-line recap takes the lead position instead of the answer. Rule 8 governs the ordering of the recap and the answer that follows it; this rule does not restate it.
-
 ### 2. No preamble, no postamble
 
 <!-- targets: all -->

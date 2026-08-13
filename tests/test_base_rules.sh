@@ -424,15 +424,24 @@ assert_contains "$rule_16_body" "preamble" "rule 16's body must state that a sta
 # recap-then-answer ordering claim in different words ("before anything
 # else" vs "never folded into the same sentence"), free to silently
 # diverge on the next edit to either one. Rule 8 (which owns
-# progress_recap) now carries the ordering statement; rule 1
-# cross-references it by number instead of repeating it. This pins both
-# halves of that split: rule 1 must point at rule 8 and must not
-# reimport rule 8's ordering phrase, and rule 8 must still carry it.
+# progress_recap) was made the single owner, and rule 1 kept a paragraph
+# pointing at it by number.
+#
+# [TOKEN AUDIT] That pointer paragraph is gone now too. Naming the
+# interaction from rule 1's side cost the system prompt a paragraph in
+# every session to say only "rule 8 handles this" - a pure restatement,
+# on the side that does not own the behaviour. Rule 8's own second
+# paragraph is untouched and still states the ordering in full, so
+# nothing rule 1 governed is unstated; what is gone is the second
+# mention. The pin is inverted rather than deleted: rule 1 must now name
+# rule 8 NOWHERE, so the bookkeeping cannot creep back one clause at a
+# time.
 rule_1_body=$(get_rule_body_prose 1)
 rule_8_body=$(get_rule_body_prose 8)
-assert_contains "$rule_1_body" "rule 8" "rule 1 must cross-reference rule 8 by number for the recap-ordering interaction, instead of restating it"
+assert_not_contains "$rule_1_body" "rule 8" "rule 1 must not name rule 8 at all - rule 8 owns progress_recap and states the recap/answer ordering itself, and a cross-reference from rule 1 is bookkeeping shipped in every session's system prompt"
 assert_not_contains "$rule_1_body" "on the next line" "rule 1 must not duplicate rule 8's ordering phrasing (the interaction is stated once, in rule 8)"
-assert_contains "$rule_8_body" "on the next line" "rule 8 must still state the recap-then-answer ordering explicitly (it is the single owner of this interaction)"
+assert_contains "$rule_8_body" "on the next line" "rule 8 must still state the recap-then-answer ordering explicitly (it is the single owner of this interaction, and now its only statement anywhere)"
+assert_contains "$rule_8_body" "The recap is the lead line, not a substitute for the answer" "rule 8 must still state that the recap leads without replacing the answer - with rule 1's pointer paragraph cut, this sentence is the whole of that interaction in the rules"
 
 # --- 18. Rule 10's amended carve-out (S9, X1) is present in the
 # canonical body, AND PLAN.md's own restatement of rule 10 agrees with
@@ -641,7 +650,11 @@ assert_contains "$plan_rule_6_flat" "$RULE6_PER_SUBANSWER_PHRASE" "PLAN.md's rul
 # side only. Fixed and pinned the same way as rule 6 above.
 RULE1_RULE8_ORDERING_PHRASE="governs the ordering of the recap and the answer that follows it"
 RULE8_ORDERING_PHRASE="follows immediately after the recap, on the next line, never folded into the same sentence"
-assert_contains "$plan_rule_1_flat" "$RULE1_RULE8_ORDERING_PHRASE" "PLAN.md's rule-1 summary must cross-reference rule 8's ordering the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
+# [TOKEN AUDIT] Inverted along with assertion 17: rule 1's pointer
+# paragraph is cut on the canonical side, so PLAN.md's item 1 must not
+# keep restating it either - the two files agreeing that it is GONE is
+# the same invariant-6e guarantee as the two agreeing it is present.
+assert_not_contains "$plan_rule_1_flat" "$RULE1_RULE8_ORDERING_PHRASE" "PLAN.md's rule-1 summary must not restate rule 8's ordering, matching the cut in rules/base-rules.md (cross-file agreement, invariant 6e)"
 
 plan_rule_8_block=$(printf '%s\n' "$plan_base_rules_section" | awk '
   /^8\. / { in_item = 1 }

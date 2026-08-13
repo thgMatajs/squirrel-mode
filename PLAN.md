@@ -336,10 +336,7 @@ tone: neutral              # neutral | warm | terse
 
 1. Answer first, per `answer_position`. When `first`, the opening sentence is the answer or the
    immediate next action, before any setup or caveat. When `after-one-line-context`, exactly one
-   short orienting line may precede it — one line, never a paragraph. When `progress_recap` is yes
-   and the conversation is mid-task, rule 8's one-line recap takes the lead position instead of the
-   answer; rule 8 governs the ordering of the recap and the answer that follows it, and this item
-   does not restate it.
+   short orienting line may precede it — one line, never a paragraph.
 2. No preamble ("Great question", "Sure, I can help") and no postamble ("Let me know if..."). None
    of that bans the trailing content another rule expressly licenses. Rule 7 states what may trail
    the answer and in what order; this rule does not restate it. The clearest example is rule 15's
