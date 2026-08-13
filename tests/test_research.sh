@@ -179,9 +179,12 @@
 #      Hitch (1974)'s volume. *Psychology of Learning and Motivation* Vol. 8 was edited by Gordon H.
 #      Bower. Scoped to citation bullets, like check_sweller_1988_citation_entries, so the
 #      Corrections section can keep naming the wrong form while explaining it.
+#  33. [THIRD VERIFICATION PASS] Finding 10 reports Parks et al. (2022)'s most prominent effect
+#      where the review puts it — studies asking participants to retell or pick out central ideas,
+#      an OUTPUT demand — rather than on text volume, which is where this file had quietly moved it.
 #
 # Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-# 30, 31, and 32 are
+# 30, 31, 32, and 33 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -2133,5 +2136,27 @@ cp "$research_file" "$bower_fixture"
 printf '\n**Citations:**\n- Baddeley, A. D., & Hitch, G. J. (1974). *Working Memory*. In G. A. Bower (Ed.), *Psychology of Learning and Motivation*, Vol. 8, pp. 47-89. Academic Press. <https://example.org/>\n' >>"$bower_fixture"
 fixture_bower_bad=$(check_wrong_bower_initial_citation_entries "$bower_fixture")
 assert_eq "1" "$fixture_bower_bad" "FAILURE PROOF (scenario 32): a citation bullet re-introducing the 'G. A. Bower' editor initial must be caught"
+
+# ================================================================================================
+# 33. Finding 10 reports Parks et al. (2022)'s most prominent effect where the review puts it —
+#     studies asking participants to retell or pick out central ideas, an OUTPUT demand — rather
+#     than on text volume (third verification pass). The retired framing is banned file-wide;
+#     Finding 10's ⚠ note and its Corrections entry describe it rather than quoting it, the same
+#     way scenarios 30 and 31 do.
+# ================================================================================================
+assert_contains "$research_flat_28" "retell or pick out central ideas in stories" "Finding 10 must state Parks et al. (2022)'s most prominent effect in the review's own terms"
+assert_not_contains "$research_flat_28" "holding and integrating larger amounts of text" "Finding 10 must not relocate Parks et al. (2022)'s most prominent effect onto text volume — the review reports it on an output demand"
+
+proof_output=$( (
+  ASSERT_PASS_COUNT=0
+  ASSERT_FAIL_COUNT=0
+  fixture_body="$research_flat_28 most prominently on tasks that require holding and integrating larger amounts of text."
+  assert_not_contains "$fixture_body" "holding and integrating larger amounts of text" "proof check"
+) )
+case "$proof_output" in
+  *"FAIL:"*) fixture_finding10_caught=yes ;;
+  *) fixture_finding10_caught=no ;;
+esac
+assert_eq "yes" "$fixture_finding10_caught" "FAILURE PROOF (scenario 33): restoring Finding 10's retired text-volume framing must be caught"
 
 assert_report

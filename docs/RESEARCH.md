@@ -464,17 +464,29 @@ not have.
 
 ## Finding 10: Reading comprehension in ADHD is measurably affected by presentation format
 
-Reading comprehension is impaired in ADHD as a general finding across the literature, most
-prominently on tasks that require holding and integrating larger amounts of text. Presentation
-format is not incidental to this: removing the need for self-directed eye movements by presenting
-text serially, one piece at a time, improved comprehension for ADHD readers specifically.
+⚠ This finding used to locate the scoping review's most prominent effect on tasks demanding that a
+reader hold and integrate a greater volume of text. The review says something different: the effect
+was most prominent where readers had to *produce* something from what they read. The volume-of-text
+reading is retired (see Corrections).
+
+Reading comprehension is impaired in ADHD as a general finding across the literature, and *how* it
+is measured changes the picture. The review's most prominent effect was in studies where
+participants "retell or pick out central ideas in stories" — a demand on what the reader can give
+back, not on how much text there was — and some studies found ADHD performance improved "when
+reading comprehension task demands were low." Presentation format is not incidental either: removing
+the need for self-directed eye movements by presenting text serially, one piece at a time, improved
+comprehension for ADHD readers specifically.
 
 **Population:** ADHD
 
 **Citations:**
 - Parks, K. M. A., Moreau, C. N., Hannah, K. E., Brainin, L., & Joanisse, M. F. (2022). *The Task
   Matters: A Scoping Review on Reading Comprehension Abilities in ADHD*. Journal of Attention
-  Disorders, 26(10), 1304–1324. <https://pubmed.ncbi.nlm.nih.gov/34961391/>
+  Disorders, 26(10), 1304–1324. <https://pubmed.ncbi.nlm.nih.gov/34961391/> — 34 articles met
+  inclusion criteria. Its own Results state that "the evidence as a whole suggests reading
+  comprehension is impaired in ADHD" and that "the most prominent effect was found in studies where
+  participants retell or pick out central ideas in stories"; its Conclusion is that "performance in
+  ADHD depends on the way reading comprehension is measured." The title's own point.
 - Moussaoui, S., Siddiqi, A., Cheung, T., & Niemeier, M. (2025). *Reading without eye movements:
   Improving reading comprehension in young adults with attention-deficit/hyperactivity disorder
   (ADHD)*. Journal of the International Neuropsychological Society, 31(9–10).
@@ -482,7 +494,10 @@ text serially, one piece at a time, improved comprehension for ADHD readers spec
 
 **Rules justified:** 3, 4 — numbered/chunked steps and one concept per paragraph are exactly the
 "serial, one piece at a time" presentation this finding supports, applied to prose instead of a
-reading-comprehension task.
+reading-comprehension task. That linkage rests on Moussaoui et al. (2025)'s serial-presentation
+result, not on the Parks et al. review: the review's contribution here is that reading comprehension
+is impaired in ADHD and that the measurement task matters, neither of which is a claim about text
+length.
 
 ---
 
@@ -776,6 +791,15 @@ source that never mentions that population.
    shrug at: it is a check-1 identity failure of exactly the kind the citation policy opens by
    insisting on, and it propagates, since the "G. A." form circulates widely in secondary reference
    aggregators that copy each other rather than the volume. Corrected in the citation.
+7. **Finding 10 reframed its source's most prominent effect as being about text volume.** The
+   finding placed the scoping review's most prominent effect on tasks requiring a reader to hold and
+   integrate a greater amount of text. Parks et al. (2022) report it elsewhere: "the most prominent
+   effect was found in studies where participants retell or pick out central ideas in stories" — an
+   output demand, what the reader can give back, not an input demand about length. The review's own
+   conclusion is that "performance in ADHD depends on the way reading comprehension is measured,"
+   which is the point its title makes and which the old framing quietly replaced with a different,
+   more convenient one. Restated to the review's own wording. The rule linkage is unaffected: rules
+   3 and 4 rest on Moussaoui et al. (2025)'s serial-presentation result, and Finding 10 now says so.
 
 ---
 
