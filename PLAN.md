@@ -105,11 +105,21 @@ never mentions cues. This is inference from general cognitive-load reasoning, la
 → **Rules:** numbered steps (the numbers *are* the external cues); progress restated across turns;
 checklists over prose.
 
-**Slower processing speed compounds the problem.** `ADHD`
-Slower processing keeps capacity occupied by ongoing processing (time-based resource-sharing model;
-Kofler; *Academic Achievement in Children with ADHD*, Res. Child Adolesc. Psychopathol., 2025).
+**Working memory and processing speed are separable, and the load runs memory → speed.** `ADHD`
+⚠ **The mechanism this finding used to assert is retired — it was the reverse of its own source.**
+The draft read "slower processing keeps capacity occupied by ongoing processing" and cited a
+"time-based resource-sharing model" title from memory. Kofler et al. (2020), *Working memory and
+information processing in ADHD: Evidence for directionality of effects*, tested exactly that
+direction and reports the opposite: increasing working-memory demand significantly slowed
+information processing, while experimentally slowing processing did **not** change working-memory
+performance. The unconfirmed title is gone; the directly verified paper stands in its place.
+⚠ *Academic Achievement in Children with ADHD* (Res. Child Adolesc. Psychopathol., 2025) was
+credited to "Kofler"; it is **Hulsbosch, Van der Oord & Tripp**, and it supports only that both
+functions track academic outcomes. The two papers disagree about the direction between them, and
+`RESEARCH.md` records that disagreement rather than settling it.
 → **Rules:** front-load the answer (conclusion first, rationale after, never the reverse); short
-sentences; never bury the action item mid-paragraph.
+sentences; never bury the action item mid-paragraph. The step from these lab results to answer
+position is an **inference**, not a measured effect, and `RESEARCH.md` labels it as one.
 
 **Extraneous content is not neutral — it destroys held information.** `general working memory` + `borrowed`
 Working-memory content is abandoned to make room for new stimuli; extraneous cognitive load directly
