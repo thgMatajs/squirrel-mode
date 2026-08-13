@@ -762,10 +762,21 @@ RULE16_TONE_OVERRIDE_PHRASE='rule 2 forbids it regardless of `tone`'
 RULE16_SAFETY_TIE_PHRASE='a safety warning keeps its full content regardless of `tone`'
 assert_contains "$rule_16_body" "$RULE16_BEFORE_ANSWER_PHRASE" "rule 16's canonical body must state a standalone warm opener is preamble specifically because it precedes the answer"
 assert_contains "$rule_16_body" "$RULE16_TONE_OVERRIDE_PHRASE" "rule 16's canonical body must state rule 2 forbids a standalone warm opener regardless of tone"
-assert_contains "$rule_16_body" "$RULE16_SAFETY_TIE_PHRASE" "rule 16's canonical body must tie its rule-13 override statement to a safety warning's full content, not merely name rule 13"
 assert_contains "$plan_rule_16_flat" "$RULE16_BEFORE_ANSWER_PHRASE" "PLAN.md's rule-16 summary must state the same before-the-answer scoping as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
 assert_contains "$plan_rule_16_flat" "$RULE16_TONE_OVERRIDE_PHRASE" "PLAN.md's rule-16 summary must state the same regardless-of-tone override as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
-assert_contains "$plan_rule_16_flat" "$RULE16_SAFETY_TIE_PHRASE" "PLAN.md's rule-16 summary must state the same rule-13 safety-warning tie as rules/base-rules.md (AA2, cross-file agreement, invariant 6e)"
+
+# [TOKEN AUDIT] Rule 16's second paragraph, which carried the phrase
+# above, is cut. Rule 13 owns its own precedence and already states it
+# from that side, naming rule 16 by number and carrying the behaviour-
+# changing extras_section:no carve-out with it (assertion 8's
+# "precedence"/"extras_section" pins, above). Rule 16 restating "rule 13
+# wins" was the non-owning half of a bilateral pair, priced in every
+# session's system prompt. Inverted on both sides, and the surviving
+# owner is pinned here by name so the relationship cannot be lost by
+# cutting rule 13's paragraph next.
+assert_not_contains "$rule_16_body" "$RULE16_SAFETY_TIE_PHRASE" "rule 16's canonical body must not restate rule 13's precedence - rule 13 owns it, states it, and carries the extras_section:no carve-out that makes it behavioural"
+assert_not_contains "$plan_rule_16_flat" "$RULE16_SAFETY_TIE_PHRASE" "PLAN.md's rule-16 summary must not restate rule 13's precedence either, matching the cut in rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$rule_13_body" "rule 16" "rule 13's canonical body must name rule 16 in its precedence list - with rule 16's own restatement cut, this is the only place the two rules' relationship is stated"
 
 # --- 32. Rule 14 licenses a one-line failure report for its checkpoint
 # read/write, and PLAN.md agrees (S10-1) --------------------------------

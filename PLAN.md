@@ -420,9 +420,7 @@ tone: neutral              # neutral | warm | terse
     effort or frustration — but **rule 2 wins structurally**: the acknowledgement must be fused into
     the same sentence as the answer or next action, never a sentence of its own preceding it. A warm
     opener that stands alone before the answer is preamble, and rule 2 forbids it regardless of
-    `tone`. `terse` strips every non-essential word: fragments over sentences, no transitions. Tone
-    never changes *what* is said, only its register, and never overrides rule 13: a safety warning
-    keeps its full content regardless of `tone`.
+    `tone`. `terse` strips every non-essential word: fragments over sentences, no transitions.
 
 ### `/squirrel:init` — calibration
 
