@@ -145,11 +145,36 @@ docs/RESEARCH.md's "Corrections" section for what got cut when a citation didn't
 
 No network calls. No telemetry. Every script squirrel-mode ships is plain POSIX `sh` or Markdown.
 
-The Claude Code plugin's runtime writes to exactly one place: `~/.squirrel/` — your `profile.md`,
-and one checkpoint file per session under `checkpoints/<slug>/<session-id>.md`
-([ADR-0006](./docs/adr/0006-session-isolation-concurrency.md)). Installs from before this location
-moved have their data at an older path instead — see the note at the end of this section;
-squirrel-mode detects that and tells you, once per session, rather than moving it for you.
+The Claude Code plugin's runtime writes to exactly one place — `~/.squirrel/` — and, inside it, to
+exactly four kinds of file:
+
+- `profile.md` — your calibration, written by `/squirrel:init` and edited by `/squirrel:tune`.
+- `checkpoints/<slug>/<session-id>.md` — one checkpoint file per session
+  ([ADR-0006](./docs/adr/0006-session-isolation-concurrency.md)).
+- `off/PENDING.<token>`, `off/CLEAR.<token>`, and `off/<session-id>` — the sentinels `/squirrel:off`
+  and `/squirrel:on` leave for the next prompt's hook to claim, and the flag a claimed `PENDING`
+  becomes. The hook consumes each sentinel as it claims it, and `/squirrel:on`'s removes the flag.
+- `profile-seen/<session-id>` — an empty marker whose timestamp is all that matters: it is how a
+  session knows whether it has already been shown the current `profile.md`, and it is what makes a
+  `/squirrel:tune` in one session reach the others.
+
+Installs from before this location moved have their data at an older path instead — see the note at
+the end of this section; squirrel-mode detects that and tells you, once per session, rather than
+moving it for you.
+
+**It also deletes, on its own, at session start.** Three prunes run in `scripts/load-profile.sh`, and
+only there — never on an ordinary message:
+
+- Off/on sentinels older than 7 days, and `profile-seen` markers older than 7 days. Both are
+  per-session scraps that are worthless once their session ends; 7 days is a deliberately generous
+  cushion so no realistically long-lived session loses its own live one.
+- Checkpoint files, on a much narrower rule, because losing one loses work you cannot get back: a
+  file is deleted only if it is **both** older than 30 days **and** not among the 10 most recently
+  modified checkpoints for that project. However long a project lies untouched, its ten newest
+  checkpoints always survive. At most 100 candidates are examined per session start, so a huge
+  directory cannot stall the hook.
+
+Nothing else in `~/.squirrel/` is ever deleted by squirrel-mode, and `profile.md` never is.
 
 The Codex and Cursor installers are a separate, one-time step: they write to the per-target
 directories already listed above (`~/.codex/AGENTS.md`, `~/.agents/skills/`, `~/.cursor/rules/`,
@@ -160,7 +185,9 @@ Nothing, on any target, is ever written inside a project repository.
 
 Uninstalling — or reinstalling — leaves `~/.squirrel/` alone: your profile and checkpoints
 survive independently of the plugin's install state
-([ADR-0003](./docs/adr/0003-profile-outside-plugin-data.md)).
+([ADR-0003](./docs/adr/0003-profile-outside-plugin-data.md)). That is a statement about install
+state, not about the session-start pruning above, which keeps running for as long as the plugin is
+installed.
 
 One exception to the normal permission flow: a `PreToolUse` hook auto-approves the plugin's own
 reads and writes inside `~/.squirrel/checkpoints/` — both the read a checkpoint interaction

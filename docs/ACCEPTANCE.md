@@ -261,13 +261,17 @@ $ echo $?
   `scripts/allow-checkpoint.sh`). Verified by reading every write-capable statement in all three
   files: none of them ever builds a destination path from `cwd` or `file_path` pointing outside
   `$HOME/.squirrel/`.
-  - `load-profile.sh` has exactly three filesystem mutations, and every one of them stays inside
+  - `load-profile.sh` has exactly four filesystem mutations, and every one of them stays inside
     `$HOME/.squirrel/`: `prune_stale_off_flags` deletes stale files strictly inside
-    `$HOME/.squirrel/off/`; `prune_stale_session_checkpoints` deletes stale per-session files at
+    `$HOME/.squirrel/off/`; `prune_stale_profile_seen` deletes stale files strictly inside
+    `$HOME/.squirrel/profile-seen/`, and refuses outright when that directory is itself a symlink;
+    `prune_stale_session_checkpoints` deletes stale per-session files at
     depth 1 inside one slug directory under `$HOME/.squirrel/checkpoints/`; and
     `touch_profile_seen` creates (`mkdir -p` plus `touch`) the marker
     `$HOME/.squirrel/profile-seen/<session_id>` whose mtime the P3 reinjection path compares
-    against `profile.md`'s. It writes nothing anywhere else.
+    against `profile.md`'s. It writes nothing anywhere else. (This enumeration read "exactly three"
+    until `prune_stale_profile_seen` was added; the count is corrected here rather than left to
+    drift a second time.)
     `cwd` is used only to compute a checkpoint slug (`project_slug`) that
     is then joined onto `$HOME/.squirrel/checkpoints/` (`build_context`, which derives the
     `session_dir` and `checkpoint_file` paths) — never onto `cwd` itself.
