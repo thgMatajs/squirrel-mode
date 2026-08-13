@@ -116,6 +116,8 @@ When a meaningful unit of work completes, update this session's own checkpoint f
 
 Give the file these `##` sections, in this order: `Doing` (one line), `Next` (the single startable step), `Open decisions` (only when there are any), `Done` (the finished items). `/squirrel:pickup` folds these files by heading across sessions, so never leave a heading with nothing under it: omit that section instead. Anything above the first heading is free-form.
 
+Use the `Read` and `Write` tools on this file, never a shell command: only those carry its auto-approval, so a shell write stops to ask for the permission this rule promises it will not need.
+
 Tool calls are always visible in the transcript; this rule promises no prose about the write in the response, not invisibility.
 
 If the read or the write fails, say so in one line: a failure is reported, never absorbed silently, and that one-line report is not the commentary the paragraph above forbids.

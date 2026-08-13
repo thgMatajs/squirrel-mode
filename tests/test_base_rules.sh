@@ -1158,6 +1158,49 @@ plan_checkpoint_template=$(awk '
 plan_template_heading_order=$(printf '%s\n' "$plan_checkpoint_template" | sed -n 's/^## //p' | tr '\n' ' ' | sed 's/ *$//')
 assert_eq "Doing Next Open decisions Done" "$plan_template_heading_order" "PLAN.md's worked checkpoint template must use the same section order rule 14 now mandates"
 
+# --- 36. Rule 14 names the tools its auto-approval actually covers -----
+#
+# hooks/hooks.json's PreToolUse matcher is "Write|Edit|Read" - letters
+# and pipes, which Claude Code reads as an exact-string LIST, not a
+# substring regex - and ADR-0002 records that a `Bash` call is never
+# auto-approved at any path by any hook. Rule 14 said only "update this
+# session's own checkpoint file", and docs/ACCEPTANCE.md records from a
+# live run that with tool-agnostic wording "the model reaches for a
+# `Bash` heredoc first" - so the rule's own "do not ask permission
+# first" promise silently failed whenever it did. skills/pickup already
+# names `Read` for the read side; rule 14 now names both for the write
+# side. Rule 14 is `targets: claude-code`, so naming a Claude Code tool
+# in it is legitimate in a way it would not be in a rule that also ships
+# to Codex and Cursor.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal
+# backtick-quoted tool names searched for in the rule's own markdown, not
+# command substitution.
+RULE14_TOOLS_PHRASE='`Read` and `Write` tools'
+RULE14_NO_SHELL_PHRASE="never a shell command"
+
+assert_contains "$rule_14_body" "$RULE14_TOOLS_PHRASE" "rule 14's canonical body must name the Read and Write tools - the PreToolUse auto-approval covers exactly those, and a tool-agnostic rule sends the model to a Bash heredoc that always prompts"
+assert_contains "$rule_14_body" "$RULE14_NO_SHELL_PHRASE" "rule 14's canonical body must rule out a shell command for the checkpoint write, since no hook can auto-approve one"
+assert_contains "$plan_rule_14_flat" "$RULE14_TOOLS_PHRASE" "PLAN.md's rule-14 summary must name the same two tools as rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_14_flat" "$RULE14_NO_SHELL_PHRASE" "PLAN.md's rule-14 summary must rule out a shell command the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
+
+# FAILURE PROOF (36): deleting the tool-naming sentence from an in-memory
+# mutant must remove both phrases from rule 14's body while leaving the
+# shape paragraph - pinned just above - untouched, so the two paragraphs'
+# pins cannot rise and fall together.
+rule14_tools_mutant_content=$(grep -v -F "Use the \`Read\` and \`Write\` tools on this file" "$base_rules_file")
+rule14_tools_mutant_body=$(extract_rule_body_from_content "$rule14_tools_mutant_content" 14)
+
+for rule14_tools_phrase in "$RULE14_TOOLS_PHRASE" "$RULE14_NO_SHELL_PHRASE"; do
+  if printf '%s' "$rule14_tools_mutant_body" | grep -qF -- "$rule14_tools_phrase"; then
+    rule14_tools_still_has=yes
+  else
+    rule14_tools_still_has=no
+  fi
+  assert_eq "no" "$rule14_tools_still_has" "FAILURE PROOF (36): deleting rule 14's tool-naming sentence from an in-memory mutant must remove '$rule14_tools_phrase' from its body, proving that pin is not matching some other line of the rule"
+done
+
+assert_contains "$rule14_tools_mutant_body" "$RULE14_SHAPE_ORDER_PHRASE" "FAILURE PROOF (36, independence): deleting rule 14's tool-naming sentence must leave the SEPARATE checkpoint-shape paragraph in place"
+
 # FAILURE PROOF (35): delete the shape paragraph from an in-memory mutant
 # of the real file and confirm all three phrases disappear from rule 14's
 # body, while the rule's OTHER pinned sentences (D2's opening paragraph,

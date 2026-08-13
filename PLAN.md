@@ -398,7 +398,10 @@ tone: neutral              # neutral | warm | terse
     actually changed. Append finished items to the Done log, keeping the last 10. The file's shape is
     fixed so two sessions produce foldable files: `##` sections in the order `Doing` (one line),
     `Next` (the single startable step), `Open decisions` (only when there are any), `Done` (the
-    finished items) — never a heading with nothing under it, omit the section instead.
+    finished items) — never a heading with nothing under it, omit the section instead. Read and
+    written with the `Read` and `Write` tools, never a shell command: the `PreToolUse` matcher is an
+    exact-string list (`Write|Edit|Read`), so only those carry the auto-approval, and a `Bash`
+    heredoc — what the model reaches for when the rule is tool-agnostic — always prompts (ADR-0002).
     *Never describe this as happening without the user's knowledge. Tool calls are always visible in
     the transcript; what we promise is no prose about it, not invisibility (ADR-0002).* If the read
     or the write fails, say so in one line: a failure is reported, never absorbed silently, and that
