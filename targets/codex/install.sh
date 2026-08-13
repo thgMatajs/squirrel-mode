@@ -97,7 +97,13 @@
 # is nothing there to clean) but the four skill files under
 # ~/.agents/skills/ are still removed - they do not live under
 # ~/.codex, and stranding them forever just because ~/.codex is gone
-# would be a worse outcome than removing them anyway.
+# would be a worse outcome than removing them anyway. The directories
+# install created for those files - ~/.agents/skills/<name>,
+# ~/.agents/skills and ~/.agents itself - are removed too, but ONLY
+# once they are empty and ONLY when this run actually removed one of
+# our own files from them: a plain rmdir that is allowed to fail, never
+# a recursive delete, and never applied to a ~/.agents/skills the user
+# made themselves and this script never installed into.
 #
 # POSIX sh, no network calls, no telemetry, never truncates a file it
 # does not fully own.
@@ -193,7 +199,8 @@ home_dir="${HOME:-}"
 
 codex_home="$home_dir/.codex"
 agents_file="$codex_home/AGENTS.md"
-agents_skills_dir="$home_dir/.agents/skills"
+agents_home="$home_dir/.agents"
+agents_skills_dir="$agents_home/skills"
 
 # --- Host detection, scoped to the AGENTS.md step only ------------------
 #
@@ -1171,6 +1178,17 @@ fi
 
 # --- The four ported skills: ~/.agents/skills/<name>/SKILL.md ----------
 
+# Set to yes the moment this run actually removes one of OUR skill
+# files, and read only by the directory cleanup at the very bottom.
+# Install creates ~/.agents (and ~/.agents/skills) with `mkdir -p`, so a
+# complete uninstall owes their removal once they are empty - but ONLY
+# when this run really did take our files out of them. The cleanup used
+# to run on any --uninstall --yes whatsoever, which deleted the empty
+# ~/.agents/skills of a user who had made it themselves and never
+# installed squirrel-mode's skills at all: a directory this script
+# neither created nor put anything in.
+removed_own_skill=no
+
 for cmd_name in digest plan init tune; do
   src="$repo_root/targets/codex/skills/$cmd_name/SKILL.md"
   dest="$agents_skills_dir/$cmd_name/SKILL.md"
@@ -1221,6 +1239,7 @@ for cmd_name in digest plan init tune; do
         echo "Would remove $dest"
         if [ "$do_write" = "yes" ]; then
           rm -f "$dest"
+          removed_own_skill=yes
           rmdir "$agents_skills_dir/$cmd_name" 2>/dev/null || true
           echo "Uninstalled: removed $dest"
         fi
@@ -1235,8 +1254,17 @@ for cmd_name in digest plan init tune; do
   fi
 done
 
-if [ "$action" = "uninstall" ] && [ "$do_write" = "yes" ]; then
+if [ "$action" = "uninstall" ] && [ "$do_write" = "yes" ] && [ "$removed_own_skill" = "yes" ]; then
+  # Both rmdirs are the plain, non-recursive kind and both tolerate
+  # failure: a directory that still holds anything else - the user's own
+  # file directly under ~/.agents, another tool's skill beside ours -
+  # makes rmdir fail, and that failure is the intended outcome, never
+  # something to escalate past with rm -rf. ~/.agents itself is included
+  # because install's own `mkdir -p` is what created it; leaving it
+  # behind on every uninstall contradicted docs/OTHER-TOOLS.md's
+  # "and their now-empty directories" in the most literal way.
   rmdir "$agents_skills_dir" 2>/dev/null || true
+  rmdir "$agents_home" 2>/dev/null || true
 fi
 
 if [ "$do_write" = "no" ]; then

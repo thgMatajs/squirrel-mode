@@ -1861,4 +1861,52 @@ if out38c2=$(HOME="$home38c" "$installer_scratch_38c/targets/codex/install.sh" -
 assert_eq "0" "$exit38c2" "38c (positive control): uninstall must still exit 0 -- output: $out38c2"
 assert_eq "identical" "$(files_byte_status "$snapshot38c" "$home38c/.codex/AGENTS.md")" "38c (positive control): the round trip through a scratch installer copy must still be byte-exact"
 
+# ==========================================================================
+# 39. Directory cleanup on uninstall must be symmetric with what install
+#     created - and must stop there.
+#
+#     Install creates ~/.agents/skills/<name> with `mkdir -p`, which
+#     also creates ~/.agents. Uninstall rmdir'd <name> and skills but
+#     never ~/.agents, so every uninstall left an empty ~/.agents behind
+#     forever, while docs/OTHER-TOOLS.md says the skill files "and their
+#     now-empty directories" are removed.
+#
+#     The mirror-image defect: that final rmdir ran unconditionally on
+#     any --uninstall --yes, so a user who had their own empty
+#     ~/.agents/skills and had never installed squirrel-mode's skills at
+#     all lost that directory to a squirrel-mode uninstall. Removal is
+#     now gated on this run having actually removed one of our own files.
+# ==========================================================================
+home39a=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home39a"
+mkdir -p "$home39a/.codex"
+HOME="$home39a" "$codex_install" --yes >/dev/null 2>&1
+assert_file_exists "$home39a/.agents/skills/digest/SKILL.md" "39a fixture: install must have created the skill files it is about to remove"
+if out39a=$(HOME="$home39a" "$codex_install" --uninstall --yes 2>&1); then exit39a=0; else exit39a=$?; fi
+assert_eq "0" "$exit39a" "39a: --uninstall --yes must exit 0 -- output: $out39a"
+assert_file_absent "$home39a/.agents" "39a: uninstall must remove ~/.agents itself once it is empty, not just the directories below it - install created it, so a complete uninstall owes its removal (docs/OTHER-TOOLS.md says so in as many words)"
+
+home39b=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home39b"
+mkdir -p "$home39b/.codex" "$home39b/.agents/skills"
+if out39b=$(HOME="$home39b" "$codex_install" --uninstall --yes 2>&1); then exit39b=0; else exit39b=$?; fi
+assert_eq "0" "$exit39b" "39b: --uninstall --yes must exit 0 when there is nothing of ours to remove -- output: $out39b"
+if [ -d "$home39b/.agents/skills" ]; then skills_dir_39b=present; else skills_dir_39b=absent; fi
+assert_eq "present" "$skills_dir_39b" "39b: a pre-existing, EMPTY ~/.agents/skills that squirrel-mode never put anything into must survive an uninstall - this installer may only remove a directory its own files were just removed from"
+if [ -d "$home39b/.agents" ]; then agents_dir_39b=present; else agents_dir_39b=absent; fi
+assert_eq "present" "$agents_dir_39b" "39b: the same holds one level up - a ~/.agents this run never installed into must survive it"
+
+home39c=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home39c"
+mkdir -p "$home39c/.codex" "$home39c/.agents"
+printf 'my own agents-level notes, nothing to do with squirrel-mode\n' >"$home39c/.agents/notes.md"
+snapshot39c=$(snapshot_file "$home39c/.agents/notes.md")
+cleanup_dirs="$cleanup_dirs $snapshot39c"
+HOME="$home39c" "$codex_install" --yes >/dev/null 2>&1
+if out39c=$(HOME="$home39c" "$codex_install" --uninstall --yes 2>&1); then exit39c=0; else exit39c=$?; fi
+assert_eq "0" "$exit39c" "39c: --uninstall --yes must exit 0 with unrelated content under ~/.agents -- output: $out39c"
+assert_file_absent "$home39c/.agents/skills" "39c: ~/.agents/skills must still be removed once our four files are gone from it"
+assert_file_exists "$home39c/.agents/notes.md" "39c: an unrelated file directly under ~/.agents must survive - the rmdir of a non-empty ~/.agents must fail harmlessly, never escalate to a recursive removal"
+assert_eq "identical" "$(files_byte_status "$snapshot39c" "$home39c/.agents/notes.md")" "39c: that unrelated file must be byte-unchanged"
+
 assert_report
