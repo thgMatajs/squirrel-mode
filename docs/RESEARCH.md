@@ -5,9 +5,9 @@
 This is the evidence log for `squirrel-mode`. 10 of the 16 base rules in `rules/base-rules.md`
 trace to at least one finding below; every finding carries the citations behind it, tagged with the
 population they rest on — measured, where the citation measured anyone, and marked as borrowed
-reasoning where it did not. The other 6 rules are stated design
-decisions with no research claim behind them — named plainly in "Rules with no research claim
-behind them" below, not folded into the findings as if they had citations they do not have.
+reasoning where it did not. The other 6 rules are stated design decisions with no research claim
+behind them — named plainly in "Rules with no research claim behind them" below, not folded into
+the findings as if they had citations they do not have.
 
 ## Rules with no research claim behind them
 
@@ -47,10 +47,10 @@ separate a population a paper *measured* from one it merely writes *for*: Speich
 (2025), under Finding 4, carries `borrowed from adjacent accessibility work` but recruited nobody,
 and Finding 4 states that in prose because the tag cannot. Where a citation measured no one in any
 population, the honest move is no tag at all rather than the nearest-fitting one — the *Tether*
-entry under "Related work" carries none, and says why in place of it. A rule
-justified by a large ADHD-population finding and a rule justified by sound reasoning borrowed from
-a different disability population are not the same strength of evidence, and this document never
-lets them look the same.
+entry under "Related work" carries none, and says why in place of it. A rule justified by a large
+ADHD-population finding and a rule justified by sound reasoning borrowed from a different
+disability population are not the same strength of evidence, and this document never lets them look
+the same.
 
 ## Citation policy
 
