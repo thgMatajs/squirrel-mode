@@ -47,7 +47,7 @@ The older single-file checkpoint cases 1 and 2 refer to is the file named by a `
 Read the files newest first and combine them, section by section:
 
 - **You were doing** and **Next action** are single values. Take each from the newest file that actually records it. A file that is empty, or that has no such section, contributes nothing and you move on to the next newest.
-- **Recent wins** folds the Done log entries of every file together, newest file first, and within a file newest entry first.
+- **Recent wins** folds the Done log entries of every file together, newest file first, and within a file newest entry first - a Done log is appended to, so its LAST entry is the newest one and you read it bottom-up.
 - **Open decisions** folds the same way; drop an entry that repeats one you already have.
 
 If a file is empty, or is missing its Doing, Next, or Done log section, do not invent content for what is missing, and never fill the gap from a file that does not actually say it. If, after folding everything you read, a section still has no source content at all, say so in one line in that section's place instead - for example "No wins recorded yet.", "No Doing entry recorded.", or "No Next entry recorded." - then continue with the rest of the fixed output. This is separate from Open decisions, which is already documented below as normal to omit entirely when nothing lists any; that is not the malformed case this paragraph covers.

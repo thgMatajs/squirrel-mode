@@ -654,6 +654,60 @@ done
 IFS=$pickup_p1_old_ifs
 
 # ==========================================================================
+# 11c. pickup must say WHICH END of a Done log holds the newest entry.
+#
+#      rules/base-rules.md rule 14 APPENDS finished items to the Done
+#      log, so inside one checkpoint file the newest entry is the LAST
+#      one. That direction was stated in exactly one file and assumed in
+#      the other. This file said only two things about it: the fold rule
+#      pinned just above ("within a file newest entry first") and the
+#      output template's "the last 2-3 Done log entries, shown FIRST, on
+#      purpose". Both are correct for an appended file, and between them
+#      they never say which end IS the newest - so a model reading only
+#      this file had to infer it.
+#
+#      Inferring it backwards inverts the feature silently: Recent wins
+#      opens with the OLDEST wins, which is the precise opposite of the
+#      reason it leads the output at all (README.md's rationale bullet,
+#      "the Done log opens with recent wins first, on purpose", resting
+#      on docs/RESEARCH.md's negative-memory-bias finding). Nothing about
+#      it fails loudly; the section is still populated, still ordered,
+#      still capped - just backwards.
+#
+#      The fix is deliberately in THIS file and not in rule 14: rule 14
+#      ships in every session's system prompt and its opening sentence is
+#      pinned verbatim as RULE14_D2_SENTENCE in tests/test_base_rules.sh,
+#      so the append direction is already held there. This scenario holds
+#      the other end, so the two statements cannot disagree again.
+#
+#      The mutant below is the pre-fix sentence, reconstructed and put
+#      back into a scratch copy of the real file. It must still satisfy
+#      scenario 11b's fold pin and must NOT satisfy this scenario's pin -
+#      which is what proves this pin measures the stated direction rather
+#      than something both wordings already share.
+# ==========================================================================
+PICKUP_FOLD_PHRASE="folds the Done log entries of every file together, newest file first"
+PICKUP_DIRECTION_PHRASE="its LAST entry is the newest one"
+PICKUP_AMBIGUOUS_SENTENCE="- **Recent wins** $PICKUP_FOLD_PHRASE, and within a file newest entry first."
+
+assert_contains "$pickup_body" "$PICKUP_DIRECTION_PHRASE" "pickup must name which end of a file's Done log is its newest entry - rule 14 appends, so it is the last one, and a model that infers the opposite opens Recent wins with the oldest wins and nothing fails"
+
+pickup_direction_mutant=$(skill_scratch "$pickup_file")
+grep -vF "$PICKUP_DIRECTION_PHRASE" "$pickup_file" >"$pickup_direction_mutant.tmp"
+printf '%s\n' "$PICKUP_AMBIGUOUS_SENTENCE" >>"$pickup_direction_mutant.tmp"
+mv "$pickup_direction_mutant.tmp" "$pickup_direction_mutant"
+pickup_direction_mutant_body=$(read_file "$pickup_direction_mutant")
+
+if printf '%s' "$pickup_direction_mutant_body" | grep -qF -- "$PICKUP_DIRECTION_PHRASE"; then
+  pickup_direction_mutant_has_direction=yes
+else
+  pickup_direction_mutant_has_direction=no
+fi
+assert_eq "no" "$pickup_direction_mutant_has_direction" "FAILURE PROOF (scenario 11c): reverting this file to the pre-fix sentence in a scratch copy must make the direction pin above fail, proving a revert is caught rather than tolerated"
+
+assert_contains "$pickup_direction_mutant_body" "$PICKUP_FOLD_PHRASE" "FAILURE PROOF (scenario 11c, independence): the same reverted copy must STILL satisfy scenario 11b's fold pin - proving that pin is not what distinguishes a file that states the direction from one that leaves it to inference"
+
+# ==========================================================================
 # 12. off and on both reference ~/.squirrel/off/ and both mention
 #     /plugin disable.
 # ==========================================================================
