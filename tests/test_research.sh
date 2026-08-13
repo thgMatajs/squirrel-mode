@@ -194,9 +194,15 @@
 #      (2010) is not retracted and has not failed replication, so this is a "note the contest" fix,
 #      not a removal — the competing continuous-resource account is stated in its own source's words
 #      and cited to Ma, Husain & Bays (2014).
+#  36. [THIRD VERIFICATION PASS] No citation bullet carries the smoothed misquotation of Sweller &
+#      Chandler (1994)'s abstract ("may be caused BY BOTH THE intrinsic nature" for the published
+#      "may be caused BOTH BY intrinsic nature"). The reordering changes no meaning, which is why it
+#      matters: quotation marks promise the source's own words. The second quotation in the same
+#      citation was verified at the same time, is accurate as printed, and is pinned as PRESENT so a
+#      future pass does not "fix" a quotation that was right all along.
 #
 # Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-# 30, 31, 32, 33, 34, and 35 are
+# 30, 31, 32, 33, 34, 35, and 36 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -642,17 +648,19 @@ check_tether_population_lines() {
   echo "$n"
 }
 
-# check_wrong_bower_initial_citation_entries <file> — prints the count of logical citation bullets
+# count_citation_entries_matching <file> <needle> — prints the count of logical citation bullets
 # (inside any "**Citations:**" block, continuation lines joined exactly as check_citation_violations
-# does) naming "G. A. Bower" as an editor. The editor of *Psychology of Learning and Motivation*
-# Vol. 8 is Gordon H. Bower — "G. H. Bower".
+# does) containing <needle> as a plain substring.
 #
-# Scoped to citation bullets rather than the whole file, for the same reason
-# check_sweller_1988_citation_entries above is: the Corrections section legitimately names the wrong
-# form while explaining that it was wrong, and a file-wide ban would fail the correct document. What
-# must not come back is the wrong initial used LIVE, in a reference.
-check_wrong_bower_initial_citation_entries() {
+# Scoping a ban to citation bullets, rather than to the whole file, is what lets the Corrections
+# section keep naming a retired form while explaining that it was wrong — the same reason
+# check_sweller_1988_citation_entries above is scoped that way. What must not come back is the bad
+# text used LIVE, in a reference. Where a retired phrase can instead be DESCRIBED rather than quoted
+# in corrective prose, the file-wide bans in scenarios 30, 31, 33 and 35 are preferred, because they
+# also catch the phrase resurfacing in ordinary prose.
+count_citation_entries_matching() {
   file=$1
+  needle=$2
   bad=0
   citations=$(awk '
     /^\*\*Citations:\*\*$/ { in_cite = 1; buf = ""; next }
@@ -677,12 +685,28 @@ check_wrong_bower_initial_citation_entries() {
 '
     for c in $citations; do
       case "$c" in
-        *"G. A. Bower"*) bad=$((bad + 1)) ;;
+        *"$needle"*) bad=$((bad + 1)) ;;
       esac
     done
     IFS=$old_ifs
   fi
   echo "$bad"
+}
+
+# check_wrong_bower_initial_citation_entries <file> — citation bullets naming "G. A. Bower" as an
+# editor. The editor of *Psychology of Learning and Motivation* Vol. 8 is Gordon H. Bower.
+check_wrong_bower_initial_citation_entries() {
+  count_citation_entries_matching "$1" "G. A. Bower"
+}
+
+# check_sweller_quote_drift_citation_entries <file> — citation bullets carrying the smoothed
+# misquotation of Sweller & Chandler (1994)'s abstract. The published assumption (e) reads "may be
+# caused both by intrinsic nature of the material being learned"; this file had it as "may be caused
+# by both the intrinsic nature of the material being learned". Scoped to citation bullets so the
+# Corrections entry can show both forms side by side, which is the only way to record a misquotation
+# usefully.
+check_sweller_quote_drift_citation_entries() {
+  count_citation_entries_matching "$1" "may be caused by both the intrinsic nature"
 }
 
 # check_finding5_meltzer_tag <file> — prints the population tag in force at the Meltzer & Basho
@@ -2240,5 +2264,30 @@ case "$proof_output" in
   *) fixture_cowan_caught=no ;;
 esac
 assert_eq "yes" "$fixture_cowan_caught" "FAILURE PROOF (scenario 35): restoring the undisputed '~4-chunk capacity' framing must be caught"
+
+# ================================================================================================
+# 36. No citation bullet carries the smoothed misquotation of Sweller & Chandler (1994)'s abstract
+#     (third verification pass). Published assumption (e) reads "may be caused both by intrinsic
+#     nature of the material being learned"; this file had reordered it to "may be caused by both
+#     the intrinsic nature of the material being learned". The reordering changes no meaning, which
+#     is why it matters: quotation marks promise the source's own words. Checked against the real
+#     file (expect 0, and the published wording present), then against a fixture with the smoothed
+#     version restored in a citation bullet (expect 1).
+#
+#     The SECOND quotation in that same citation was verified at the same time and is accurate as
+#     printed — the abstract really does conclude "spectacular gains in learning efficiency" — so it
+#     is pinned as present rather than corrected, to stop a future pass "fixing" a quotation that
+#     was right all along.
+# ================================================================================================
+real_sweller_quote_bad=$(check_sweller_quote_drift_citation_entries "$research_file")
+assert_eq "0" "$real_sweller_quote_bad" "no citation bullet may carry the smoothed 'may be caused by both the intrinsic nature' misquotation of Sweller & Chandler (1994)"
+assert_contains "$research_flat_28" "may be caused both by intrinsic nature of the material being learned" "the Sweller & Chandler (1994) citation must quote its abstract's published wording"
+assert_contains "$research_flat_28" "spectacular gains in learning efficiency" "the Sweller & Chandler (1994) citation's concluding quotation is accurate as printed and must stay as printed"
+
+sweller_quote_fixture="$scratch_dir/bad_sweller_quote.md"
+cp "$research_file" "$sweller_quote_fixture"
+printf '\n**Citations:**\n- Sweller, J., & Chandler, P. (1994). *Why Some Material Is Difficult to Learn*. Cognition and\n  Instruction, 12(3), 185-233. <https://doi.org/10.1207/s1532690xci1203_1> — "high levels of element\n  interactivity and their associated cognitive loads may be caused by both the intrinsic nature of\n  the material being learned."\n' >>"$sweller_quote_fixture"
+fixture_sweller_quote_bad=$(check_sweller_quote_drift_citation_entries "$sweller_quote_fixture")
+assert_eq "1" "$fixture_sweller_quote_bad" "FAILURE PROOF (scenario 36): a citation bullet re-introducing the smoothed Sweller & Chandler quotation must be caught"
 
 assert_report

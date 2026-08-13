@@ -274,10 +274,11 @@ correctly below (see Corrections).
 **Citations:**
 - Sweller, J., & Chandler, P. (1994). *Why Some Material Is Difficult to Learn*. Cognition and
   Instruction, 12(3), 185–233. <https://doi.org/10.1207/s1532690xci1203_1> — its own abstract states
-  the distinction directly: "high levels of element interactivity and their associated cognitive
-  loads may be caused by both the intrinsic nature of the material being learned and by the method
-  of presentation," concluding that "analysis of both intrinsic and extraneous cognitive load can
-  lead to instructional designs generating spectacular gains in learning efficiency."
+  the distinction directly, as assumption (e) of the six it lists: "High levels of element
+  interactivity and their associated cognitive loads may be caused both by intrinsic nature of the
+  material being learned and by the method of presentation." It concludes "that an analysis of both
+  intrinsic and extraneous cognitive load can lead to instructional designs generating spectacular
+  gains in learning efficiency."
 
 A code-presentation application of this reasoning exists, aimed at blind and low-vision developers
 rather than ADHD. It is included as sound cognitive-load reasoning applied by inference to a
@@ -847,6 +848,17 @@ source that never mentions that population.
    (2014), which names Cowan's four as the account under contest and states the alternative in its
    own abstract. Finding 2's specific-number wording is replaced with "small concurrent capacity,"
    which is what its argument actually needs and what both accounts agree on.
+10. **Sweller & Chandler (1994) was misquoted inside quotation marks.** Finding 4 presented the
+    abstract's assumption (e) as reading "may be caused by both the intrinsic nature of the material
+    being learned"; the abstract reads "may be caused both by intrinsic nature of the material being
+    learned." The reordering is small and changes no meaning, which is exactly why it is worth
+    recording: a document that puts quotation marks around a sentence is promising the sentence is
+    the source's, not a tidied version of it, and once one quotation is known to be smoothed a reader
+    is entitled to doubt the rest. Corrected to the published wording. The second quotation in the
+    same citation was checked at the same time and is **accurate as printed** — the abstract does
+    conclude "that an analysis of both intrinsic and extraneous cognitive load can lead to
+    instructional designs generating spectacular gains in learning efficiency" — so it is left
+    alone, and the fuller "an analysis" is restored to the quotation's start.
 
 ---
 
