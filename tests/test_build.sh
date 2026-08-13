@@ -960,7 +960,25 @@ else
   atomic_build2_exit=$?
 fi
 chmod 755 "$atomic_scratch/targets/codex"
-assert_eq "1" "$atomic_build2_exit" "build.sh must exit non-zero when it cannot write one target artifact (read-only targets/codex/ directory) -- got exit $atomic_build2_exit, output: $atomic_build2_output"
+# NON-ZERO, not a specific number. The requirement build.sh has to meet is
+# "refuse to ship a half-written artifact", and the only observable it owes
+# a caller for that is a failing exit status - which number it is belongs to
+# the shell, not to this repo. `sh scripts/build.sh` dies on the failed
+# redirection that creates the temp file, and the status a shell reports for
+# a redirection failure is dialect-specific: bash reports 1, dash reports 2
+# (verified directly: `dash -c 'echo x > /nonexistent-dir/f'` exits 2, the
+# same line under bash exits 1). Pinning "1" therefore passed on macOS and
+# failed on CI's ubuntu /bin/sh (dash) with "got exit 2" - a green/red split
+# decided by the runner's shell rather than by build.sh's behaviour, which
+# was correct on both. Widened to the requirement the message already
+# stated; the observed status stays in the message so a regression that
+# changes WHICH failure occurs is still legible in the output.
+if [ "$atomic_build2_exit" -ne 0 ]; then
+  atomic_build2_failed=yes
+else
+  atomic_build2_failed=no
+fi
+assert_eq "yes" "$atomic_build2_failed" "build.sh must exit non-zero when it cannot write one target artifact (read-only targets/codex/ directory) -- got exit $atomic_build2_exit, output: $atomic_build2_output"
 
 for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cursor.mdc:$atomic_cursor" "codex-skill-digest.md:$atomic_scratch/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$atomic_scratch/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$atomic_scratch/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$atomic_scratch/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$atomic_scratch/targets/cursor/commands/digest.md" "cursor-command-plan.md:$atomic_scratch/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$atomic_scratch/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$atomic_scratch/targets/cursor/skills/squirrel-plan/SKILL.md"; do
   snap_name=${pair%%:*}
