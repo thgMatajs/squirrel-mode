@@ -37,11 +37,12 @@ Sets: `language`. This question is the one exception to the general free-form-ma
 
 ### Question 2 of 7: What breaks your focus most? (bundle selector)
 
-This is the single highest-information question in the interview: it sets four fields at once. Ask exactly this question, with exactly these three lettered options, plus "type your own":
+This is the single highest-information question in the interview: it sets four fields at once. Ask exactly this question, with exactly these four lettered options, plus "type your own":
 
 A. Long walls of text
 B. Answers that jump around or feel disorganized
 C. Too many options or choices thrown at me at once
+D. Getting stuck or frustrated, and losing momentum
 
 This mapping is authoritative - do not improvise it, and do not infer a different combination even if it seems plausible. Each answer describes a distinct *mode* of overwhelm, and the tech lead has already worked out the combination each mode needs:
 
@@ -50,10 +51,13 @@ This mapping is authoritative - do not improvise it, and do not infer a differen
 | A - long walls of text | `checklist` | 1 | `no` | `terse` |
 | B - jumps around, disorganized | `numbered` | 3 | `yes` | `neutral` |
 | C - too many options at once | `numbered` | 2 | `no` | `neutral` |
+| D - stuck or frustrated, losing momentum | `numbered` | 3 | `no` | `warm` |
 
-Why these three combinations, so a future edit does not undo it: A is drowning in words, so cut words and drop the Extra section entirely. B can handle content but needs scaffolding, so it keeps a normal budget and gets a clearly labelled Extra - a reader who wants structure tolerates one more labelled section. C is paralysed by choice, so `extras_section` is `no` there too - an Extra section is one more thing to evaluate, which is exactly the load C is reporting; C answering this way also strongly suggests `options_per_answer: 1` at question 6, but question 6 asks that directly and its own answer wins.
+Why these four combinations, so a future edit does not undo it: A is drowning in words, so cut words and drop the Extra section entirely. B can handle content but needs scaffolding, so it keeps a normal budget and gets a clearly labelled Extra - a reader who wants structure tolerates one more labelled section. C is paralysed by choice, so `extras_section` is `no` there too - an Extra section is one more thing to evaluate, which is exactly the load C is reporting; C answering this way also strongly suggests `options_per_answer: 1` at question 6, but question 6 asks that directly and its own answer wins. D is the one mode where the material is not the problem: the content lands and the momentum does not, so structure stays ordinary and `tone` is `warm` - the only field in the profile that can acknowledge the friction at all, and rule 16 keeps that acknowledgement to one clause fused into the answer, never an opener of its own. `extras_section` is `no` for D as well, because an optional extra section is one more thing to come back to for someone already stalled.
 
-A free-form answer for this question follows the general free-form rule above: map it to the closest of A, B, or C by meaning, and name which one in one line before continuing.
+`warm` is reachable only here. Answer D is the one path in this interview that sets it, so do not quietly fold D into B: the two differ in `extras_section` and in `tone`, and collapsing them would take a third of `tone`'s value space off the calibration path entirely.
+
+A free-form answer for this question follows the general free-form rule above: map it to the closest of A, B, C, or D by meaning, and name which one in one line before continuing.
 
 This one question sets `step_style`, `explanation_budget`, `extras_section`, and `tone` together. No other question in this interview sets any of these four fields; the squirrel-mode `tune` skill is where each of the four can be revisited on its own later.
 

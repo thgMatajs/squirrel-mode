@@ -1197,4 +1197,83 @@ mut6_blockvalue=$(field_value_from_block "$mut6_block" "language")
 if [ "$mut6_default" = "$mut6_blockvalue" ]; then mut6_matches=yes; else mut6_matches=no; fi
 assert_eq "no" "$mut6_matches" "FAILURE PROOF (scenario 26c, example value drift): changing the example block's language value away from the canonical default in a scratch copy must make the per-field value check fail"
 
+# ==========================================================================
+# 27. Every allowed value of `tone` is reachable from the interview.
+#
+#     rules/base-rules.md advertises `tone` as neutral/warm/terse, but
+#     init's only tone-setting question (question 2, the bundle
+#     selector) mapped its three answers to terse/neutral/neutral - so
+#     `warm` could not be produced by the primary calibration path at
+#     all, only by /squirrel:tune afterwards. A third of an advertised
+#     value space unreachable from the interview that exists to set it.
+#
+#     Written against the CANONICAL allowed-value list rather than a
+#     hardcoded one, so adding a fourth tone to rules/base-rules.md
+#     immediately reddens this check until question 2 (or another
+#     question) can actually produce it. Scoped to `tone` alone: it is
+#     the only field question 2 sets whose full value space the
+#     interview is expected to cover (max_list_items, for instance, is
+#     deliberately offered as 3/5/7 out of an integer range).
+# ==========================================================================
+tone_allowed_cell=$(extract_defaults_table "$base_rules_file" | awk -F'|' '$2 ~ /^[[:space:]]*tone[[:space:]]*$/ { print $4 }')
+tone_allowed_values=$(printf '%s\n' "$tone_allowed_cell" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' || true)
+
+tone_allowed_count=$(printf '%s\n' "$tone_allowed_values" | grep -c . || true)
+if [ "${tone_allowed_count:-0}" -ge 2 ] 2>/dev/null; then
+  tone_allowed_nonvacuous=yes
+else
+  tone_allowed_nonvacuous=no
+fi
+assert_eq "yes" "$tone_allowed_nonvacuous" "sanity check: rules/base-rules.md's Defaults table must yield at least two allowed values for tone, or the reachability check below passes vacuously"
+
+# tone_values_reachable_from <init file> - prints one line per distinct
+# tone value question 2's mapping table can produce. The table's rows are
+# "| <letter> - <label> | `step_style` | <budget> | `extras_section` |
+# `tone` |", so tone is the 6th pipe-delimited field.
+tone_values_reachable_from() {
+  awk '
+    /^### Question 3 of 7/ { if (flag) exit }
+    /^### Question 2 of 7/ { flag = 1 }
+    flag { print }
+  ' "$1" | awk -F'|' '/^\| [A-Z] - / { gsub(/[ `]/, "", $6); if ($6 != "") print $6 }' | sort -u
+}
+
+q2_reachable_tones=$(tone_values_reachable_from "$init_file")
+
+for tone_value in $tone_allowed_values; do
+  if printf '%s\n' "$q2_reachable_tones" | grep -qxF "$tone_value"; then
+    tone_reachable=yes
+  else
+    tone_reachable=no
+  fi
+  assert_eq "yes" "$tone_reachable" "init's question 2 must be able to produce tone='$tone_value' - rules/base-rules.md advertises it as an allowed value, and question 2 is the interview's only tone-setting question"
+done
+
+# --- Failure proof: the loop above is not vacuous ---------------------
+#
+# Delete question 2's `warm` row from a scratch COPY and confirm `warm`
+# is no longer reachable - i.e. this scenario would have caught the
+# original defect, where that row simply did not exist.
+fp_tone_scratch=$(skill_scratch "$init_file")
+grep -vF '| D - stuck or frustrated, losing momentum |' "$fp_tone_scratch" >"$fp_tone_scratch.tmp" && mv "$fp_tone_scratch.tmp" "$fp_tone_scratch"
+fp_reachable_tones=$(tone_values_reachable_from "$fp_tone_scratch")
+if printf '%s\n' "$fp_reachable_tones" | grep -qxF "warm"; then
+  fp_tone_still_reachable=yes
+else
+  fp_tone_still_reachable=no
+fi
+assert_eq "no" "$fp_tone_still_reachable" "FAILURE PROOF (scenario 27): deleting question 2's warm-producing row from a scratch copy must make tone='warm' unreachable - proving the reachability loop above measures something"
+
+# Independence: the same mutant must leave the OTHER tone values
+# reachable, so a rewrite that collapsed the mapping table into one row
+# could not make every assertion in the loop rise and fall together.
+for tone_value in neutral terse; do
+  if printf '%s\n' "$fp_reachable_tones" | grep -qxF "$tone_value"; then
+    fp_other_tone_reachable=yes
+  else
+    fp_other_tone_reachable=no
+  fi
+  assert_eq "yes" "$fp_other_tone_reachable" "FAILURE PROOF (scenario 27, independence): deleting only the warm row must leave tone='$tone_value' reachable"
+done
+
 assert_report

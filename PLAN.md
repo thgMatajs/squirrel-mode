@@ -450,7 +450,7 @@ is no 1:1 mapping and the spec must not claim one.
 | 6 | One recommendation, or alternatives? | `options_per_answer` |
 | 7 | Recap progress and confirm topic switches? | `progress_recap`, `confirm_topic_switch` |
 
-**Question 2's value mapping is authoritative — do not improvise it.** The three answers describe
+**Question 2's value mapping is authoritative — do not improvise it.** The four answers describe
 different *modes* of overwhelm, and each maps to a distinct combination. If two answers produced the
 same values the question would be doing no work.
 
@@ -459,13 +459,18 @@ same values the question would be doing no work.
 | **A** — long walls of text | volume | `checklist` | 1 | `no` | `terse` |
 | **B** — jumps around, disorganized | structure | `numbered` | 3 | `yes` | `neutral` |
 | **C** — too many options at once | decision load | `numbered` | 2 | `no` | `neutral` |
+| **D** — stuck or frustrated, losing momentum | momentum | `numbered` | 3 | `no` | `warm` |
 
 The reasoning, so a future edit does not undo it: A is drowning in words, so cut words and drop the
 Extra section. B can handle content but needs scaffolding, so keep a normal budget and allow a clearly
 labelled Extra — a reader who wants structure tolerates one more *labelled* section. C is paralysed by
 choice, so `extras_section: no` — an Extra section is one more thing to evaluate, which is exactly the
 load C is reporting. Answering C also strongly suggests `options_per_answer: 1` at question 6, but
-question 6 asks that directly and its answer wins.
+question 6 asks that directly and its answer wins. D is the one mode where the material is not the
+problem — the content lands, the momentum does not — so structure stays ordinary and `tone` is
+`warm`, the only field that can acknowledge the friction; `extras_section: no` for the same reason as
+C. **D is the only path to `warm` in the interview**: without it a third of `tone`'s value space
+would be reachable through `/squirrel:tune` alone, which is not calibration.
 
 `/squirrel:tune` exposes all 11 fields individually — that is where the long tail is discoverable.
 
