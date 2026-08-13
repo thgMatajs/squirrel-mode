@@ -197,19 +197,24 @@ Each is still a tool call like any other and shows up in the transcript the same
 tool call does — what's skipped is the permission prompt and any commentary about it in the
 response, not the read or write itself.
 
-**That guarantee is exactly as wide as the hook's matcher, and there is a known path where it does
-not hold.** The matcher is `Write|Edit|Read`: three exact tool names, not a pattern that also catches
-things containing them. A checkpoint read or write made with one of those three skips the prompt. A
-`Bash` call cannot be auto-approved by any hook, at any path, so one that writes a checkpoint file
-with a heredoc instead goes through the normal permission flow — a prompt, in an interactive session.
-`/squirrel:pickup` names the `Read` tool explicitly and stays inside the guarantee. The base rule
-that keeps a checkpoint current says only "update this session's own checkpoint file", without naming
-a tool, and a live run recorded that with exactly that kind of tool-agnostic wording the model
-reaches for a `Bash` heredoc first, then retries with `Write` and says so in one line
-(`docs/ACCEPTANCE.md`, Live-sweep finding 3 — observed on `/squirrel:init`, `/squirrel:tune`,
-`/squirrel:off` and `/squirrel:on`, which are worded the same way, not on the checkpoint rule
-itself). The cost when it happens is one permission prompt and one extra line of report, not a lost
-checkpoint.
+**That guarantee is exactly as wide as the hook's matcher, and every instruction that touches a
+checkpoint now names a tool the matcher covers.** The matcher is `Write|Edit|Read`: three exact tool
+names, not a pattern that also catches things containing them. A checkpoint read or write made with
+one of those three skips the prompt. A `Bash` call cannot be auto-approved by any hook, at any path,
+so one that writes a checkpoint file with a heredoc instead goes through the normal permission flow —
+a prompt, in an interactive session. `/squirrel:pickup` names the `Read` tool explicitly; the base
+rule that keeps a checkpoint current names the `Read` and `Write` tools and rules out a shell command
+in as many words. Neither is worded tool-agnostically any more.
+
+**That is an instruction, not enforcement, and the difference is worth stating.** The matcher decides
+which tool calls are auto-approved, never which tool gets called: nothing in the harness stops a model
+from reaching for a `Bash` heredoc against the checkpoint anyway, and no hook could auto-approve it if
+it did. What has been watched live is the tool-agnostic wording, not this one — `/squirrel:init`,
+`/squirrel:tune`, `/squirrel:off` and `/squirrel:on` still say "write" or "create" without naming a
+tool, and a live run recorded the model reaching for a `Bash` heredoc first there, then retrying with
+`Write` and saying so in one line (`docs/ACCEPTANCE.md`, Live-sweep finding 3 — observed on those
+four, never on the checkpoint rule itself). Should a checkpoint write ever go that way, the cost is
+the same as it was there: one permission prompt and one extra line of report, not a lost checkpoint.
 
 The auto-approval only covers paths that genuinely resolve inside that directory: a symlink at
 `checkpoints/` itself, or anywhere below it, is never auto-approved — that write falls back to the

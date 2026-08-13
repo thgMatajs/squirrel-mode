@@ -2084,6 +2084,57 @@ assert_eq "yes" "$perturn_pin_removed" "FAILURE PROOF (scenario 35, per-turn cap
 assert_contains "$perturn_pin_mutant_content" "never auto-approved" "FAILURE PROOF (scenario 35, per-turn cap): deleting the one-write-per-turn sentence alone must leave the SEPARATE symlink-boundary paragraph untouched (proving the two pins are independent)"
 
 # ==========================================================================
+# 35b. Same disclosure, the half about which TOOL writes a checkpoint.
+#
+#      README used to disclose a live gap here: the auto-approval covers
+#      Write|Edit|Read, and the base rule that keeps a checkpoint current
+#      named no tool at all, so the model could reach for a Bash heredoc
+#      no hook can auto-approve. Commit cecbd7c closed it - rule 14 now
+#      names the `Read` and `Write` tools (pinned at the rule's own end by
+#      tests/test_base_rules.sh scenario 36, which also pins PLAN.md's
+#      copy). README now says so, which makes it the THIRD file carrying
+#      that one fact, and invariant 6e wants the third end pinned like the
+#      other two: pin 1 below fails if README drops the claim, pin 2 fails
+#      if rules/base-rules.md drops what README is claiming ABOUT it, so
+#      removing the tool naming from the rule cannot leave README quietly
+#      asserting it.
+#
+#      Pin 3 is the honesty half and matters just as much. Rule 14
+#      INSTRUCTS the model to use those tools; the harness does not
+#      ENFORCE the choice, and docs/ACCEPTANCE.md's live evidence is on
+#      init/tune/off/on, not on the checkpoint rule. Without this pin the
+#      claim above could drift into "impossible" - a bigger guarantee than
+#      anything here delivers - with the two pins above still green.
+# ==========================================================================
+# shellcheck disable=SC2016 # single-quoted deliberately: the backticks
+# below are literal Markdown characters this needle searches README.md's
+# and rules/base-rules.md's own TEXT for, not command substitution.
+readme_tools_needle='`Read` and `Write` tools'
+readme_unenforced_needle="instruction, not enforcement"
+base_rules_content_35b=$(read_file "$repo_root/rules/base-rules.md")
+
+assert_contains "$readme_content_35" "$readme_tools_needle" "README.md's checkpoint auto-approval disclosure must state that the base rule names the Read and Write tools - that is what closed the Bash-heredoc gap this paragraph used to disclose as open"
+assert_contains "$base_rules_content_35b" "$readme_tools_needle" "rules/base-rules.md must actually name those two tools, or README.md's disclosure is claiming a closure that no longer exists (cross-file agreement, invariant 6e)"
+assert_contains "$readme_content_35" "$readme_unenforced_needle" "README.md must keep saying the tool naming is an INSTRUCTION and not enforcement - a model can still reach for a Bash heredoc, and no hook can auto-approve one, so 'names the tools' must never be read as 'cannot happen'"
+
+readme_35b_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-tools-pin-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $readme_35b_mutant_dir"
+
+readme_tools_mutant="$readme_35b_mutant_dir/README-tools.md"
+grep -vF "$readme_tools_needle" "$readme_doc" >"$readme_tools_mutant"
+readme_tools_mutant_content=$(read_file "$readme_tools_mutant")
+if printf '%s' "$readme_tools_mutant_content" | grep -qF "$readme_tools_needle"; then readme_tools_pin_removed=no; else readme_tools_pin_removed=yes; fi
+assert_eq "yes" "$readme_tools_pin_removed" "FAILURE PROOF (scenario 35b, tools claim): deleting that line from a scratch copy of README.md must remove the pinned text"
+assert_contains "$readme_tools_mutant_content" "$readme_unenforced_needle" "FAILURE PROOF (scenario 35b, tools claim): deleting the tools-naming line alone must leave the SEPARATE instruction-not-enforcement sentence standing (proving the two pins are independent)"
+
+readme_unenforced_mutant="$readme_35b_mutant_dir/README-unenforced.md"
+grep -vF "$readme_unenforced_needle" "$readme_doc" >"$readme_unenforced_mutant"
+readme_unenforced_mutant_content=$(read_file "$readme_unenforced_mutant")
+if printf '%s' "$readme_unenforced_mutant_content" | grep -qF "$readme_unenforced_needle"; then readme_unenforced_pin_removed=no; else readme_unenforced_pin_removed=yes; fi
+assert_eq "yes" "$readme_unenforced_pin_removed" "FAILURE PROOF (scenario 35b, unenforced caveat): deleting that line from a scratch copy of README.md must remove the pinned text"
+assert_contains "$readme_unenforced_mutant_content" "$readme_tools_needle" "FAILURE PROOF (scenario 35b, unenforced caveat): deleting the instruction-not-enforcement line alone must leave the SEPARATE tools claim standing (proving the two pins are independent)"
+
+# ==========================================================================
 # 36. The AGENTS.md round trip must be byte-exact across ALL FOUR
 #     combinations of {the user's original file ends with a newline /
 #     does not} x {the user writes their own content BELOW the installed
