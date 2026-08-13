@@ -107,7 +107,7 @@ folding them into one sentence was overreach corrected below (see Corrections).
 **Population:** general working memory
 
 **Citations:**
-- Baddeley, A. D., & Hitch, G. J. (1974). *Working Memory*. In G. A. Bower (Ed.), *Psychology of
+- Baddeley, A. D., & Hitch, G. J. (1974). *Working Memory*. In G. H. Bower (Ed.), *Psychology of
   Learning and Motivation*, Vol. 8, pp. 47–89. Academic Press.
   <https://www.sciencedirect.com/science/article/abs/pii/S0079742108604521>
 
@@ -769,6 +769,13 @@ source that never mentions that population.
    it was fixing. The population tag was never wrong after #2; the verb was. Finding 4 now describes
    it as a theoretical paper proposing recommendations for that population, and says explicitly that
    this makes the inference one step longer than the tag alone implies.
+6. **Baddeley & Hitch (1974) named the wrong editor.** The volume's editor was given as "G. A.
+   Bower." *Psychology of Learning and Motivation*, Vol. 8 (Academic Press, 1974) was edited by
+   **Gordon H. Bower** — "G. H. Bower" — confirmed against the publisher's own listing for the
+   series and the volume's catalogue records. The wrong middle initial is not a typo this file can
+   shrug at: it is a check-1 identity failure of exactly the kind the citation policy opens by
+   insisting on, and it propagates, since the "G. A." form circulates widely in secondary reference
+   aggregators that copy each other rather than the volume. Corrected in the citation.
 
 ---
 

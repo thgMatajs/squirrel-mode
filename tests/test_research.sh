@@ -175,9 +175,13 @@
 #      and fixed its POPULATION while leaving the verb beside it untouched, so the verb is what this
 #      pins, with a companion vacuous-pass guard that the population fact scenario 6 checks was not
 #      deleted instead.
+#  32. [THIRD VERIFICATION PASS] No citation bullet names "G. A. Bower" as the editor of Baddeley &
+#      Hitch (1974)'s volume. *Psychology of Learning and Motivation* Vol. 8 was edited by Gordon H.
+#      Bower. Scoped to citation bullets, like check_sweller_1988_citation_entries, so the
+#      Corrections section can keep naming the wrong form while explaining it.
 #
 # Scenarios 2, 4, 5, 6, 9, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-# 30, and 31 are
+# 30, 31, and 32 are
 # checked twice each: once against the real, committed file(s) (expecting zero violations), and
 # once against a scratch copy deliberately corrupted to contain exactly the bad pattern the check
 # exists to catch (expecting the check to report a violation). Scenario 14 is checked once directly
@@ -604,6 +608,49 @@ check_finding3_directionality_ok() {
   else
     echo no
   fi
+}
+
+# check_wrong_bower_initial_citation_entries <file> — prints the count of logical citation bullets
+# (inside any "**Citations:**" block, continuation lines joined exactly as check_citation_violations
+# does) naming "G. A. Bower" as an editor. The editor of *Psychology of Learning and Motivation*
+# Vol. 8 is Gordon H. Bower — "G. H. Bower".
+#
+# Scoped to citation bullets rather than the whole file, for the same reason
+# check_sweller_1988_citation_entries above is: the Corrections section legitimately names the wrong
+# form while explaining that it was wrong, and a file-wide ban would fail the correct document. What
+# must not come back is the wrong initial used LIVE, in a reference.
+check_wrong_bower_initial_citation_entries() {
+  file=$1
+  bad=0
+  citations=$(awk '
+    /^\*\*Citations:\*\*$/ { in_cite = 1; buf = ""; next }
+    in_cite && /^-[ ]/ {
+      if (buf != "") { print buf }
+      buf = $0
+      next
+    }
+    in_cite && /^  / {
+      buf = buf " " $0
+      next
+    }
+    in_cite {
+      if (buf != "") { print buf; buf = "" }
+      in_cite = 0
+    }
+    END { if (buf != "") print buf }
+  ' "$file" 2>/dev/null || true)
+  if [ -n "$citations" ]; then
+    old_ifs=$IFS
+    IFS='
+'
+    for c in $citations; do
+      case "$c" in
+        *"G. A. Bower"*) bad=$((bad + 1)) ;;
+      esac
+    done
+    IFS=$old_ifs
+  fi
+  echo "$bad"
 }
 
 # check_finding5_meltzer_tag <file> — prints the population tag in force at the Meltzer & Basho
@@ -2068,5 +2115,23 @@ case "$proof_output" in
   *) fixture_finding4_caught=no ;;
 esac
 assert_eq "yes" "$fixture_finding4_caught" "FAILURE PROOF (scenario 31): restoring the claim that arXiv:2511.14636 studied a population must be caught"
+
+# ================================================================================================
+# 32. No citation bullet names "G. A. Bower" as the editor of Baddeley & Hitch (1974)'s volume
+#     (third verification pass). *Psychology of Learning and Motivation* Vol. 8 was edited by Gordon
+#     H. Bower. Checked against the real file (expect 0, and the correct form present), then against
+#     a fixture with a citation bullet carrying the wrong initial appended (expect 1). Scoped to
+#     citation bullets, not the whole file, so the Corrections section can keep naming the wrong
+#     form while explaining it — the same scoping check_sweller_1988_citation_entries uses.
+# ================================================================================================
+real_bower_bad=$(check_wrong_bower_initial_citation_entries "$research_file")
+assert_eq "0" "$real_bower_bad" "no citation bullet may name 'G. A. Bower' — the editor of Psychology of Learning and Motivation Vol. 8 is Gordon H. Bower"
+assert_contains "$research_flat_28" "In G. H. Bower (Ed.)" "the Baddeley & Hitch (1974) citation must name G. H. Bower as editor (vacuous-pass guard: the ban above must not be satisfied by deleting the editor entirely)"
+
+bower_fixture="$scratch_dir/bad_bower.md"
+cp "$research_file" "$bower_fixture"
+printf '\n**Citations:**\n- Baddeley, A. D., & Hitch, G. J. (1974). *Working Memory*. In G. A. Bower (Ed.), *Psychology of Learning and Motivation*, Vol. 8, pp. 47-89. Academic Press. <https://example.org/>\n' >>"$bower_fixture"
+fixture_bower_bad=$(check_wrong_bower_initial_citation_entries "$bower_fixture")
+assert_eq "1" "$fixture_bower_bad" "FAILURE PROOF (scenario 32): a citation bullet re-introducing the 'G. A. Bower' editor initial must be caught"
 
 assert_report
