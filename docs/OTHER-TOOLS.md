@@ -124,7 +124,15 @@ This touches:
   with your own instructions in it (it almost certainly does), those are never touched, never
   truncated, and stay exactly where they were — the block is appended below them. Running the
   installer again after editing `AGENTS.md` yourself, outside that block, updates only the block; your
-  own edits elsewhere in the file survive untouched.
+  own edits elsewhere in the file survive untouched. Two refusals guard that block, and both change
+  nothing when they fire. If a matching marker pair is already there but what sits **between** them
+  does not carry squirrel-mode's own generated banner line — someone pasted the markers around
+  content this installer never wrote — install and uninstall both stop and tell you to remove the two
+  marker lines by hand, keeping whatever is between them. And before writing anything at all, the
+  installer wraps its **own** bundled block in those markers and re-scans the result with the same
+  marker scan every other decision here uses: unless that comes out as exactly one findable block, it
+  fails, because installing a block that no later run could find again would wedge your `AGENTS.md`
+  permanently.
 - `~/.agents/skills/<name>/SKILL.md` for `digest`, `plan`, `init`, and `tune` — one file per command,
   copied in. If Codex has not been run on this machine yet, `~/.codex` does not exist, and the
   installer reports exactly that and does nothing, without failing — run Codex once, then re-run the
@@ -228,9 +236,14 @@ targets/cursor/install.sh --uninstall --yes    # actually remove
 
 Codex's uninstall removes exactly the delimited block from `AGENTS.md` — the rest of the file is left
 byte-for-byte as it was before squirrel-mode was ever installed — and removes the four skill files (and
-their now-empty directories). This happens even if `~/.codex` itself was removed since squirrel-mode
-was installed: the four skill files live under `~/.agents/skills/`, not under `~/.codex`, so they are
-still cleaned up rather than stranded. If the squirrel-mode block was the ONLY content `AGENTS.md` ever
+their now-empty directories: each `~/.agents/skills/<name>`, then `~/.agents/skills`, then `~/.agents`
+itself, which install's own `mkdir -p` created). Each of those is a plain, non-recursive `rmdir` that
+is allowed to fail, and none of them runs unless that same run really did remove one of
+squirrel-mode's own skill files — so an `~/.agents` or `~/.agents/skills` you made yourself, and
+squirrel-mode never installed into, survives an uninstall, and one still holding anything else of
+yours is left exactly where it is. That skill-file cleanup happens even if `~/.codex` itself was
+removed since squirrel-mode was installed: the four files live under `~/.agents/skills/`, not under
+`~/.codex`, so they are still cleaned up rather than stranded. If the squirrel-mode block was the ONLY content `AGENTS.md` ever
 had, uninstall leaves the file in place, empty (0 bytes), rather than deleting it — install cannot tell
 "you had an empty `AGENTS.md` before we ever touched it" apart from "we ourselves created this file",
 and the safe default is to never delete a user-visible file under `$HOME` it is not certain it created;
