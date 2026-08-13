@@ -1740,11 +1740,42 @@ emit_json() {
 # cap_profile_body enforces both limits (whichever is hit first: lines,
 # then bytes on what's left) and appends a single-line notice - never
 # silent truncation - whenever it actually had to cut something.
+#
+# FIXED HIGH (audit): PROFILE_MAX_BYTES was a PER-LINE bound, not a
+# per-stream one, so the two limits MULTIPLIED instead of the second
+# bounding the first. `cut -b 1-4096` is a per-line field operation -
+# `printf 'aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\n' | cut -b 1-5 | wc -c`
+# prints 18, not 5 - so every one of the PROFILE_MAX_LINES lines that
+# survived the line cap kept up to PROFILE_MAX_BYTES bytes of its own.
+# The real bound was 100 x 4096 ~= 400 KB. Measured end to end before
+# the fix, with a 100-line x 500 000-byte profile.md: 410 842 bytes
+# injected into EVERY SessionStart, framed by format_profile_framing as
+# authoritative instruction ("These field values OVERRIDE the
+# defaults") - i.e. the exact privileged surface this cap exists to
+# bound, bounded two orders of magnitude too loosely.
+#
+# The GATE was never wrong: `printf '%s' "$body" | wc -c` already
+# measures the whole stream, so the decision to truncate fired at the
+# right size. Only the truncation itself was per-line, and only it
+# changed - `dd bs=1 count=$PROFILE_MAX_BYTES` copies at most that many
+# bytes of the STREAM, whatever the line structure is. `dd` with `bs`
+# and `count` is POSIX, needs no more of an external dependency than
+# `cut` did, and at bs=1 cannot short-read: each block is one byte, so
+# `count` blocks is exactly `count` bytes, or fewer only at EOF.
+#
+# WHAT THE BUDGET COVERS, stated exactly so it is not read as more than
+# it is: PROFILE_MAX_BYTES bounds the profile BODY. The one-line
+# truncation notice below is appended AFTER the cut and is deliberately
+# outside it - suppressing the notice to stay under a round number
+# would be silent truncation, which this function has always refused.
+# So a capped body is at most PROFILE_MAX_BYTES bytes plus that single
+# fixed-length line, and that is the whole of it: nothing here scales
+# with the size of profile.md any more.
 PROFILE_MAX_LINES=100
 PROFILE_MAX_BYTES=4096
 
-# strip_incomplete_utf8_tail <text>: FIXED MINOR (cycle 3) - `cut -b`
-# below slices at an exact BYTE position with no awareness of UTF-8
+# strip_incomplete_utf8_tail <text>: FIXED MINOR (cycle 3) - the byte
+# cap above slices at an exact BYTE position with no awareness of UTF-8
 # multi-byte boundaries, so it can (and, given a profile.md close to
 # the 4096-byte cap and a multi-byte character sitting on the boundary,
 # eventually will) leave a truncated multi-byte sequence dangling at
@@ -1821,7 +1852,24 @@ strip_incomplete_utf8_tail() {
   if [ "$drop" -gt 0 ]; then
     keep=$((len - drop))
     if [ "$keep" -gt 0 ]; then
-      printf '%s' "$text" | cut -b "1-$keep"
+      # `dd`, not `cut -b "1-$keep"`, for the reason given at
+      # PROFILE_MAX_BYTES and repeated here because this site had the
+      # identical defect INDEPENDENTLY, and a worse-behaved one: `len`
+      # and `keep` are whole-STREAM byte counts, so on a multi-line
+      # <text> every individual line is far shorter than `keep` and
+      # `cut -b` kept all of them - this whole function was a silent
+      # no-op for exactly the multi-line bodies it now has to handle.
+      # Verified before the fix on "line one\nline two\nline
+      # three\xe2\x82": drop computed correctly as 2, 30 bytes in, 30
+      # bytes out, the invalid "e2 82" tail still there.
+      #
+      # It had no way to show up until now: while the byte cap above was
+      # per-line, a multi-line body was never cut mid-line in the first
+      # place, so no partial character was ever manufactured for this
+      # function to strip. Fixing the cap is what makes this one
+      # load-bearing, which is why it is fixed in the same change rather
+      # than left for later.
+      printf '%s' "$text" | dd bs=1 count="$keep" 2>/dev/null
     fi
   else
     printf '%s' "$text"
@@ -1838,9 +1886,14 @@ cap_profile_body() {
     truncated=1
   fi
 
+  # `dd`, not `cut -b`: a true STREAM cut. See the PROFILE_MAX_BYTES
+  # comment above for what `cut -b` did here instead and what it cost.
+  # stderr is discarded because dd reports its block counts there on
+  # every run; a failing dd leaves $body empty, which cap_profile_body
+  # is free to emit - it is smaller than the cap, not larger.
   byte_count=$(printf '%s' "$body" | wc -c | awk '{print $1}')
   if [ "$byte_count" -gt "$PROFILE_MAX_BYTES" ]; then
-    body=$(printf '%s' "$body" | cut -b "1-$PROFILE_MAX_BYTES")
+    body=$(printf '%s' "$body" | dd bs=1 count="$PROFILE_MAX_BYTES" 2>/dev/null)
     body=$(strip_incomplete_utf8_tail "$body")
     truncated=1
   fi

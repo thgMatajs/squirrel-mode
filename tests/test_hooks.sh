@@ -447,7 +447,18 @@ make_tool_path() {
   # checkpoint files on disk was proving "no list block" for the wrong
   # reason. Scenario 6h6b below is the one place `ls` is excluded on
   # purpose, through the explicit <exclude list> argument.
-  for tool in sh awk sed cat find dirname basename tr cksum od head tail wc cut printf grep jq realpath readlink mktemp rm mkdir mv ln touch ls; do
+  # `dd` ADDED (byte-cap audit fix): cap_profile_body and
+  # strip_incomplete_utf8_tail in scripts/load-profile.sh cut by BYTE
+  # OFFSET with `dd bs=1 count=N`, having previously used `cut -b`, which
+  # is a per-LINE operation and therefore was not a byte budget at all.
+  # `cut` was already on this list; `dd` was not, so the swap immediately
+  # made every restricted-PATH scenario run without the one tool the cap
+  # now needs, and the truncation silently produced an EMPTY body. That is
+  # not a hypothetical: it turned scenarios 34 and 34b-F red the moment
+  # the source changed, which is this list working as intended - the same
+  # class of gap the `mv` and `ls` notes above record. No scenario
+  # excludes `dd` deliberately.
+  for tool in sh awk sed cat find dirname basename tr cksum od head tail wc cut dd printf grep jq realpath readlink mktemp rm mkdir mv ln touch ls; do
     case " $exclude " in
       *" $tool "*) continue ;;
     esac
@@ -3118,6 +3129,177 @@ assert_contains "$ctx34" "truncated" "MINOR fix: the truncation notice must stil
 
 e2_count34=$(printf '%s' "$out34" | LC_ALL=C od -An -v -tu1 | tr -s ' \n' ' ' | tr ' ' '\n' | awk '$1 == 226 { c++ } END { print c + 0 }')
 assert_eq "0" "$e2_count34" "MINOR fix: cap_profile_body must not leave the euro sign's lead byte (0xE2) dangling, complete, or otherwise present in raw output once the byte cap lands mid-character"
+
+# ==========================================================================
+# 34b. load-profile.sh - PROFILE_MAX_BYTES is a TOTAL byte budget for the
+#      injected profile body, not a per-LINE one.
+#
+# THE DEFECT. The cap used `cut -b "1-$PROFILE_MAX_BYTES"`, a per-LINE
+# field operation: `printf 'aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\n' |
+# cut -b 1-5 | wc -c` prints 18, not 5. With the 100-line cap applied
+# first, each of the surviving 100 lines kept up to 4096 bytes of its
+# own, so the two limits MULTIPLIED: the real bound was ~400 KB.
+# Measured end to end against the shipped script with a 100-line x
+# 500 000-byte profile.md: 410 842 bytes injected into every
+# SessionStart, framed by format_profile_framing as authoritative
+# instruction. The same fixture through the fixed script: ~5 KB.
+#
+# WHY THE MULTI-LINE FIXTURE IS THE ONE THAT PROVES IT. For a
+# SINGLE-line profile a per-line cut and a per-stream cut are the same
+# operation, so a single-line over-cap fixture passes with or without
+# the fix. It is covered below anyway - as a boundary case, explicitly
+# not as the proof - and the many-line case is what the failure proof
+# at the end of this file mutates against.
+#
+# The budget is asserted against the WHOLE injected additionalContext,
+# not against an extracted body: that is the number that actually costs
+# the user context, it is strictly larger than the body, and it needs no
+# fragile re-parsing of the framing text to measure.
+# ==========================================================================
+
+# write_profile_exact <file> <total_bytes> <n_lines> <tail_marker> -
+# writes EXACTLY <total_bytes> bytes across <n_lines> lines, with no
+# trailing newline (so `$(cat ...)`, which strips trailing newlines,
+# yields a body of exactly that many bytes) and <tail_marker> as the
+# final bytes of the last line.
+write_profile_exact() {
+  wpe_file=$1
+  wpe_total=$2
+  wpe_lines=$3
+  MARKER="$4" awk -v total="$wpe_total" -v nlines="$wpe_lines" 'BEGIN {
+    marker = ENVIRON["MARKER"]
+    body = total - (nlines - 1)
+    per = int(body / nlines)
+    last = body - per * (nlines - 1)
+    for (i = 1; i < nlines; i++) {
+      s = ""
+      for (j = 0; j < per; j++) { s = s "A" }
+      printf "%s\n", s
+    }
+    s = ""
+    for (j = 0; j < last - length(marker); j++) { s = s "A" }
+    printf "%s%s", s, marker
+  }' >"$wpe_file"
+}
+
+ctx_bytes_for_profile() {
+  # ctx_bytes_for_profile <home> - byte length of the additionalContext
+  # this hook injects for the profile.md already written under <home>.
+  cbfp_home=$1
+  cbfp_stdin=$(printf '{"session_id":"sess-34b","cwd":"%s/project-cap","hook_event_name":"SessionStart"}' "$cbfp_home")
+  cbfp_ctx=$(extract_ctx "$(capture_stdout "$load_profile_script" "$cbfp_home" "$cbfp_stdin")")
+  printf '%s' "$cbfp_ctx" | wc -c | awk '{print $1}'
+}
+
+ctx_text_for_profile() {
+  ctfp_home=$1
+  ctfp_stdin=$(printf '{"session_id":"sess-34b","cwd":"%s/project-cap","hook_event_name":"SessionStart"}' "$ctfp_home")
+  extract_ctx "$(capture_stdout "$load_profile_script" "$ctfp_home" "$ctfp_stdin")"
+}
+
+# --- 34b-A. FAR over the cap, MANY lines: 100 x 5000 bytes. This is the
+# fixture the defect was measured on, and the one the failure proof
+# mutates. 6000 is a deliberately loose ceiling - the fixed hook emits
+# ~5 KB of total context here (4096 of body, the truncation notice, the
+# framing sentence and the half-dozen session lines) - so this asserts
+# the ORDER OF MAGNITUDE the cap is supposed to impose, not an exact
+# byte count that would break on any unrelated wording change.
+home34bA=$(new_home)
+mkdir -p "$home34bA/.squirrel"
+line34b=$(awk 'BEGIN { s = ""; for (i = 0; i < 5000; i++) { s = s "A" }; printf "%s", s }')
+i34b=1
+: >"$home34bA/.squirrel/profile.md"
+while [ "$i34b" -le 100 ]; do
+  printf '%s\n' "$line34b" >>"$home34bA/.squirrel/profile.md"
+  i34b=$((i34b + 1))
+done
+bytes34bA=$(ctx_bytes_for_profile "$home34bA")
+if [ "$bytes34bA" -lt 6000 ]; then
+  within34bA=yes
+else
+  within34bA=no
+fi
+assert_eq "yes" "$within34bA" "PROFILE_MAX_BYTES must be a TOTAL byte budget: a 100-line x 5000-byte profile.md must inject well under 6000 bytes of context, not 100 x the per-line cap (injected ${bytes34bA} bytes)"
+assert_contains "$(ctx_text_for_profile "$home34bA")" "[squirrel-mode: profile.md truncated" "a profile.md far over the cap must still carry the truncation notice - the budget is enforced by cutting, never by cutting silently"
+
+# --- 34b-B. FAR over the cap, ONE line: 50 000 bytes. Boundary
+# coverage, NOT a proof - a per-line cut and a per-stream cut are the
+# same operation on a single line, so this passed before the fix too.
+home34bB=$(new_home)
+mkdir -p "$home34bB/.squirrel"
+awk 'BEGIN { s = ""; for (i = 0; i < 50000; i++) { s = s "A" }; printf "%s", s }' >"$home34bB/.squirrel/profile.md"
+bytes34bB=$(ctx_bytes_for_profile "$home34bB")
+if [ "$bytes34bB" -lt 6000 ]; then
+  within34bB=yes
+else
+  within34bB=no
+fi
+assert_eq "yes" "$within34bB" "a single-line 50 000-byte profile.md must inject well under 6000 bytes of context (injected ${bytes34bB} bytes)"
+
+# --- 34b-C/D/E. The boundary itself, at exact byte counts, multi-line.
+# The gate is `-gt`, so EXACTLY PROFILE_MAX_BYTES is not truncated and
+# 4097 is. All three are written with no trailing newline so `$(cat)` -
+# which strips trailing newlines - yields a body of exactly the stated
+# size.
+home34bC=$(new_home)
+mkdir -p "$home34bC/.squirrel"
+write_profile_exact "$home34bC/.squirrel/profile.md" 4095 10 "TAILMARK_34B_C"
+assert_eq "4095" "$(wc -c <"$home34bC/.squirrel/profile.md" | awk '{print $1}')" "34b fixture sanity: the just-under-cap profile.md must be exactly 4095 bytes, or the boundary assertions below measure the wrong boundary"
+ctx34bC=$(ctx_text_for_profile "$home34bC")
+assert_not_contains "$ctx34bC" "[squirrel-mode: profile.md truncated" "a 4095-byte profile.md is UNDER the cap and must not be reported as truncated"
+assert_contains "$ctx34bC" "TAILMARK_34B_C" "a 4095-byte profile.md must be injected whole, final bytes included"
+
+home34bD=$(new_home)
+mkdir -p "$home34bD/.squirrel"
+write_profile_exact "$home34bD/.squirrel/profile.md" 4096 10 "TAILMARK_34B_D"
+assert_eq "4096" "$(wc -c <"$home34bD/.squirrel/profile.md" | awk '{print $1}')" "34b fixture sanity: the exactly-at-cap profile.md must be exactly 4096 bytes"
+ctx34bD=$(ctx_text_for_profile "$home34bD")
+assert_not_contains "$ctx34bD" "[squirrel-mode: profile.md truncated" "a profile.md of EXACTLY PROFILE_MAX_BYTES is not over the cap (the gate is -gt) and must not be reported as truncated"
+assert_contains "$ctx34bD" "TAILMARK_34B_D" "a profile.md of exactly PROFILE_MAX_BYTES must be injected whole, final bytes included"
+
+home34bE=$(new_home)
+mkdir -p "$home34bE/.squirrel"
+write_profile_exact "$home34bE/.squirrel/profile.md" 4097 10 "TAILMARK_34B_E"
+assert_eq "4097" "$(wc -c <"$home34bE/.squirrel/profile.md" | awk '{print $1}')" "34b fixture sanity: the one-over-cap profile.md must be exactly 4097 bytes"
+ctx34bE=$(ctx_text_for_profile "$home34bE")
+assert_contains "$ctx34bE" "[squirrel-mode: profile.md truncated" "a profile.md ONE byte over PROFILE_MAX_BYTES must be truncated and must say so"
+assert_not_contains "$ctx34bE" "TAILMARK_34B_E" "the one byte past the cap must actually be cut - the marker sitting at the end of a 4097-byte profile.md must not survive"
+
+# --- 34b-F. The multi-line UTF-8 boundary. Scenario 34 above proves the
+# byte cap does not leave a partial character dangling, but it does so
+# with a SINGLE-LINE profile.md - and strip_incomplete_utf8_tail cut its
+# own output with `cut -b "1-$keep"` against a whole-STREAM byte count,
+# so on a MULTI-LINE body every line was shorter than `keep` and the
+# function kept all of them: it was a silent no-op for exactly the
+# multi-line case. That could not show up while the cap itself was
+# per-line (a multi-line body was never cut mid-line, so no partial
+# character was ever manufactured); making the cap a true stream cut is
+# what makes this reachable, which is why it is asserted here.
+#
+# Fixture: exactly 4094 bytes across 10 lines, then a 3-byte euro sign
+# straddling the 4096-byte boundary (bytes 4095-4097), then a tail. Run
+# through the no-jq emission path for scenario 34's reason - jq's own
+# encoder can paper over an invalid byte sequence on the way out.
+home34bF=$(new_home)
+mkdir -p "$home34bF/.squirrel"
+write_profile_exact "$home34bF/.squirrel/profile.md" 4094 10 "MARK_34B_F"
+printf '\342\202\254TAIL_34B_F_UTF8\n' >>"$home34bF/.squirrel/profile.md"
+stdin34bF=$(printf '{"session_id":"sess-34bF","cwd":"%s/project-cap-utf8","hook_event_name":"SessionStart"}' "$home34bF")
+nojq_path34bF=$(make_tool_path "jq")
+
+exit34bF=$(capture_exit_with_path "$load_profile_script" "$home34bF" "$nojq_path34bF" "$stdin34bF")
+assert_eq "0" "$exit34bF" "load-profile.sh must exit 0 when a MULTI-LINE profile.md's byte cap lands mid-character, with jq absent"
+
+out34bF=$(capture_stdout_with_path "$load_profile_script" "$home34bF" "$nojq_path34bF" "$stdin34bF")
+out34bF_valid=$(printf '%s' "$out34bF" | jq empty >/dev/null 2>&1 && echo yes || echo no)
+assert_eq "yes" "$out34bF_valid" "output must still be valid JSON when a MULTI-LINE profile.md's byte cap lands mid-character, with jq absent"
+
+e2_count34bF=$(printf '%s' "$out34bF" | LC_ALL=C od -An -v -tu1 | tr -s ' \n' ' ' | tr ' ' '\n' | awk '$1 == 226 { c++ } END { print c + 0 }')
+assert_eq "0" "$e2_count34bF" "strip_incomplete_utf8_tail must drop the dangling euro-sign lead byte (0xE2) on a MULTI-LINE profile.md too - it cut its own output per-LINE against a whole-STREAM byte count, which kept every line intact and stripped nothing"
+
+ctx34bF=$(extract_ctx "$out34bF")
+assert_contains "$ctx34bF" "MARK_34B_F" "content before the byte-cap boundary must survive on a multi-line profile.md"
+assert_not_contains "$ctx34bF" "TAIL_34B_F_UTF8" "content past the byte cap must still be dropped on a multi-line profile.md"
 
 # ==========================================================================
 # 35. allow-checkpoint.sh - "Do not regress" list, closing a gap two
