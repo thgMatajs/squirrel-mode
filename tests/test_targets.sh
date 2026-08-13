@@ -43,11 +43,54 @@ trap 'rm -rf $cleanup_dirs' EXIT
 
 read_file() {
   # read_file <path> - prints file content, or empty string if missing.
+  #
+  # DELIBERATELY NOT USED for a round-trip / "must be byte-unchanged"
+  # comparison - see files_byte_status below for why.
   if [ -f "$1" ]; then
     cat "$1"
   else
     printf ''
   fi
+}
+
+files_byte_status() {
+  # files_byte_status <expected_file> <actual_file>: prints "identical"
+  # when the two files are byte-for-byte equal, "DIFFERS" otherwise
+  # (including either file being missing entirely - cmp's own diagnostic
+  # is discarded so a missing file reports as a clean assertion failure
+  # rather than noise).
+  #
+  # This exists because `assert_eq "$(read_file "$orig")" "$(read_file
+  # "$after")"` - the shape every round-trip comparison in this file
+  # except scenario 10 used to have - is STRUCTURALLY BLIND to exactly
+  # the corruption class those round trips exist to catch: command
+  # substitution strips ALL trailing newlines from what it captures, on
+  # both sides, so a file that came back one trailing newline short (or
+  # long) compares EQUAL. Proven, not theorised: mutating
+  # render_agents_uninstall's `printf '%s'` to `printf '%s\n'` - a
+  # direct, deliberate byte-exactness break in the installer - went
+  # UNCAUGHT across all ten test files and every assertion in them.
+  # Every "must round-trip / must be byte-unchanged" assertion below now
+  # goes through this function, against a real snapshot FILE (see
+  # snapshot_file), never through a shell variable.
+  if cmp -s "$1" "$2" 2>/dev/null; then
+    printf 'identical\n'
+  else
+    printf 'DIFFERS\n'
+  fi
+}
+
+snapshot_file() {
+  # snapshot_file <path>: copies <path> to a fresh throwaway file
+  # OUTSIDE any scenario's $HOME (so it can never be mistaken for
+  # content under test, nor appear in a full_tree_listing snapshot) and
+  # prints that copy's path. Registered for cleanup by the caller
+  # (cleanup_dirs="$cleanup_dirs $result"), exactly like make_temp_home
+  # above - a registration made INSIDE this function would be lost, the
+  # function being run in a command substitution's subshell.
+  snap=$(mktemp "${TMPDIR:-/tmp}/squirrel-snapshot.XXXXXX")
+  cp "$1" "$snap"
+  printf '%s\n' "$snap"
 }
 
 make_temp_home() {
@@ -545,27 +588,30 @@ assert_foreign_survives_install_and_uninstall() {
   # (already created), runs <installer> --yes then
   # <installer> --uninstall --yes against <home>, and asserts
   # <dest_path>'s content is unchanged after each step.
-  # read_file (not a bare `cat`) is used throughout, deliberately: if
+  # files_byte_status (not a bare `cat`, and not a $(...) capture) is
+  # used throughout, deliberately, for two independent reasons. (1) If
   # the mutation this scenario exists to catch is present, an
   # "uninstall" can actually DELETE the seeded foreign file - a bare
   # `cat` on a now-missing file would exit non-zero and, under
   # `set -eu`, abort this whole test FILE right there (no SUMMARY line,
-  # every later scenario silently never runs). read_file degrades to an
-  # empty string instead, so the mutation shows up as a clean, reported
-  # assertion failure ("expected: <content> / actual: ") rather than an
-  # opaque crash that hides everything after it.
+  # every later scenario silently never runs); cmp inside an `if` is
+  # exempt from `set -e` and reports "DIFFERS" instead. (2) "byte-for-
+  # byte" must actually mean byte-for-byte: a $(...) capture of both
+  # sides silently discards trailing newlines on both, so a foreign file
+  # that came back with its trailing newline added or removed would
+  # compare equal - see files_byte_status's own comment.
   home=$1
   installer=$2
   dest=$3
   content=$4
   label=$5
   printf '%s' "$content" >"$dest"
+  seed_ref=$(snapshot_file "$dest")
+  cleanup_dirs="$cleanup_dirs $seed_ref"
   HOME="$home" "$installer" --yes >/dev/null 2>&1
-  after_install=$(read_file "$dest")
-  assert_eq "$content" "$after_install" "$label: must survive install byte-for-byte at the exact install path (ownership must be an exact banner-line match, not a substring search)"
+  assert_eq "identical" "$(files_byte_status "$seed_ref" "$dest")" "$label: must survive install byte-for-byte at the exact install path (ownership must be an exact banner-line match, not a substring search)"
   HOME="$home" "$installer" --uninstall --yes >/dev/null 2>&1
-  after_uninstall=$(read_file "$dest")
-  assert_eq "$content" "$after_uninstall" "$label: must survive --uninstall --yes byte-for-byte at the exact install path"
+  assert_eq "identical" "$(files_byte_status "$seed_ref" "$dest")" "$label: must survive --uninstall --yes byte-for-byte at the exact install path"
 }
 
 # --- 15a: Codex, no-marker foreign file at the exact skill path --------
@@ -616,6 +662,8 @@ some fake content that must never be treated as the real block
 More of my own content after the example.
 FENCE_EOF
 fence_original_16=$(read_file "$home16/.codex/AGENTS.md")
+fence_snapshot_16=$(snapshot_file "$home16/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $fence_snapshot_16"
 if fence_install_out_16=$(HOME="$home16" "$codex_install" --yes 2>&1); then fence_install_exit_16=0; else fence_install_exit_16=$?; fi
 assert_eq "0" "$fence_install_exit_16" "install must exit 0 against a fenced BEGIN/END example -- output: $fence_install_out_16"
 fence_after_install_16=$(read_file "$home16/.codex/AGENTS.md")
@@ -631,12 +679,7 @@ assert_eq "yes" "$fence_prefix_survived_16" "the fenced example (including its o
 assert_contains "$fence_after_install_16" "GENERATED FILE. Source: rules/base-rules.md" "a REAL squirrel-mode block must still be appended after install - the fenced example must not fool install into thinking the file already has a real block"
 if fence_uninstall_out_16=$(HOME="$home16" "$codex_install" --uninstall --yes 2>&1); then fence_uninstall_exit_16=0; else fence_uninstall_exit_16=$?; fi
 assert_eq "0" "$fence_uninstall_exit_16" "uninstall must exit 0 against a fenced BEGIN/END example -- output: $fence_uninstall_out_16"
-fence_after_uninstall_16=$(read_file "$home16/.codex/AGENTS.md")
-if [ "$fence_after_uninstall_16" = "$fence_original_16" ]; then
-  fence_roundtrip_16=identical
-else
-  fence_roundtrip_16=DIFFERS
-fi
+fence_roundtrip_16=$(files_byte_status "$fence_snapshot_16" "$home16/.codex/AGENTS.md")
 assert_eq "identical" "$fence_roundtrip_16" "install then uninstall of a file containing a fenced BEGIN/END example must round-trip byte-identical (A1)"
 
 # ==========================================================================
@@ -801,6 +844,8 @@ home21=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home21"
 mkdir -p "$home21/.codex"
 printf 'seed content\n' >"$home21/.codex/AGENTS.md"
+seed_snapshot_21=$(snapshot_file "$home21/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $seed_snapshot_21"
 
 # shellcheck disable=SC2016 # single-quoted deliberately: the literal
 # source text to grep for in the scratch install.sh copy, not an
@@ -826,8 +871,8 @@ assert_eq "143" "$sig_exit_21" "SIGTERM during an installer write must make it e
 
 leftover_21=$(find "$home21" -name '.*.tmp.*' 2>/dev/null || true)
 assert_eq "" "$leftover_21" "no leftover temp file must remain anywhere in \$HOME after a SIGTERM mid-write (A8)"
-seed_after_21=$(read_file "$home21/.codex/AGENTS.md")
-assert_eq "seed content" "$seed_after_21" "AGENTS.md must be unmodified after a SIGTERM mid-write (A8) - the mv never ran"
+seed_after_21=$(files_byte_status "$seed_snapshot_21" "$home21/.codex/AGENTS.md")
+assert_eq "identical" "$seed_after_21" "AGENTS.md must be unmodified after a SIGTERM mid-write (A8) - the mv never ran"
 assert_file_absent "$home21/.codex/.squirrel-install.lock" "the A3 lock directory must be released (removed) even after a SIGTERM mid-write, not left behind forever"
 
 # --- A3 lock-contention coverage: a pre-existing lock directory must
@@ -981,13 +1026,14 @@ home24=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home24"
 mkdir -p "$home24/.codex"
 printf 'my own content\n\nHere is an unterminated fence example:\n```\nsome content that never closes the fence\n' >"$home24/.codex/AGENTS.md"
-original_24=$(cat "$home24/.codex/AGENTS.md")
+original_24=$(snapshot_file "$home24/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $original_24"
 before24=$(full_tree_listing "$home24")
 if out24=$(HOME="$home24" "$codex_install" --yes 2>&1); then exit24=0; else exit24=$?; fi
 assert_eq "1" "$exit24" "install must exit non-zero against an AGENTS.md ending inside an unterminated fence, rather than append the block where it can never be found again -- output: $out24"
 assert_contains "$out24" "unterminated" "the failure message must name the unterminated fence as the cause"
-after24=$(cat "$home24/.codex/AGENTS.md")
-assert_eq "$original_24" "$after24" "AGENTS.md must be byte-unchanged after install refuses an unterminated-fence file"
+after24=$(files_byte_status "$original_24" "$home24/.codex/AGENTS.md")
+assert_eq "identical" "$after24" "AGENTS.md must be byte-unchanged after install refuses an unterminated-fence file"
 after_tree24=$(full_tree_listing "$home24")
 assert_eq "$before24" "$after_tree24" "24 (G2): \$HOME tree must be completely unchanged after the unterminated-fence refusal (no skill files created either)"
 leftover24=$(find "$home24" -name '.*.tmp.*' 2>/dev/null || true)
@@ -1015,6 +1061,8 @@ some fake content that must never be treated as the real block
 More of my own content after the example.
 TILDE_FENCE_EOF
 tilde_original_25=$(cat "$home25/.codex/AGENTS.md")
+tilde_snapshot_25=$(snapshot_file "$home25/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $tilde_snapshot_25"
 if tilde_install_out_25=$(HOME="$home25" "$codex_install" --yes 2>&1); then tilde_install_exit_25=0; else tilde_install_exit_25=$?; fi
 assert_eq "0" "$tilde_install_exit_25" "install must exit 0 against a ~~~ fenced example with an info string -- output: $tilde_install_out_25"
 tilde_after_install_25=$(cat "$home25/.codex/AGENTS.md")
@@ -1029,12 +1077,7 @@ esac
 assert_eq "yes" "$tilde_prefix_survived_25" "the ~~~ fenced example must survive install completely unmodified, as a verbatim prefix of the file (A1: ~~~ fences and info strings)"
 if tilde_uninstall_out_25=$(HOME="$home25" "$codex_install" --uninstall --yes 2>&1); then tilde_uninstall_exit_25=0; else tilde_uninstall_exit_25=$?; fi
 assert_eq "0" "$tilde_uninstall_exit_25" "uninstall must exit 0 against a ~~~ fenced example -- output: $tilde_uninstall_out_25"
-tilde_after_uninstall_25=$(cat "$home25/.codex/AGENTS.md")
-if [ "$tilde_after_uninstall_25" = "$tilde_original_25" ]; then
-  tilde_roundtrip_25=identical
-else
-  tilde_roundtrip_25=DIFFERS
-fi
+tilde_roundtrip_25=$(files_byte_status "$tilde_snapshot_25" "$home25/.codex/AGENTS.md")
 assert_eq "identical" "$tilde_roundtrip_25" "install then uninstall of a file containing a ~~~ fenced BEGIN/END example (with an info string) must round-trip byte-identical (A1)"
 
 # ==========================================================================
@@ -1259,7 +1302,8 @@ home30=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home30"
 mkdir -p "$home30/.codex"
 printf 'My own read-only instructions.\nSecond line.\n' >"$home30/.codex/AGENTS.md"
-original_captured_30=$(cat "$home30/.codex/AGENTS.md")
+original_captured_30=$(snapshot_file "$home30/.codex/AGENTS.md")
+cleanup_dirs="$cleanup_dirs $original_captured_30"
 chmod 444 "$home30/.codex/AGENTS.md"
 before30=$(full_tree_listing "$home30")
 
@@ -1276,8 +1320,8 @@ assert_not_contains "$out30yes" "Permission denied" "F6: the --yes failure must 
 assert_not_contains "$out30yes" "squirrel-codex-install" "F6: the --yes failure must never leak an internal \$TMPDIR work-dir path"
 assert_not_contains "$out30yes" ".tmp." "F6: the --yes failure must never leak an internal .tmp staging file name"
 
-after30=$(cat "$home30/.codex/AGENTS.md")
-assert_eq "$original_captured_30" "$after30" "F6: AGENTS.md must be byte-unchanged after the clean --yes failure (the mv never ran)"
+after30=$(files_byte_status "$original_captured_30" "$home30/.codex/AGENTS.md")
+assert_eq "identical" "$after30" "F6: AGENTS.md must be byte-unchanged after the clean --yes failure (the mv never ran)"
 leftover30=$(find "$home30" -name '.*.tmp.*' 2>/dev/null || true)
 assert_eq "" "$leftover30" "F6: no leftover temp file must remain after the clean --yes failure"
 after_tree30=$(full_tree_listing "$home30")
