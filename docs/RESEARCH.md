@@ -87,8 +87,11 @@ source stated in its own abstract that it found *no* group difference in how muc
 disrupted working-memory performance, the opposite of what this file claimed on its strength. A
 correctly identified paper used to support something it does not say is the failure a hostile
 reader finds first, and it is worse than an uncited claim, because it *looks* verified. All five
-identity misattributions from the first pass and every substance failure the second pass turned up
-are recorded in full in "Corrections" below.
+identity misattributions from the first pass, every substance failure the second pass turned up, and
+the ten corrections a third pass found on top of both — among them a finding that asserted the
+reverse of its own source's result, and a population tag resting on a source that never mentions
+that population — are recorded in full in "Corrections" below. Two passes had already read those
+same two citations and let both through.
 
 ---
 
