@@ -1009,18 +1009,23 @@ the per-session nested path the current layout uses (`checkpoints/<slug>/<sessio
 20's layout, where AE1 predates the nesting), and it is under the default permission mode rather than
 any relaxed one — which is the mode a user actually installs into.
 
-**L sweep — `/squirrel:pickup` costs one permission prompt. Found live, not fixed in this release.**
+**L sweep — `/squirrel:pickup` cost one permission prompt. Found live; fixed since.**
 The pickup branch is no longer merely unexercised: the sweep ran it, and it cost a prompt — by
 construction, not by luck, for the reason spelled out next.
-`pickup` has to enumerate the checkpoint directory before it can fold sessions together; the harness
+`pickup` had to enumerate the checkpoint directory before it could fold sessions together; the harness
 it ran under exposes no Glob/Grep tool at all (only `Read`, `Write`, `Edit`, `Bash`), so the model
-shells out to `ls`/`find` — and `hooks/hooks.json`'s `PreToolUse` matcher is `Write|Edit|Read`, which
+shelled out to `ls`/`find` — and `hooks/hooks.json`'s `PreToolUse` matcher is `Write|Edit|Read`, which
 a `Bash` call can never match. No hook can auto-approve it, at any path.
 `docs/adr/0002-checkpoint-auto-allow.md` promises that a checkpoint interaction never costs a
-permission prompt; for pickup, it does. The known remedy — injecting the session's checkpoint file
-list at `SessionStart` so pickup only ever needs `Read` on paths it was handed, consistent with
-tech-lead Decision 1, which already hands the model paths it must not compute — was deliberately
-deferred rather than landed at release time; it is known limit 2 in "Live-sweep findings" below.
+permission prompt; for pickup, it did. This paragraph recorded the remedy — injecting the session's
+checkpoint file list at `SessionStart` so pickup only ever needs `Read` on paths it was handed,
+consistent with tech-lead Decision 1, which already hands the model paths it must not compute — as
+deliberately deferred rather than landed at release time. It was landed instead, in commit `d403ea3`
+(`scripts/load-profile.sh` emits the list block, `skills/pickup/SKILL.md` consumes it and is forbidden
+to enumerate when the block guarantees completeness), and is recorded as
+`docs/adr/0002-checkpoint-auto-allow.md`'s Amendment (PICKUP-LIST). Finding 2 in "Live-sweep
+findings" below carries the full corrected account. The judgment call below is kept as written,
+because it is the reasoning that applied when this criterion's status word was last settled.
 
 **Judgment call on this finding, stated rather than buried: it does not make this criterion
 `not met`.** The criterion's own heading ties "no permission prompt" to the checkpoint *write*, which
@@ -1045,8 +1050,10 @@ fine, just unverified" would be reading it wrong, which is why this paragraph ex
 **Status:** `manual`, unchanged by the L sweep. The same three named parts of this criterion's
 heading — `/squirrel:pickup`'s output order, the once-per-turn cap, and the read-then-update path on
 an existing checkpoint — still have no live evidence behind them (named above), and the L sweep added
-a fourth thing to know about the first of them: pickup does run, and it costs a permission prompt
-doing it. Under the convention now stated in "How to read the status column," the whole-criterion
+a fourth thing to know about the first of them: pickup does run, and at the time of that sweep it cost
+a permission prompt doing it. That prompt has since been removed (see the L-sweep paragraph above and
+Amendment (PICKUP-LIST)) — which changes nothing here, because the fix's own model-side half is
+unobserved live too. Under the convention now stated in "How to read the status column," the whole-criterion
 status word tracks the least-covered named branch — the same rule criterion 10 already follows — so
 this criterion is `manual` in full, not `observed` with three open footnotes. That does not erase
 what the S11 probe and L12 each directly demonstrated: a checkpoint write reaching
@@ -1660,14 +1667,17 @@ order, the once-per-turn cap, and the read-then-update path on an existing check
 named in that criterion's own section rather than folded into
 its status word. See criterion 12's own "Judgment call" note for the full history of both moves, kept
 rather than scrubbed. The 2026-08-10 sweep confirmed criterion 12's write half a second time (L12,
-default permission mode) and found that `/squirrel:pickup` costs one permission prompt — a real
-defect against ADR-0002's promise, recorded as a known limit rather than as a change to this
-criterion's status word, for the reason that criterion's own judgment-call paragraph gives.
+default permission mode) and found that `/squirrel:pickup` cost one permission prompt — a real
+defect against ADR-0002's promise, recorded at the time as a known limit rather than as a change to
+this criterion's status word, for the reason that criterion's own judgment-call paragraph gives. That
+defect has since been fixed (commit `d403ea3`, ADR-0002's Amendment (PICKUP-LIST)), which leaves the
+status word where it was: the fix's own model-side half has no live evidence behind it either.
 None of the 22 is `not met`. **That is a statement about the 22 criteria's own wording, not a clean
 bill of health for the release:** the same live sweep found a release-blocking defect that no
 criterion's wording names — `permissionDecision: "defer"` pausing every non-checkpoint file
-operation — plus two limits this release ships with, all three in "Live-sweep findings" immediately
-below. Every `manual` criterion still has a tested mechanism underneath and names the exact remaining
+operation — plus two findings recorded there as limits this release ships with, all three in
+"Live-sweep findings" immediately below, where finding 2 now records its own fix and finding 3
+stands. Every `manual` criterion still has a tested mechanism underneath and names the exact remaining
 scenario and observable, ready for whoever runs it.
 
 ---
@@ -1702,8 +1712,9 @@ say so explicitly.
 
 The section above is what the *static* sweep found and closed. This is its live counterpart: what
 running the product against the real CLI found — the class of defect no static check can see. One of
-the three is a release-blocking defect. The other two are limits this release ships with, written
-down here rather than left for a user to discover.
+the three is a release-blocking defect. The other two were written down as limits this release ships
+with, rather than left for a user to discover. Finding 2 has since been fixed; its entry below says
+so in place, rather than being deleted, because the observation that produced it was real.
 
 **1. BLOCKER — `permissionDecision: "defer"` pauses the tool call. It does not stand aside.**
 `scripts/allow-checkpoint.sh` emitted, for every `Write`/`Edit`/`Read` outside the checkpoint
@@ -1751,17 +1762,33 @@ coexisted with a plugin that broke on install. Every claim in this document that
 decision rests on that same class of evidence unless a live run is named next to it, which is what
 the `observed` word, and the "Live probe method" section, exist to keep visible.
 
-**2. Known limit (not fixed in this release) — `/squirrel:pickup` costs one permission prompt.**
-`pickup` has to enumerate the checkpoint directory to fold work across sessions. The harness it ran
-under exposes no Glob/Grep tool at all (only `Read`, `Write`, `Edit`, `Bash`), so the model shells out
+**2. FIXED since this entry was written — `/squirrel:pickup` used to cost one permission prompt.**
+`pickup` had to enumerate the checkpoint directory to fold work across sessions. The harness it ran
+under exposes no Glob/Grep tool at all (only `Read`, `Write`, `Edit`, `Bash`), so the model shelled out
 to `ls`/`find` — and `hooks/hooks.json`'s `PreToolUse` matcher is `Write|Edit|Read`, so a `Bash` call
 can never be auto-approved, at any path, by any hook. `docs/adr/0002-checkpoint-auto-allow.md`
-promises that a checkpoint interaction never costs a permission prompt; for pickup, it does. The
-known remedy — have `SessionStart` inject the session's checkpoint file list (newest first, capped)
-so pickup only ever needs `Read` on paths it was handed, consistent with tech-lead Decision 1, which
-already hands the model paths it must not compute — was deliberately deferred rather than landed at
-release time. Recorded under criterion 12 as well, with the reasoning for why it does not make that
-criterion `not met`.
+promises that a checkpoint interaction never costs a permission prompt; for pickup, it did. The entry
+above this line originally recorded the remedy as deliberately deferred rather than landed at release
+time. **It was landed instead** — commit `d403ea3`, recorded as
+`docs/adr/0002-checkpoint-auto-allow.md`'s Amendment (PICKUP-LIST).
+
+What ships now: `scripts/load-profile.sh` injects, at `SessionStart`, a block headed
+`Project checkpoint files, newest first (session <token>):` followed by one absolute path per line,
+newest first, capped at `CHECKPOINT_LIST_MAX_FILES` (10, deliberately the same number as
+`CHECKPOINT_PRUNE_KEEP_NEWEST`). When the cap or an unrecognised filename left something out, the
+block closes with `(more checkpoint files exist in that directory than are listed here - session
+<token>)`, so a block *without* that line is a positive guarantee the list is whole.
+`skills/pickup/SKILL.md` reads those paths with `Read`, which this hook already auto-approves, and is
+forbidden from listing, globbing or searching that directory in exactly the case where the block
+guarantees completeness. `scripts/allow-checkpoint.sh` is byte-for-byte unchanged: no new tool is
+auto-approved and the set of auto-approved paths is unchanged.
+
+Enumeration still costs one permission prompt in the two cases where it genuinely has to happen — a
+marked block whose unnamed files the user's request actually needs, and no block at all — and
+`skills/pickup/SKILL.md` tells the model to ask for it plainly rather than work around it. What is
+still unobserved is the half that lives in the model: that `/squirrel:pickup` now reads the
+handed-over list instead of shelling out. That needs a live authenticated session, and is one of the
+reasons criterion 12 stays `manual`.
 
 **3. Known limit (not fixed in this release) — skills do not name the tool for their filesystem
 writes.** `skills/init`, `skills/tune`, `skills/off` and `skills/on` all say "write" or "create"
