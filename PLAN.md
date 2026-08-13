@@ -395,7 +395,10 @@ tone: neutral              # neutral | warm | terse
     computed, guessed, or re-derived; every other file in that slug directory belongs to another
     session and is left alone — **with no commentary in the response** — do
     not announce it, do not ask. At most **one write per turn**, and only when `Doing` or `Next`
-    actually changed. Append finished items to the Done log, keeping the last 10.
+    actually changed. Append finished items to the Done log, keeping the last 10. The file's shape is
+    fixed so two sessions produce foldable files: `##` sections in the order `Doing` (one line),
+    `Next` (the single startable step), `Done` (the finished items), `Open decisions` (only when
+    there are any) — never a heading with nothing under it, omit the section instead.
     *Never describe this as happening without the user's knowledge. Tool calls are always visible in
     the transcript; what we promise is no prose about it, not invisibility (ADR-0002).* If the read
     or the write fails, say so in one line: a failure is reported, never absorbed silently, and that

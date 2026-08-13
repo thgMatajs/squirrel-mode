@@ -1116,4 +1116,59 @@ else
 fi
 assert_eq "yes" "$rule14_d2_reintro_found" "FAILURE PROOF (D2, negative pin): re-appending the retired flat path shape to an in-memory mutant must be detected, proving the assert_not_contains guard above is not vacuous"
 
+# --- 35. Rule 14 defines the shape of the file it mandates -------------
+#
+# Rule 14 required updating "the new Doing and Next state" and appending
+# to "the Done log" while nothing anywhere said what that file looks
+# like. A live probe on a completed unit of work produced a 130-byte
+# checkpoint under an invented title with "## Doing" left COMPLETELY
+# EMPTY - Next and Done filled, and the one section /squirrel:pickup
+# reads as this session's state blank. Across sessions that yields files
+# with no shared shape for pickup to fold. Fixed by naming the four
+# sections and their order in rule 14's body, and pinned on both sides
+# (canonical + PLAN.md's own item 14) the same cross-file way rules 6,
+# 10, 15 and 16 already are.
+#
+# The three needles are deliberately substrings common to BOTH files'
+# wording rather than either file's full sentence, so the pin measures
+# the agreement (invariant 6e) instead of one file's phrasing.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal
+# backtick-quoted section names searched for in the rules' own markdown,
+# not command substitution.
+RULE14_SHAPE_ORDER_PHRASE='`Doing` (one line), `Next` (the single startable step), `Done` (the finished items)'
+# shellcheck disable=SC2016
+RULE14_SHAPE_OPTIONAL_PHRASE='`Open decisions` (only when there are any)'
+RULE14_SHAPE_NONEMPTY_PHRASE="a heading with nothing under it"
+
+assert_contains "$rule_14_body" "$RULE14_SHAPE_ORDER_PHRASE" "rule 14's canonical body must name the checkpoint's Doing/Next/Done sections in order - without it the rule mandates a file whose shape is left to each session to invent"
+assert_contains "$rule_14_body" "$RULE14_SHAPE_OPTIONAL_PHRASE" "rule 14's canonical body must mark Open decisions as the one conditional section, matching what /squirrel:pickup omits when nothing lists any"
+assert_contains "$rule_14_body" "$RULE14_SHAPE_NONEMPTY_PHRASE" "rule 14's canonical body must forbid a section heading with nothing under it - the empty '## Doing' is the exact failure observed live"
+assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_ORDER_PHRASE" "PLAN.md's rule-14 summary must name the same section order as rules/base-rules.md (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_OPTIONAL_PHRASE" "PLAN.md's rule-14 summary must mark Open decisions conditional the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_14_flat" "$RULE14_SHAPE_NONEMPTY_PHRASE" "PLAN.md's rule-14 summary must carry the same no-empty-heading requirement as rules/base-rules.md (cross-file agreement, invariant 6e)"
+
+# FAILURE PROOF (35): delete the shape paragraph from an in-memory mutant
+# of the real file and confirm all three phrases disappear from rule 14's
+# body, while the rule's OTHER pinned sentences (D2's opening paragraph,
+# assertion 32's failure report, AD3's slot placement) stay put - so a
+# rewrite that fused the shape into an existing paragraph could not make
+# every rule-14 pin rise and fall together.
+RULE14_SHAPE_PARAGRAPH="Give the file these \`##\` sections, in this order: $RULE14_SHAPE_ORDER_PHRASE, and $RULE14_SHAPE_OPTIONAL_PHRASE. Never leave $RULE14_SHAPE_NONEMPTY_PHRASE: omit that section instead. \`/squirrel:pickup\` folds these files by heading across sessions, so a \`Doing\` left empty loses this session's state; anything above the first heading is free-form."
+
+rule14_shape_mutant_content=$(grep -vxF "$RULE14_SHAPE_PARAGRAPH" "$base_rules_file")
+rule14_shape_mutant_body=$(extract_rule_body_from_content "$rule14_shape_mutant_content" 14)
+
+for rule14_shape_phrase in "$RULE14_SHAPE_ORDER_PHRASE" "$RULE14_SHAPE_OPTIONAL_PHRASE" "$RULE14_SHAPE_NONEMPTY_PHRASE"; do
+  if printf '%s' "$rule14_shape_mutant_body" | grep -qF -- "$rule14_shape_phrase"; then
+    rule14_shape_still_has=yes
+  else
+    rule14_shape_still_has=no
+  fi
+  assert_eq "no" "$rule14_shape_still_has" "FAILURE PROOF (35): deleting rule 14's shape paragraph from an in-memory mutant must remove '$rule14_shape_phrase' from its body, proving that pin is not matching some other line of the rule"
+done
+
+assert_contains "$rule14_shape_mutant_body" "$RULE14_INJECTED_PATH_PHRASE" "FAILURE PROOF (35, independence): deleting rule 14's shape paragraph must leave the SEPARATE injected-path sentence in place"
+assert_contains "$rule14_shape_mutant_body" "$RULE14_FAILURE_PHRASE" "FAILURE PROOF (35, independence): deleting rule 14's shape paragraph must leave the SEPARATE failure-report sentence in place"
+assert_contains "$rule14_shape_mutant_body" "$RULE14_SLOT_PHRASE" "FAILURE PROOF (35, independence): deleting rule 14's shape paragraph must leave the SEPARATE slot-placement sentence in place"
+
 assert_report
