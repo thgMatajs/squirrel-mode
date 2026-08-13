@@ -2584,6 +2584,65 @@ fp19d_ok_decision=$(printf '%s' "$fp19d_ok_out" | jq -r '.hookSpecificOutput.per
 assert_eq "allow" "$fp19d_ok_decision" "FAILURE PROOF (19d): the mutant must still allow an ordinary two-dot filename - the mutation disabled exactly one gate, it did not break the script into deferring or allowing everything"
 
 # ==========================================================================
+# 19e. allow-checkpoint.sh - AUDIT FIX (LOW): with jq PRESENT and no
+#      top-level `tool_name`, the greedy whole-payload sed fallback must
+#      not bind a `tool_name` nested inside `tool_input`.
+#
+# THE DEFECT. extract_field asked jq first, but only RETURNED on a
+# non-empty answer - so a jq that PARSED the payload and correctly
+# reported `tool_name` absent fell through to the sed scan, which is
+# greedy over the whole payload text and happily matched a `tool_name`
+# sitting inside `tool_input`. Reproduced against the shipped script with
+# jq present:
+#   {"tool_input":{"file_path":"<a real checkpoints/ path>",
+#    "tool_name":"Write"}}
+# came back `allow`, on an operation whose actual tool this hook never
+# established. Same for an explicit "tool_name":null. The comment block
+# above extract_field claimed no `allow` was reachable through that scan;
+# it was true only for jq ABSENT.
+#
+# The rule now: if jq parsed the document, its answer is authoritative,
+# INCLUDING "absent". The scan still exists for jq-absent and
+# failed-to-parse payloads, where extract_tool_input_field cannot produce
+# a file_path either and decide() defers regardless.
+#
+# The fp16/fp17 naive mutants further down this file used to read
+# `file_path` through extract_field, which is what previously made this
+# fallback's breadth load-bearing for the suite. They now read it through
+# extract_tool_input_field - a faithful reader of the field the tool
+# actually uses, and irrelevant to the naive-prefix bug they exist to
+# prove - so nothing depends on that breadth any more.
+# ==========================================================================
+home19e=$(new_home)
+mkdir -p "$home19e/.squirrel/checkpoints/proj-19e"
+scenario19e_cases="no_top_level_tool_name:{\"tool_input\":{\"file_path\":\"PATH\",\"tool_name\":\"Write\"}}
+null_top_level_tool_name:{\"tool_name\":null,\"tool_input\":{\"file_path\":\"PATH\",\"tool_name\":\"Write\"}}"
+
+old_ifs=$IFS
+IFS='
+'
+for case19e in $scenario19e_cases; do
+  IFS=$old_ifs
+  case19e_name=${case19e%%:*}
+  case19e_tmpl=${case19e#*:}
+  case19e_json=$(printf '%s' "$case19e_tmpl" | sed "s#PATH#$home19e/.squirrel/checkpoints/proj-19e/x.md#")
+  out19e=$(capture_stdout "$allow_checkpoint_script" "$home19e" "$case19e_json")
+  exit19e=$(capture_exit "$allow_checkpoint_script" "$home19e" "$case19e_json")
+  assert_no_opinion "$out19e" "$exit19e" "allow-checkpoint.sh must express NO OPINION for '$case19e_name' - a tool_name nested inside tool_input is not the top-level field the PreToolUse contract puts there, and must never satisfy the Write/Edit/Read gate"
+  IFS='
+'
+done
+IFS=$old_ifs
+
+# The isolation half: the ordinary, correctly-shaped payload against the
+# same fixture must still be allowed, so the fix above is narrowing what
+# the fallback may bind rather than breaking top-level extraction.
+stdin19e_ok=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/checkpoints/proj-19e/x.md"}}' "$home19e")
+out19e_ok=$(capture_stdout "$allow_checkpoint_script" "$home19e" "$stdin19e_ok")
+decision19e_ok=$(printf '%s' "$out19e_ok" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decision19e_ok="<jq error>"
+assert_eq "allow" "$decision19e_ok" "a correctly-shaped payload with tool_name at the top level must still be allowed - the audit fix narrows what the sed fallback may bind, it does not stop jq reading the real field"
+
+# ==========================================================================
 # 20. allow-checkpoint.sh - tool_name other than Write/Edit/Read: "defer".
 # ==========================================================================
 home20=$(new_home)
@@ -3682,7 +3741,7 @@ fp16_end=$(line_of_after "$fp16_script" "$fp16_start" '}')
 fp16_naive_decide='decide() {
   input=$(cat)
   tool_name=$(extract_field "$input" "tool_name")
-  file_path=$(extract_field "$input" "file_path")
+  file_path=$(extract_tool_input_field "$input" "file_path")
   case "$tool_name" in
     Write | Edit | Read) ;;
     *) printf "defer"; return 0 ;;
@@ -3726,7 +3785,7 @@ fp17_end=$(line_of_after "$fp17_script" "$fp17_start" '}')
 fp17_naive_decide='decide() {
   input=$(cat)
   tool_name=$(extract_field "$input" "tool_name")
-  file_path=$(extract_field "$input" "file_path")
+  file_path=$(extract_tool_input_field "$input" "file_path")
   case "$tool_name" in
     Write | Edit | Read) ;;
     *) printf "defer"; return 0 ;;

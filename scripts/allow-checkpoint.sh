@@ -482,28 +482,58 @@ extract_field() {
   #       in decide() below. `file_path` never comes through here - it
   #       comes through extract_tool_input_field, which has no fallback.
   #   (b) So no `allow` decision can be reached on the strength of this
-  #       function's scan. With jq stripped from PATH,
-  #       extract_tool_input_field returns empty, file_path fails the
-  #       `case ... in /*)` test, and decide() defers. Confirmed by
-  #       running this script both ways against a legitimate nested
-  #       checkpoint Write: jq absent defers, jq present allows.
-  #   (c) tests/test_hooks.sh scenarios 16/17 build HISTORICAL,
-  #       pre-AB1-shaped mutant decide() bodies that call this function
-  #       for `file_path` precisely to simulate "reads file_path from
-  #       anywhere in the payload" while proving an older, different bug.
-  #       Narrowing this function to the top level would empty their
-  #       file_path and turn those proofs green-for-the-wrong-reason.
+  #       function's scan. The scan is now reached ONLY when jq is absent
+  #       or failed to parse the payload (see the FIXED (audit, LOW) note
+  #       at the `return 0` below for the case that used to slip past
+  #       this), and on either of those paths extract_tool_input_field
+  #       returns empty, file_path fails the `case ... in /*)` test, and
+  #       decide() defers. Confirmed by running this script both ways
+  #       against a legitimate nested checkpoint Write: jq absent defers,
+  #       jq present allows.
+  #   (c) It used to be true that tests/test_hooks.sh scenarios 16/17
+  #       depended on this scan - their mutant decide() bodies called
+  #       this function for `file_path` to simulate "reads file_path from
+  #       anywhere in the payload". They no longer do: those mutants now
+  #       call extract_tool_input_field, which is both a faithful reader
+  #       of the field the tool actually uses and irrelevant to the bug
+  #       they exist to prove (naive prefix matching with no lexical
+  #       normalisation). That dependency is therefore no longer a reason
+  #       to keep this fallback broad, and it is not cited as one.
   # If a future change ever routes a security-relevant key through this
-  # function, that reasoning expires with it and the scanner must be
-  # copied in here too.
+  # function, that reasoning expires with it and the top-level-only awk
+  # scanner the sibling scripts use must be copied in here too.
   json=$1
   key=$2
   if command -v jq >/dev/null 2>&1; then
     if val=$(printf '%s' "$json" | jq -r --arg k "$key" '(.[$k] // empty)' 2>/dev/null); then
+      # FIXED (audit, LOW): this `return 0` used to sit INSIDE the
+      # non-empty test, so a jq that PARSED the payload and correctly
+      # reported the field ABSENT fell through to the sed scan below -
+      # and that scan is greedy over the WHOLE payload, so it bound a
+      # `tool_name` nested inside `tool_input`. Reproduced with jq
+      # present and no top-level tool_name at all:
+      #   {"tool_input":{"file_path":"<a real checkpoints/ path>",
+      #    "tool_name":"Write"}}
+      # came back `allow` - on an operation whose actual tool this hook
+      # never established. The same happened for an explicit
+      # `"tool_name":null`. The comment block above claimed no `allow`
+      # was reachable through this function's scan; that claim was true
+      # only for jq ABSENT, and is now true unconditionally.
+      #
+      # The rule is: if jq PARSED the document, its answer is
+      # authoritative, INCLUDING "the field is not there". Only a jq
+      # that is absent, or one that failed to parse at all (malformed
+      # JSON, non-zero exit), reaches the fallback - and on that path
+      # extract_tool_input_field cannot produce a file_path either, so
+      # decide() defers on the empty-file_path check and no `allow` is
+      # reachable regardless of what the scan below binds. That is what
+      # keeps this fallback safe to keep, and keeping it is what lets
+      # tests/test_hooks.sh's malformed-payload scenarios still exercise
+      # the shapes they were written for.
       if [ "$val" != "null" ] && [ -n "$val" ]; then
         printf '%s' "$val"
-        return 0
       fi
+      return 0
     fi
   fi
   printf '%s\n' "$json" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
