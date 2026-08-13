@@ -188,9 +188,13 @@ long as the plugin is on.
 
 `/squirrel:off` suspends the base rules for one session. `/plugin disable squirrel@squirrel-mode`,
 then a new session, removes them from the system prompt entirely — the hard off. `/reload-plugins`
-alone does not reliably drop the output style: its documented reload list never names output
-styles. (`/plugin disable` opens the plugin panel and leaves it open; press Esc before typing the
-next command.)
+alone is not a substitute for that, but not for the reason this paragraph used to give. Claude Code's
+plugins reference does name `output-styles/` among the components `/reload-plugins` picks up — so the
+old claim that its reload list never mentions output styles was wrong. What that sentence covers is
+reloading a component's *content*; it says nothing about deactivating a style already applied to the
+running session, and this repo has not tested whether it does. A new session is the trigger that can
+actually be promised here, which is why it is the one documented above. (`/plugin disable` opens the
+plugin panel and leaves it open; press Esc before typing the next command.)
 
 `/squirrel:off` and `/squirrel:on` take effect starting with your next message, not the one you
 just sent: both write a sentinel that a hook claims on the next prompt, not immediately.

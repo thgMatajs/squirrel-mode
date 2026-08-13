@@ -253,9 +253,14 @@ PLUGIN_CLEAR_SAME_SENTENCE_REGEX='/plugin (install|uninstall|enable|disable)'
 # match. If you are editing one of these sentences: the reason it is pinned is that "a new session"
 # is the only trigger output-styles.md and prompt-caching.md jointly guarantee for a plugin-state
 # change to drop or pick up a `force-for-plugin` output style — `/clear` alone is not documented to
-# do this, and `/reload-plugins` alone is not documented to either (its own reload list never names
-# output styles). Update the constant deliberately, only after re-checking that guarantee still
-# holds, never just to make a failing assertion pass.
+# do this, and `/reload-plugins` alone is not documented to either. [Audit correction] That last
+# clause used to justify itself with "its own reload list never names output styles", which is
+# false: the plugins reference's skills-directory-plugin section names `output-styles/` among the
+# components `/reload-plugins` picks up. It reloads a component's CONTENT; nothing documents it as
+# deactivating a style already applied to the running session, and nobody here has tested it. The
+# guarantee the pins rest on is unchanged, but it now rests on absence of a documented claim rather
+# than on a wrong one. Update the constants deliberately, only after re-checking that guarantee
+# still holds, never just to make a failing assertion pass.
 # shellcheck disable=SC2016 # single-quoted deliberately, all six PIN_* below: literal expected
 # file text, backtick-quoted commands and all, never shell command substitution.
 PIN_README_INSTALL='Start a new session. The base rules load as an output style with `force-for-plugin: true` — no `/config` step — and a new session is the one thing this repo can promise makes that happen.'
