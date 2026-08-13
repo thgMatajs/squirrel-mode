@@ -1,5 +1,11 @@
 # Profile and checkpoints live in ~/.claude/squirrel/, not the plugin data directory
 
+**The directory in that title is superseded. The live one is `~/.squirrel/` — see the Amendment
+(S11) section below.** The title is left as first written, this repo's convention for a decision its
+own amendments overtake; what changed is the directory, not the reasoning that follows, which holds
+at the new location exactly as well as at the old one. `README.md` links here for the
+survives-uninstall guarantee, so a reader arriving from there should read this note first.
+
 Claude Code provides `${CLAUDE_PLUGIN_DATA}` (`~/.claude/plugins/data/{id}/`) as the official per-plugin persistent store, and we deliberately do not use it. Two properties make it wrong for this data. It is deleted when the plugin is uninstalled from its last scope — `--keep-data` is opt-in — so uninstalling would destroy the Done log, which is the least disposable thing the plugin holds — it is the only record the plugin accumulates that a user cannot reconstruct. Its path also embeds the marketplace id, so reinstalling from a different marketplace silently yields a fresh, empty profile. We use `~/.claude/squirrel/` instead: a fixed, memorable, hand-editable path that survives uninstall and is indifferent to install source.
 
 ## Consequences
