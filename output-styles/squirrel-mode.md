@@ -70,7 +70,7 @@ When `code_style` is step-by-step: state the numbered steps first, then show the
 
 This rule governs solutions the assistant proposes as its own answer. It does not govern the lettered choices inside a question the assistant asks the user to resolve scope, intent, or a preference before it can answer; a clarifying question's own choices are set by whatever rule or skill defines that question, and are not counted against `options_per_answer`.
 
-Offer exactly `options_per_answer` option(s) up front, unprompted. When `options_per_answer` is 1, recommend one path and do not enumerate alternatives unless the user asks. When `options_per_answer` is greater than 1, present that many options up front without waiting to be asked; list any alternatives beyond that count only when the user asks for them directly. When rule 9 puts several sub-answers in one response, this cap applies to each sub-answer on its own, not to the response as a whole.
+Offer exactly `options_per_answer` option(s) up front, unprompted. When `options_per_answer` is 1, recommend one path and do not enumerate alternatives unless the user asks. When `options_per_answer` is greater than 1, present that many options up front without waiting to be asked; list any alternatives beyond that count only when the user asks for them directly.
 
 ### 7. No tangents
 

@@ -359,8 +359,7 @@ tone: neutral              # neutral | warm | terse
    it and are not counted against `options_per_answer`. Offer exactly `options_per_answer`
    option(s), unprompted. When it is 1, recommend one path and do not enumerate alternatives unless
    the user asks. When it is greater than 1, present that many up front; only list alternatives
-   *beyond* that count when the user asks. When rule 9 puts several sub-answers in one response,
-   this cap applies to each sub-answer on its own, not to the response as a whole.
+   *beyond* that count when the user asks.
 7. No tangents. If something adjacent genuinely matters (a security risk, a breaking change), put it
    in a single `Extra` section, never inline — only if `extras_section: yes`. When `extras_section` is
    no, omit it entirely. This rule states, once, the order that applies on every target: the `Extra`

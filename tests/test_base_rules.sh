@@ -637,8 +637,20 @@ plan_rule_6_flat=$(printf '%s\n' "$plan_rule_6_block" | tr '\n' ' ' | tr -s ' ')
 
 RULE6_PER_SUBANSWER_PHRASE="applies to each sub-answer on its own, not to the response as a whole"
 assert_contains "$plan_rule_6_flat" "$RULE6_CLARIFYING_CARVEOUT_PHRASE" "PLAN.md's rule-6 summary must carve out a clarifying question's own choices, matching rules/base-rules.md (cross-file agreement, invariant 6e -- this is Z3's headline fix)"
-assert_contains "$rule_6_body" "$RULE6_PER_SUBANSWER_PHRASE" "rule 6's canonical body must state the options_per_answer cap applies per sub-answer when rule 9 produces several in one response (Z4)"
-assert_contains "$plan_rule_6_flat" "$RULE6_PER_SUBANSWER_PHRASE" "PLAN.md's rule-6 summary must state the same per-sub-answer scoping as rules/base-rules.md (cross-file agreement, invariant 6e)"
+# [TOKEN AUDIT] Rule 6's copy of that sentence is cut. Rule 3 carries the
+# identical sentence for its own cap (assertion 28, below), and the
+# variable is still defined here because that assertion uses it.
+#
+# Stated plainly rather than glossed over: this is NOT a case of the
+# surviving side restating the same fact. Rule 3's sentence scopes
+# max_list_items; rule 6's scoped options_per_answer. After the cut, rule
+# 6's scoping is implied by the parallel wording rather than stated, and
+# that is the cost the project owner accepted for this cut. What is NOT
+# left unstated is the thing rule 6's sentence actually guarded against -
+# rule 9's guarantee that every question gets answered, which rule 3's
+# body carries by name (assertion 14).
+assert_not_contains "$rule_6_body" "$RULE6_PER_SUBANSWER_PHRASE" "rule 6's canonical body must not carry its own copy of the per-sub-answer sentence - rule 3 states it for its own cap, and two identical sentences ship in every session's system prompt"
+assert_not_contains "$plan_rule_6_flat" "$RULE6_PER_SUBANSWER_PHRASE" "PLAN.md's rule-6 summary must not carry it either, matching the cut in rules/base-rules.md (cross-file agreement, invariant 6e)"
 
 # --- 24. Rule 1's rule-8 cross-reference and rule 8's recap-ordering
 # sentence both reach PLAN.md (S9 review cycle 2, Z3 audit finding) --------
