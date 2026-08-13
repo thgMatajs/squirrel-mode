@@ -153,7 +153,7 @@ exactly four kinds of file:
   ([ADR-0006](./docs/adr/0006-session-isolation-concurrency.md)).
 - `off/PENDING.<token>`, `off/CLEAR.<token>`, and `off/<session-id>` — the sentinels `/squirrel:off`
   and `/squirrel:on` leave for the next prompt's hook to claim, and the flag a claimed `PENDING`
-  becomes. The hook consumes each sentinel as it claims it, and `/squirrel:on`'s removes the flag.
+  becomes. The hook consumes each sentinel as it claims it; claiming a `CLEAR` removes the flag too.
 - `profile-seen/<session-id>` — an empty marker whose timestamp is all that matters: it is how a
   session knows whether it has already been shown the current `profile.md`, and it is what makes a
   `/squirrel:tune` in one session reach the others.
