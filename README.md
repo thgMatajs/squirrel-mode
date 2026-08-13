@@ -59,10 +59,13 @@ targets/cursor/install.sh          # dry run
 targets/cursor/install.sh --yes    # actually install
 ```
 
-Adds `~/.cursor/rules/squirrel-mode.mdc`; `targets/cursor/install.sh --uninstall` removes it again,
-on the same dry-run-by-default terms. `/digest` and `/plan` still need copying by hand into
-each project's `.cursor/commands/` — [docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md) has the two
-file paths and why Cursor can't install them once for every project.
+Adds `~/.cursor/rules/squirrel-mode.mdc` (the always-on base rules) and two Cursor Agent Skills at
+`~/.cursor/skills/squirrel-digest/SKILL.md` and `~/.cursor/skills/squirrel-plan/SKILL.md`, invoked as
+`/squirrel-digest` and `/squirrel-plan` in every project on the machine.
+`targets/cursor/install.sh --uninstall` removes all three again, on the same dry-run-by-default
+terms. Cursor's project-scoped `/digest` and `/plan` commands are a separate mechanism and still have
+to be copied into a project's own `.cursor/commands/` if you want them there too —
+[docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md) has the two file paths.
 
 ## The eight commands
 
@@ -78,7 +81,8 @@ file paths and why Cursor can't install them once for every project.
 | `/squirrel:rules` | Pulls the base rules into the current conversation by hand. A recovery path only — see below. |
 
 All eight exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`. Cursor gets
-`digest` and `plan` only — see the parity table below for why.
+`digest` and `plan` only — see the parity table below for why. On Cursor they are `/squirrel-digest`
+and `/squirrel-plan`: Cursor has no command namespace, so the prefix is part of the name.
 
 **`/squirrel:rules` is a recovery path, not part of the normal flow.** The base rules are already in
 the system prompt on every turn, carried by the forced output style
@@ -95,15 +99,17 @@ type it.
 | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
+| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no |
 
 Codex and Cursor have no lifecycle hooks, so neither gets automatic checkpoints, session-scoped
 off/on, or profile reinjection after a tune — a change elsewhere can leave their view stale until
 their own cadence re-reads the file. Claude Code isolates concurrent sessions (one checkpoint file
 per session, token-bound off/on) and reinjects an updated profile on the next prompt; see
-[ADR-0006](./docs/adr/0006-session-isolation-concurrency.md). Neither Codex nor Cursor has a
-harness-level guarantee against the model starting calibration on its own the way Claude
-Code's `disable-model-invocation: true` does. All three targets read the same
+[ADR-0006](./docs/adr/0006-session-isolation-concurrency.md). Neither Codex nor Cursor can run the
+calibration interview at all, so the question of the model starting it unprompted does not arise
+there. Codex has no `disable-model-invocation` equivalent of any kind; Cursor's Agent Skills do
+support it, and squirrel-mode sets it on both skills it installs, so `/squirrel-digest` and
+`/squirrel-plan` never fire on their own. All three targets read the same
 `~/.squirrel/profile.md`, so one calibration run — `/squirrel:init` in Claude Code, or asking Codex
 in plain language to run squirrel init — calibrates every target on that machine. Full breakdown —
 which commands port and why, what each target loses — in
@@ -146,7 +152,8 @@ moved have their data at an older path instead — see the note at the end of th
 squirrel-mode detects that and tells you, once per session, rather than moving it for you.
 
 The Codex and Cursor installers are a separate, one-time step: they write to the per-target
-directories already listed above (`~/.codex/AGENTS.md`, `~/.agents/skills/`, `~/.cursor/rules/`).
+directories already listed above (`~/.codex/AGENTS.md`, `~/.agents/skills/`, `~/.cursor/rules/`,
+`~/.cursor/skills/`).
 Nothing, on any target, is ever written inside a project repository.
 
 `/plugin uninstall squirrel@squirrel-mode` removes the Claude Code plugin.

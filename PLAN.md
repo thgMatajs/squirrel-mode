@@ -592,7 +592,7 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
+| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no |
 
 **Which commands port, and why the other three cannot.**
 

@@ -1236,7 +1236,10 @@ end to end outside the suite, so it is recorded:
 - Codex once `~/.codex` exists: the dry run lists 5 files; `--yes` installs `AGENTS.md` plus the four
   ported skills.
 - Cursor `--yes`: installs `~/.cursor/rules/squirrel-mode.mdc` and prints the two project-scoped
-  command paths as **absolute** paths.
+  command paths as **absolute** paths. That hand-run predates the two Cursor Agent Skills; a `--yes`
+  run today also installs `~/.cursor/skills/squirrel-digest/SKILL.md` and
+  `~/.cursor/skills/squirrel-plan/SKILL.md`, which this run never covered and which therefore carry
+  no observation here — only the automated coverage named above.
 - Cursor `--uninstall` dry run: lists the removal and writes nothing.
 
 This changes no status word — the criterion is already `met` on automated evidence, and `met` is the

@@ -11,7 +11,7 @@ feature set; this page states the practical consequences plainly, with no hedgin
 | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `.cursor/commands/*.md`, project-scoped | no | no |
+| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no |
 
 ## Which commands port, and why the other four cannot
 
@@ -19,7 +19,7 @@ feature set; this page states the practical consequences plainly, with no hedgin
 | :-- | :-- | :-- | :-- | :-- |
 | `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the target. |
 | `plan` | ✅ | ✅ | ✅ | Same. |
-| `init` | ✅ | ✅ | ❌ | Writes `~/.squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
+| `init` | ✅ | ✅ | ❌ | Writes `~/.squirrel/profile.md`. Codex can run shell commands. No Cursor artifact is built for this one: the reason recorded when the port set was settled — Cursor had no user-level place to install a command — stopped being true when Agent Skills landed, since `~/.cursor/skills/` is exactly that. What has *not* been established is whether a Cursor Agent Skill can write that file at all, so it stays unported rather than shipped on an assumption. |
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |
 | `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
 | `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
@@ -52,16 +52,21 @@ feature set; this page states the practical consequences plainly, with no hedgin
 
 - **No calibration interview at all.** Cursor gets no `init` and no `tune`. You cannot run the
   seven-question interview from inside Cursor, and you cannot hand-tune a single field from inside
-  Cursor either — both would need to write `~/.squirrel/profile.md`, and Cursor's commands are
-  project-scoped with no user-level install path to put such a thing at.
+  Cursor either — both would need to write `~/.squirrel/profile.md`, and squirrel-mode builds no
+  Cursor artifact that does. The port table above states what is and is not known about why.
 - **No personalization, period, on Cursor alone.** The `.mdc` rules file applies the same fixed
   defaults to everyone. It cannot read the profile, because Cursor rules cannot execute anything —
   they are static text injected into context, not a skill that can open a file.
-- **`digest` and `plan` are project-scoped.** They live in `.cursor/commands/*.md`, which Cursor reads
-  per-project, not once for the whole machine. Getting them into a given project means copying two
-  files into that project's own `.cursor/commands/` directory (see Install below) — there is no
-  "install once, use everywhere" path for these two commands the way there is on Claude Code and
-  Codex.
+- **`digest` and `plan` never fire on their own.** They install once, machine-wide, as Cursor
+  **Agent Skills** at `~/.cursor/skills/squirrel-digest/` and `~/.cursor/skills/squirrel-plan/`,
+  invoked explicitly as `/squirrel-digest` and `/squirrel-plan`. Both carry
+  `disable-model-invocation: true`, so Cursor never applies them on its own the way Claude Code's
+  model-invocable `digest` can trigger on an ordinary-language "what should I do with this?" asked
+  alongside a pasted ticket. Cursor Agent Skills have no `alwaysApply` equivalent, so explicit
+  invocation is the only mode available; each one's "Trigger on…" description therefore describes
+  when *you* should reach for the command, not something Cursor will act on by itself. The
+  project-scoped `.cursor/commands/*.md` copies still exist for anyone who also wants `/digest` and
+  `/plan` inside one specific repository.
 
 ## The one consequence worth knowing before you install anything
 
@@ -146,21 +151,49 @@ This touches:
 - `~/.cursor/rules/squirrel-mode.mdc` — the always-on base rules, copied in whole. If Cursor has not
   been run on this machine yet, `~/.cursor` does not exist, and the installer reports exactly that
   and does nothing, without failing — open Cursor once, then re-run the installer.
+- `~/.cursor/skills/squirrel-digest/SKILL.md` and `~/.cursor/skills/squirrel-plan/SKILL.md` — Cursor
+  **Agent Skills**, auto-discovered from `~/.cursor/skills/` for every project on this machine. The
+  folder names carry a `squirrel-` prefix because Cursor has no command namespace; each one's
+  frontmatter `name` must match its folder exactly, and `scripts/build.sh` generates both from one
+  expression so they cannot drift apart.
 - `~/.cursor/.squirrel-install.lock` — the same lock mechanism as Codex's above, created and removed
   only during a real write (`--yes`); a dry run never creates it.
 
-`/digest` and `/plan` are **not** installed anywhere by this script, because Cursor has no user-level
-command location (see "What each target loses" above). Instead, every run of the installer — dry run
-included — ends by naming the two files to copy, as absolute paths inside the checkout you ran it
-from:
+Cursor's **project-scoped** commands are a separate mechanism and are still not installed by this
+script — they live in a project's own `.cursor/commands/` directory, and writing them there would
+mean guessing which project. The Agent Skills above are what covers every project. Every **install**
+run — dry run included, but never an `--uninstall` run — ends by naming the two command files, as
+absolute paths inside the checkout you ran it from, for anyone who also wants them in one specific
+repository:
 
 ```
-Cursor commands are project-scoped - there is nowhere under $HOME to install /digest and /plan once for every project. To add them to a specific project, copy these two files into that project's .cursor/commands/ directory:
+The two skills above are Cursor AGENT SKILLS: Cursor auto-discovers $HOME/.cursor/skills/ for every project on this machine, so /squirrel-digest and /squirrel-plan work everywhere once, with nothing to copy per project.
+Cursor's PROJECT-scoped commands are a separate mechanism and are not installed here. If you also want /digest and /plan as project commands in one specific repository, copy these two files into that project's .cursor/commands/ directory:
   <your-checkout>/targets/cursor/commands/digest.md
   <your-checkout>/targets/cursor/commands/plan.md
 ```
 
-Repeat that copy for every project where you want `/digest` and `/plan` available.
+Repeat that copy for every project where you want the project-scoped `/digest` and `/plan` as well.
+
+### One honest caveat about `~/.cursor/rules/`
+
+Cursor's own documentation describes `.mdc` rule files at **project** level only — project rules live
+in `.cursor/rules` as `.mdc` files — and describes user-level rules only as global preferences set in
+Customize → Rules, a screen with no documented filesystem path. The **user-level** directory
+`~/.cursor/rules/`, where squirrel-mode installs `squirrel-mode.mdc`, appears nowhere in those docs.
+
+That is absence from the documentation, not a documented denial. It works today, and it is the only
+mechanism on Cursor that applies squirrel-mode's base rules to every turn without being asked.
+Cursor's documented user-level file mechanism is Agent Skills (`~/.cursor/skills/`), which
+squirrel-mode also installs — but Agent Skills are never always-on: they are applied when the agent
+judges them relevant, or, with `disable-model-invocation: true`, only when you type their slash
+command. There is no `alwaysApply` for an Agent Skill, so Agent Skills cannot carry the base rules.
+
+squirrel-mode therefore ships both: the documented mechanism for the two commands, and the
+undocumented-but-working one for the always-on rules. If a future Cursor release stops reading
+`~/.cursor/rules/`, the symptom is that the base rules quietly stop applying while `/squirrel-digest`
+and `/squirrel-plan` keep working. The fallback is to paste the contents of
+`~/.cursor/rules/squirrel-mode.mdc` into Cursor's Customize → Rules screen by hand.
 
 ## Concurrency
 
@@ -201,7 +234,16 @@ still cleaned up rather than stranded. If the squirrel-mode block was the ONLY c
 had, uninstall leaves the file in place, empty (0 bytes), rather than deleting it — install cannot tell
 "you had an empty `AGENTS.md` before we ever touched it" apart from "we ourselves created this file",
 and the safe default is to never delete a user-visible file under `$HOME` it is not certain it created;
-delete the empty file by hand if you don't want it. Cursor's uninstall removes `squirrel-mode.mdc`.
+delete the empty file by hand if you don't want it.
+
+Cursor's uninstall removes `squirrel-mode.mdc` **and** both `~/.cursor/skills/squirrel-*/SKILL.md`
+files, plus the directories install created for them — `~/.cursor/rules`, each
+`~/.cursor/skills/<name>`, and `~/.cursor/skills` itself. Every one of those is a plain,
+non-recursive `rmdir` that is allowed to fail, so a directory still holding anything else survives
+untouched, and every one of them runs **only** when that same run actually removed one of
+squirrel-mode's own files from it — so a `~/.cursor/skills` you made yourself and squirrel-mode never
+installed into is never deleted. `~/.cursor` itself is never removed: Cursor creates it, and this
+installer refuses to run at all when it is missing.
 
 ### Ownership, and the symlink refusal
 
@@ -214,8 +256,9 @@ that quotes squirrel-mode's own docs — does **not** count as a match: it is fo
 and neither installer ever touches a file at that path that does not carry that exact banner line. If
 something else already occupies that exact path, the installer reports it and leaves it alone.
 
-If the exact managed path (`~/.codex/AGENTS.md`, an `~/.agents/skills/<name>/SKILL.md`, or
-`~/.cursor/rules/squirrel-mode.mdc`) is itself a **symlink**, both installers **refuse** — a loud
+If the exact managed path (`~/.codex/AGENTS.md`, an `~/.agents/skills/<name>/SKILL.md`,
+`~/.cursor/rules/squirrel-mode.mdc`, or a `~/.cursor/skills/<name>/SKILL.md`) is itself a
+**symlink**, both installers **refuse** — a loud
 `fail()`, changing nothing — on both install and uninstall, rather than write through it. Either
 installer replaces a destination atomically via `mv` (`rename(2)`), which replaces the *directory
 entry* at that path; if that entry is a symlink, the rename severs it instead of writing through it,
@@ -253,7 +296,9 @@ automatically there — turn it off by removing or disabling the thing that is a
   `alwaysApply: false` in the frontmatter (Cursor stops applying it automatically, but you can still
   invoke it manually), or delete the file entirely (`targets/cursor/install.sh --uninstall --yes`), or
   turn it off from Cursor's own Rules settings UI if your version exposes one. Any of the three takes
-  effect immediately for new context Cursor builds.
+  effect immediately for new context Cursor builds. The two Agent Skills are unaffected by any of
+  this — they only ever run when you type `/squirrel-digest` or `/squirrel-plan`, so there is nothing
+  to turn off there; delete their folders, or run the uninstall, if you want them gone.
 
 ## Privacy
 
