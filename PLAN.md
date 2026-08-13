@@ -127,8 +127,11 @@ harms task performance (**Sweller & Chandler**, 1994, *Cognition and Instruction
 cited a bare "Sweller"; the 1988 paper does not contain the words "intrinsic" or "extraneous" and was
 removed repo-wide). ⚠ The code-presentation
 application — Speicher & Chandrasekar, *Theoretical basis for code presentation: A case for cognitive
-load*, arXiv:2511.14636 — studies **blind and low-vision developers, not ADHD**. It is sound CLT
-reasoning borrowed from an adjacent accessibility population and must be labelled as such.
+load*, arXiv:2511.14636 — **studies nobody**: it has no participants, recruits and tests no one, and
+proposes design recommendations *for* **blind and low-vision developers, not ADHD**. Calling it a
+study of that population was wrong twice over. It is sound CLT reasoning borrowed from an adjacent
+accessibility population, one inferential step further out than the tag alone suggests, and must be
+labelled as such.
 → **Rules:** zero tangents, zero "by the way", zero unsolicited alternatives; no preamble or
 postamble; one optional `Extra` section at the very end if something genuinely matters.
 
