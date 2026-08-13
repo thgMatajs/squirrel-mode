@@ -1599,4 +1599,102 @@ if printf '%s' "$perturn_pin_mutant_content" | grep -qF "cap them at one checkpo
 assert_eq "yes" "$perturn_pin_removed" "FAILURE PROOF (scenario 35, per-turn cap): deleting that sentence from a scratch copy of README.md must remove the pinned text"
 assert_contains "$perturn_pin_mutant_content" "never auto-approved" "FAILURE PROOF (scenario 35, per-turn cap): deleting the one-write-per-turn sentence alone must leave the SEPARATE symlink-boundary paragraph untouched (proving the two pins are independent)"
 
+# ==========================================================================
+# 36. The AGENTS.md round trip must be byte-exact across ALL FOUR
+#     combinations of {the user's original file ends with a newline /
+#     does not} x {the user writes their own content BELOW the installed
+#     block / does not}. Scenario 10 is the only other byte-exact check
+#     of this round trip, and its fixture covers exactly one of the four
+#     (ends with a newline, nothing below the block) - so
+#     render_agents_uninstall's OTHER branch, the one taken whenever the
+#     line before BEGIN is not blank, had no test at all.
+#
+#     Combination D is a real, reproduced data-corruption bug, not a
+#     hypothetical: an AGENTS.md seeded WITHOUT a trailing newline, then
+#     added to below the block, came back from --uninstall --yes with
+#     the user's last own line and their first line below the block
+#     MERGED INTO ONE ("Always answer in English.And never use emoji.")
+#     - while the script printed "leaving the rest of the file
+#     byte-identical to before it was ever installed".
+#
+#     Combination C is the one that discriminates the byte-exactness
+#     mutation described in files_byte_status above (`printf '%s'` ->
+#     `printf '%s\n'`): it is the only combination whose correct result
+#     ends WITHOUT a trailing newline. Scenario 10 cannot see that
+#     mutation (its fixture ends with one) and neither can D (which
+#     routes through the head branch), so C must exist as its own
+#     byte-exact scenario or the mutation stays invisible.
+# ==========================================================================
+od_dump() {
+  # od_dump <file>: a compact one-line byte dump for failure messages.
+  # "expected: identical / actual: DIFFERS" does not say WHICH bytes
+  # moved, and for a trailing-newline defect that is the entire content
+  # of the finding.
+  od -An -c "$1" 2>/dev/null | tr '\n' ' ' | tr -s ' '
+}
+
+assert_agents_roundtrip() {
+  # assert_agents_roundtrip <label> <seed_file> <trailer_file>
+  # <expected_file>: seeds a fresh throwaway $HOME's ~/.codex/AGENTS.md
+  # with <seed_file>'s exact bytes, installs, appends <trailer_file>'s
+  # bytes BELOW the installed block (skipped when <trailer_file> is
+  # empty), uninstalls, and asserts the result is byte-identical to
+  # <expected_file>.
+  rt_label=$1
+  rt_seed=$2
+  rt_trailer=$3
+  rt_expected=$4
+  rt_home=$(make_temp_home)
+  cleanup_dirs="$cleanup_dirs $rt_home"
+  mkdir -p "$rt_home/.codex"
+  cp "$rt_seed" "$rt_home/.codex/AGENTS.md"
+
+  if rt_install_out=$(HOME="$rt_home" "$codex_install" --yes 2>&1); then rt_install_exit=0; else rt_install_exit=$?; fi
+  assert_eq "0" "$rt_install_exit" "$rt_label: install --yes must exit 0 -- output: $rt_install_out"
+  # Vacuous-pass guard: for the two combinations whose expected result
+  # IS the seed file unchanged, an install that silently did nothing at
+  # all would make the uninstall assertion below pass for entirely the
+  # wrong reason.
+  rt_begin_count=$(grep -c 'BEGIN SQUIRREL-MODE' "$rt_home/.codex/AGENTS.md" || true)
+  assert_eq "1" "$rt_begin_count" "$rt_label: sanity - install must actually have written exactly one squirrel-mode block into AGENTS.md"
+
+  if [ -s "$rt_trailer" ]; then
+    cat "$rt_trailer" >>"$rt_home/.codex/AGENTS.md"
+  fi
+
+  if rt_uninstall_out=$(HOME="$rt_home" "$codex_install" --uninstall --yes 2>&1); then rt_uninstall_exit=0; else rt_uninstall_exit=$?; fi
+  assert_eq "0" "$rt_uninstall_exit" "$rt_label: uninstall --yes must exit 0 -- output: $rt_uninstall_out"
+  assert_eq "identical" "$(files_byte_status "$rt_expected" "$rt_home/.codex/AGENTS.md")" "$rt_label: uninstall must leave AGENTS.md byte-exact -- expected: $(od_dump "$rt_expected") / actual: $(od_dump "$rt_home/.codex/AGENTS.md")"
+}
+
+fixtures36=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-roundtrip-fixtures.XXXXXX")
+cleanup_dirs="$cleanup_dirs $fixtures36"
+printf 'Always answer in English.\nBe concise.\n' >"$fixtures36/seed-with-newline"
+printf 'Always answer in English.' >"$fixtures36/seed-no-newline"
+printf 'And never use emoji.\n' >"$fixtures36/trailer"
+: >"$fixtures36/no-trailer"
+
+# A: ends with a newline, nothing below the block -> the seed, unchanged.
+cp "$fixtures36/seed-with-newline" "$fixtures36/expect-a"
+# B: ends with a newline, user content below the block -> the seed, then
+#    that content. The blank separator line install added is the only
+#    thing removed.
+cat "$fixtures36/seed-with-newline" "$fixtures36/trailer" >"$fixtures36/expect-b"
+# C: no trailing newline, nothing below the block -> the seed, unchanged,
+#    STILL with no trailing newline: the single newline install added to
+#    terminate the dangling last line was squirrel-mode's own, and
+#    nothing else needs it now.
+cp "$fixtures36/seed-no-newline" "$fixtures36/expect-c"
+# D: no trailing newline, user content below the block -> the seed, that
+#    same newline, then the content. Here the newline install added is
+#    the ONLY thing separating the user's last own line from their first
+#    line below the block; removing it merges two of their instructions
+#    into one.
+{ cat "$fixtures36/seed-no-newline"; printf '\n'; cat "$fixtures36/trailer"; } >"$fixtures36/expect-d"
+
+assert_agents_roundtrip "36A (trailing newline, nothing below the block)" "$fixtures36/seed-with-newline" "$fixtures36/no-trailer" "$fixtures36/expect-a"
+assert_agents_roundtrip "36B (trailing newline, user content below the block)" "$fixtures36/seed-with-newline" "$fixtures36/trailer" "$fixtures36/expect-b"
+assert_agents_roundtrip "36C (no trailing newline, nothing below the block)" "$fixtures36/seed-no-newline" "$fixtures36/no-trailer" "$fixtures36/expect-c"
+assert_agents_roundtrip "36D (no trailing newline, user content below the block)" "$fixtures36/seed-no-newline" "$fixtures36/trailer" "$fixtures36/expect-d"
+
 assert_report

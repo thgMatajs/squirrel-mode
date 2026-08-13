@@ -803,13 +803,32 @@ render_agents_uninstall() {
   #     the block sits at the very start of the file): the original
   #     had NO trailing newline of its own (render_agents_install used
   #     NO blank-line separator in that case - see its comment), and
-  #     line B-1 IS the original's true last line. `head`/`tail` are
-  #     line-oriented tools that always terminate whatever they print
-  #     with a real "\n", even when asked for exactly this one line -
-  #     so the ONE synthetic trailing newline that head would
-  #     otherwise add here is stripped via `$(...)`, which is safe
-  #     specifically because head's own output never contains more
-  #     than that one trailing newline to strip.
+  #     line B-1 IS the original's true last line. What becomes of the
+  #     ONE newline render_agents_install added to terminate that
+  #     dangling last line then depends on whether anything at all
+  #     FOLLOWS the block in the file as it stands today:
+  #       * nothing follows (the block really is at end of file): that
+  #         newline is squirrel-mode's own addition and nothing else
+  #         needs it, so it is stripped - via `$(...)`, safe
+  #         specifically because head's own output never contains more
+  #         than that one trailing newline to strip - restoring the
+  #         original's bytes exactly, trailing-newline-less as they
+  #         were.
+  #       * something follows: the user has since written their own
+  #         content BELOW the block, an entirely ordinary thing to do
+  #         to a file they keep using. That newline is now the ONLY
+  #         thing separating their last own line from their first line
+  #         under the block, so stripping it JOINS TWO OF THEIR OWN
+  #         LINES INTO ONE - silently, while this script prints
+  #         "leaving the rest of the file byte-identical to before it
+  #         was ever installed". `print_first_n_lines` (head) is used
+  #         instead, which preserves the terminator of every line it
+  #         prints. This branch used to treat "B-1 is not blank" as if
+  #         it also implied "and therefore the block ends the file";
+  #         nothing has ever enforced that, and merging two lines of a
+  #         user's own instructions is what the unchecked assumption
+  #         cost. Whether the block ends the file is now MEASURED, not
+  #         assumed - see after_block below.
   out=$1
   # shellcheck disable=SC2046 # see markers_state above.
   set -- $(find_marker_lines "$agents_file")
@@ -820,15 +839,29 @@ render_agents_uninstall() {
   if [ "$before_n" -gt 0 ]; then
     line_before=$(sed -n "${before_n}p" "$agents_file")
   fi
+  # Everything BELOW the END marker is materialised FIRST, because
+  # whether it is empty is what decides how the content ABOVE the BEGIN
+  # marker has to be terminated (third branch below). Written to a file
+  # rather than captured into a variable for exactly the reason this
+  # function never reads $agents_file into one either: command
+  # substitution strips trailing newlines, which is the corruption this
+  # whole function exists to avoid. The file lives beside <out> inside
+  # the caller's $TMPDIR staging directory - never under $HOME - and is
+  # removed as soon as it has been appended.
+  after_block="$out.after"
+  tail -n +"$((e + 1))" "$agents_file" >"$after_block"
   if [ "$before_n" -le 0 ]; then
     : >"$out"
   elif [ -z "$line_before" ]; then
     print_first_n_lines "$agents_file" "$((before_n - 1))" >"$out"
+  elif [ -s "$after_block" ]; then
+    print_first_n_lines "$agents_file" "$before_n" >"$out"
   else
     before_content=$(print_first_n_lines "$agents_file" "$before_n")
     printf '%s' "$before_content" >"$out"
   fi
-  tail -n +"$((e + 1))" "$agents_file" >>"$out"
+  cat "$after_block" >>"$out"
+  rm -f "$after_block"
 }
 
 # --- Execution ----------------------------------------------------------
