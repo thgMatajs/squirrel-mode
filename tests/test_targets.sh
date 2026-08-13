@@ -999,7 +999,22 @@ assert_contains "$cursor_help_out" ".squirrel-install.lock" "targets/cursor/inst
 g7_part1="removed the ins"
 g7_part2="tant that work ends"
 retired_lock_phrase="$g7_part1$g7_part2"
-retired_lock_wording_hits=$(cd "$repo_root" && git ls-files -z | xargs -0 grep -l "$retired_lock_phrase" 2>/dev/null || true)
+# The `cd` gets its own explicit failure path, and that is a real fix,
+# not a style change. Folded into one `cd "$repo_root" && git ls-files
+# ... || true` chain, a `cd` that FAILED was indistinguishable from "the
+# sweep ran and matched nothing": `|| true` swallowed the failure, the
+# variable came back empty, and this assertion passed - green, with the
+# repo-wide sweep never having run at all. That is exactly the
+# vacuous-pass this file's other guards exist to prevent, and it is the
+# reason `A && B || C` is worth spelling out here rather than silencing.
+# `|| true` still covers the one status that legitimately means success:
+# `grep -l` exits 1 when the retired phrase is nowhere to be found, which
+# is the outcome this assertion WANTS. The subshell keeps the `cd`
+# contained, so the rest of this file still runs from its own directory.
+retired_lock_wording_hits=$(
+  cd "$repo_root" || { printf '%s' "<sweep did not run: could not cd to $repo_root>"; exit 0; }
+  git ls-files -z | xargs -0 grep -l "$retired_lock_phrase" 2>/dev/null || true
+)
 assert_eq "" "$retired_lock_wording_hits" "G7: the retired lock-release-timing wording must not survive in any git-tracked file (found in: $retired_lock_wording_hits)"
 
 # ==========================================================================

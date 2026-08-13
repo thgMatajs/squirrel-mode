@@ -910,7 +910,9 @@ prune_stale_session_checkpoints() {
     # too (same trust boundary as checkpoint_dir_has_any). A depth-1
     # symlink to a regular file must neither be pruned as a candidate
     # nor inflate newer_count and delete a real ancient session file.
-    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    if [ ! -f "$candidate" ] || [ -L "$candidate" ]; then
+      continue
+    fi
     # Age gate on this single file: find given a file path does not
     # recurse. Empty output means "not old enough" (or find failed).
     candidate_old=$(find "$candidate" -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidate_old=""
@@ -923,7 +925,9 @@ prune_stale_session_checkpoints() {
 
     newer_count=0
     for peer in "$slug_dir"/*; do
-      [ -f "$peer" ] && [ ! -L "$peer" ] || continue
+      if [ ! -f "$peer" ] || [ -L "$peer" ]; then
+        continue
+      fi
       peer_newer=$(find "$peer" -newer "$candidate" 2>/dev/null) || peer_newer=""
       if [ -n "$peer_newer" ]; then
         newer_count=$((newer_count + 1))
@@ -1027,7 +1031,9 @@ checkpoint_list_candidates() {
         continue
         ;;
     esac
-    [ -f "$clc_path" ] && [ ! -L "$clc_path" ] || continue
+    if [ ! -f "$clc_path" ] || [ -L "$clc_path" ]; then
+      continue
+    fi
     printf '%s\n' "$clc_path"
   done
   printf '%s\n' "$clc_omitted"

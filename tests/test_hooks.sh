@@ -6012,15 +6012,15 @@ assert_contains "$fpP1p_ctx_real" "Resume available" "FAILURE PROOF isolation (s
 # lone ancient regular file; also proves the 9-real+1-symlink tip-over.
 fpP1q_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016
-fpP1q_cand_line=$(line_of "$fpP1q_script" '    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue')
+fpP1q_cand_line=$(line_of "$fpP1q_script" '    if [ ! -f "$candidate" ] || [ -L "$candidate" ]; then')
 [ -n "$fpP1q_cand_line" ] || fpP1q_cand_line=0
 # shellcheck disable=SC2016
-replace_line "$fpP1q_script" "$fpP1q_cand_line" '    [ -f "$candidate" ] || continue'
+replace_line "$fpP1q_script" "$fpP1q_cand_line" '    if [ ! -f "$candidate" ]; then'
 # shellcheck disable=SC2016
-fpP1q_peer_line=$(line_of "$fpP1q_script" '      [ -f "$peer" ] && [ ! -L "$peer" ] || continue')
+fpP1q_peer_line=$(line_of "$fpP1q_script" '      if [ ! -f "$peer" ] || [ -L "$peer" ]; then')
 [ -n "$fpP1q_peer_line" ] || fpP1q_peer_line=0
 # shellcheck disable=SC2016
-replace_line "$fpP1q_script" "$fpP1q_peer_line" '      [ -f "$peer" ] || continue'
+replace_line "$fpP1q_script" "$fpP1q_peer_line" '      if [ ! -f "$peer" ]; then'
 
 fpP1q_home=$(new_home)
 fpP1q_stdin=$(printf '{"session_id":"sess-fpP1q","cwd":"%s/symlink-peers-project"}' "$fpP1q_home")
@@ -6694,10 +6694,10 @@ assert_eq "14" "$(count_checkpoint_list_block "$fpL2_ctx")" "FAILURE PROOF (6h2)
 # --- fpL3: drop the [ ! -L ] half of the entry guard. Proves 6h3.
 fpL3_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016
-fpL3_line=$(line_of "$fpL3_script" '    [ -f "$clc_path" ] && [ ! -L "$clc_path" ] || continue')
+fpL3_line=$(line_of "$fpL3_script" '    if [ ! -f "$clc_path" ] || [ -L "$clc_path" ]; then')
 [ -n "$fpL3_line" ] || fpL3_line=0
 # shellcheck disable=SC2016
-replace_line "$fpL3_script" "$fpL3_line" '    [ -f "$clc_path" ] || continue'
+replace_line "$fpL3_script" "$fpL3_line" '    if [ ! -f "$clc_path" ]; then'
 
 fpL3_home=$(new_home)
 fpL3_stdin=$(printf '{"session_id":"sess-fpL3","cwd":"%s/symlinked-entry-project","hook_event_name":"SessionStart"}' "$fpL3_home")
