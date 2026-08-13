@@ -197,6 +197,20 @@ Each is still a tool call like any other and shows up in the transcript the same
 tool call does — what's skipped is the permission prompt and any commentary about it in the
 response, not the read or write itself.
 
+**That guarantee is exactly as wide as the hook's matcher, and there is a known path where it does
+not hold.** The matcher is `Write|Edit|Read`: three exact tool names, not a pattern that also catches
+things containing them. A checkpoint read or write made with one of those three skips the prompt. A
+`Bash` call cannot be auto-approved by any hook, at any path, so one that writes a checkpoint file
+with a heredoc instead goes through the normal permission flow — a prompt, in an interactive session.
+`/squirrel:pickup` names the `Read` tool explicitly and stays inside the guarantee. The base rule
+that keeps a checkpoint current says only "update this session's own checkpoint file", without naming
+a tool, and a live run recorded that with exactly that kind of tool-agnostic wording the model
+reaches for a `Bash` heredoc first, then retries with `Write` and says so in one line
+(`docs/ACCEPTANCE.md`, Live-sweep finding 3 — observed on `/squirrel:init`, `/squirrel:tune`,
+`/squirrel:off` and `/squirrel:on`, which are worded the same way, not on the checkpoint rule
+itself). The cost when it happens is one permission prompt and one extra line of report, not a lost
+checkpoint.
+
 The auto-approval only covers paths that genuinely resolve inside that directory: a symlink at
 `checkpoints/` itself, or anywhere below it, is never auto-approved — that write falls back to the
 normal permission prompt instead of being silently redirected through the symlink.
