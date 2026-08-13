@@ -637,7 +637,7 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
 | Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no |
 
-**Which commands port, and why the other three cannot.**
+**Which commands port, and why the other four cannot.**
 
 | Command | Claude Code | Codex | Cursor | Reason |
 | :-- | :-- | :-- | :-- | :-- |
@@ -647,6 +647,7 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |
 | `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
 | `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
+| `rules` | ✅ | ❌ | ❌ | Pulls the base rules back into one conversation after the forced output style has been turned off. Neither other target has an output style to turn off, so there is nothing to recover from: the rules are a block in `AGENTS.md` or a `.mdc` file, restored by editing the file, not by a command. |
 
 One consequence worth stating plainly in `docs/OTHER-TOOLS.md`: because all three targets read the
 **same** `~/.squirrel/profile.md`, running `/squirrel:init` once in Claude Code or Codex
