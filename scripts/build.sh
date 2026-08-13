@@ -943,6 +943,64 @@ check_no_claude_only_syntax() {
   fi
 }
 
+check_cursor_skill_swap_is_word_only() {
+  # check_cursor_skill_swap_is_word_only <text> <label>: fails the build
+  # loudly if <text> - the Cursor-bound body as it stands IMMEDIATELY
+  # BEFORE write_cursor_command's `literal_replace "$body" "skill"
+  # "command"` runs on it - contains an occurrence of the lowercase
+  # substring "skill" that is not the standalone WORD "skill".
+  #
+  # WHY THIS EXISTS. That substitution is a blanket, literal,
+  # every-occurrence swap with no notion of a word boundary. It is
+  # correct today only because every occurrence in the Cursor bodies
+  # happens to be the standalone word ("This skill restructures...",
+  # "...any tool call this skill makes."), which is exactly what has to
+  # become "command" in Cursor's own vocabulary. Nothing enforced that.
+  # A source sentence such as
+  #
+  #   See the skills/rules/SKILL.md file; skillful use of the skills
+  #   directory helps.
+  #
+  # shipped, verbatim and silently, as
+  #
+  #   See the commands/rules/SKILL.md file; commandful use of the
+  #   commands directory helps.
+  #
+  # - a broken path and an invented word - with build.sh exiting 0.
+  #
+  # This is the same hazard class as check_no_backslash_in_source_skills
+  # near the top of this file, and it is unreachable by the CI drift
+  # check for the same reason that one gives: the corruption is a
+  # deterministic function of the source, so a fresh regeneration is
+  # identically wrong and `git diff --exit-code` can never see it. The
+  # fix chosen is the same one: turn a silent future corruption into a
+  # loud failure now.
+  #
+  # THE RULE. An occurrence is safe iff neither the character before it
+  # nor the character after it is a word character or "/". That accepts
+  # the standalone word in ordinary prose ("a skill", "this skill.",
+  # "the skill's output") and rejects:
+  #   - a longer word containing it   - skills, skillful, reskill
+  #   - a path segment                - skills/rules/SKILL.md, /skill
+  # Uppercase and mixed-case spellings ("SKILL.md", "Skill") are not
+  # examined at all, deliberately: the substitution is case-sensitive
+  # and lowercase-only, so those are never rewritten and are not a
+  # hazard. Note that "skills/rules/SKILL.md" is still rejected - by the
+  # lowercase "skill" inside "skills", which the substitution WOULD
+  # rewrite.
+  #
+  # Fixing an occurrence this rejects means editing the source skill's
+  # prose (or the substitution in this script), never loosening the
+  # rule: there is no safe way for the blanket swap to leave a
+  # non-standalone occurrence alone.
+  cursor_swap_text=$1
+  cursor_swap_label=$2
+  cursor_swap_hits=$(printf '%s\n' "$cursor_swap_text" | grep -n -E '[A-Za-z0-9_/]skill|skill[A-Za-z0-9_/]' | head -n 3 | tr '\n' ' ' || true)
+  if [ -n "$cursor_swap_hits" ]; then
+    fail "$cursor_swap_label: the Cursor 'skill' -> 'command' substitution would rewrite an occurrence of 'skill' that is NOT the standalone word - it is part of a longer word or of a path (e.g. 'skills/rules/SKILL.md' would become 'commands/rules/SKILL.md', 'skillful' would become 'commandful'). That swap is a blanket literal replacement of every occurrence and has no way to skip one; the drift check cannot see the damage either, because a fresh regeneration from the same source is identically wrong. Reword the offending text in the source skill so the only lowercase 'skill' occurrences left are standalone words. Offending line(s): $cursor_swap_hits"
+  fi
+}
+
 # ported_skill_description <name>: the Codex frontmatter "description"
 # for <name>, mechanically derived from skills/<name>/SKILL.md's own
 # description by literal substitution (see the section header above).
@@ -1116,6 +1174,15 @@ write_cursor_command() {
   printf '\n'
   body=$(ported_skill_body "$name")
   body=$(add_title_suffix "$body" "(Cursor)")
+  # Guarded, not blind: the swap below rewrites EVERY literal occurrence
+  # of "skill", so the check immediately above it proves there is no
+  # occurrence left that is anything but the standalone word. See
+  # check_cursor_skill_swap_is_word_only for what it rejects and why the
+  # drift check can never catch this on its own. Runs against $body only
+  # - the GENERATED banner printed above names skills/<name>/SKILL.md as
+  # the source and is deliberately NOT part of $body, so the swap never
+  # reaches it and the banner keeps saying "skills/".
+  check_cursor_skill_swap_is_word_only "$body" "targets/cursor/commands/$name.md"
   body=$(literal_replace "$body" "skill" "command")
   printf '%s\n' "$body"
 }

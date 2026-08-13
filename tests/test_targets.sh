@@ -392,6 +392,84 @@ for rel in $generated_target_rel_paths; do
 done
 
 # ==========================================================================
+# 6b. The Cursor "skill" -> "command" swap is guarded.
+#
+#     write_cursor_command's `literal_replace "$body" "skill" "command"`
+#     is a blanket, literal, EVERY-occurrence substitution. It was
+#     unguarded: any occurrence of the substring "skill" in a Cursor
+#     body was rewritten, path segments and unrelated words included.
+#     Appending one sentence naming skills/rules/SKILL.md to a source
+#     skill shipped "commands/rules/SKILL.md" and "commandful" into
+#     targets/cursor/commands/digest.md, with build.sh exiting 0.
+#
+#     This is unreachable by the drift check, for the same reason
+#     build.sh's own backslash guard documents: the corruption is a
+#     deterministic function of the source, so a fresh regeneration is
+#     identically wrong and `git diff --exit-code` sees nothing. The
+#     build must therefore refuse the input outright, which is what the
+#     three sub-cases below check - each on its own throwaway scratch,
+#     never against the real skills/ sources.
+# ==========================================================================
+# 6b-1: a non-standalone occurrence (a path segment AND a longer word)
+# in a Cursor-ported source must fail the build loudly, and must not
+# have written the corrupted artifact.
+cursor_swap_scratch=$(make_full_scratch)
+cleanup_dirs="$cleanup_dirs $cursor_swap_scratch"
+printf '\nSee the skills/rules/SKILL.md file; skillful use of the skills directory helps.\n' >>"$cursor_swap_scratch/skills/digest/SKILL.md"
+if cursor_swap_out=$("$cursor_swap_scratch/scripts/build.sh" 2>&1); then
+  cursor_swap_exit=0
+else
+  cursor_swap_exit=$?
+fi
+assert_eq "1" "$cursor_swap_exit" "a source skill body containing 'skills/rules/SKILL.md' and 'skillful' must FAIL the build -- the Cursor skill-to-command swap would rewrite both -- output: $cursor_swap_out"
+assert_contains "$cursor_swap_out" "targets/cursor/commands/digest.md" "the swap-guard failure must name the artifact it would have corrupted"
+assert_contains "$cursor_swap_out" "standalone word" "the swap-guard failure must say the occurrence is not the standalone word, so the author knows what to reword"
+if [ -f "$cursor_swap_scratch/targets/cursor/commands/digest.md" ]; then
+  cursor_swap_body=$(cat "$cursor_swap_scratch/targets/cursor/commands/digest.md")
+else
+  cursor_swap_body=""
+fi
+assert_not_contains "$cursor_swap_body" "commandful" "the corrupted 'commandful' must never reach targets/cursor/commands/digest.md (the build must fail before any artifact is written)"
+assert_not_contains "$cursor_swap_body" "commands/rules/" "the corrupted 'commands/rules/' path must never reach targets/cursor/commands/digest.md"
+rm -rf "$cursor_swap_scratch"
+
+# 6b-2: VACUOUS-PASS GUARD. The same sentence, with every "skill"
+# occurrence reworded to something the swap cannot touch, must BUILD
+# CLEAN - proving 6b-1 fails on the "skill" occurrences specifically and
+# not merely on "any extra sentence appended to a source skill".
+cursor_swap_ok_scratch=$(make_full_scratch)
+cleanup_dirs="$cleanup_dirs $cursor_swap_ok_scratch"
+printf '\nSee the rules file; careful use of that directory helps.\n' >>"$cursor_swap_ok_scratch/skills/digest/SKILL.md"
+if cursor_swap_ok_out=$("$cursor_swap_ok_scratch/scripts/build.sh" 2>&1); then
+  cursor_swap_ok_exit=0
+else
+  cursor_swap_ok_exit=$?
+fi
+assert_eq "0" "$cursor_swap_ok_exit" "vacuous-pass guard: the same appended sentence with no 'skill' occurrence in it must build clean -- output: $cursor_swap_ok_out"
+rm -rf "$cursor_swap_ok_scratch"
+
+# 6b-3: the standalone word must keep being swapped. An appended
+# sentence using "skill" as an ordinary word is accepted by the guard
+# AND arrives in the Cursor artifact as "command" - the transformation
+# the guard exists to protect, not block.
+cursor_swap_word_scratch=$(make_full_scratch)
+cleanup_dirs="$cleanup_dirs $cursor_swap_word_scratch"
+printf '\nThis skill is deliberate about that.\n' >>"$cursor_swap_word_scratch/skills/digest/SKILL.md"
+if cursor_swap_word_out=$("$cursor_swap_word_scratch/scripts/build.sh" 2>&1); then
+  cursor_swap_word_exit=0
+else
+  cursor_swap_word_exit=$?
+fi
+assert_eq "0" "$cursor_swap_word_exit" "a standalone-word 'skill' occurrence must be accepted by the swap guard -- output: $cursor_swap_word_out"
+if [ -f "$cursor_swap_word_scratch/targets/cursor/commands/digest.md" ]; then
+  cursor_swap_word_body=$(cat "$cursor_swap_word_scratch/targets/cursor/commands/digest.md")
+else
+  cursor_swap_word_body=""
+fi
+assert_contains "$cursor_swap_word_body" "This command is deliberate about that." "the standalone word 'skill' must still be swapped to 'command' in the Cursor artifact"
+rm -rf "$cursor_swap_word_scratch"
+
+# ==========================================================================
 # 7. Both install.sh are executable and idempotent: running --yes
 #    twice against the same temporary $HOME changes nothing on the
 #    second run. (POSIX-ness is covered repo-wide by
