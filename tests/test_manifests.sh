@@ -93,6 +93,31 @@ else
 fi
 assert_eq "yes" "$semver_ok" "plugin.json .version ('$plugin_version') must match a semver pattern X.Y.Z with a non-empty, all-digit segment in each of the three positions"
 
+# 4b. The version must also be the one this repo has DELIBERATELY
+# released. The shape check above is the only thing that ever looked at
+# .version, and shape is not identity: editing "0.3.2" to "0.3.3" and
+# changing nothing else went uncaught across the entire suite, because
+# nothing else in the repo references the version string at all.
+#
+# There is deliberately nothing to cross-check it against. marketplace.json
+# is forbidden from carrying its own copy (assertions 15 and 16 below,
+# for good reason - a second copy can only go stale), there is no
+# CHANGELOG and no README badge, and the git tag that does correspond to
+# a release is not reliably present in a CI checkout, which fetches no
+# tags by default. Inventing a second file to hold the number would
+# create the staleness those assertions exist to prevent.
+#
+# So this is a deliberate-acknowledgement pin, not a cross-check: the
+# version lives in exactly one place, and bumping it costs one extra
+# line in the same commit. That is the whole point. This repo's releases
+# are their own standalone commit ("Release v0.3.2: ..."), so the pin
+# moves with the bump it belongs to; an incidental or accidental edit -
+# an agent tidying a manifest, a stray rebase, a half-finished release -
+# has nothing to move it, and turns red here instead of shipping a
+# version number nobody chose.
+EXPECTED_PLUGIN_VERSION="0.3.2"
+assert_eq "$EXPECTED_PLUGIN_VERSION" "$plugin_version" "plugin.json .version must be the released version this test pins. If you are cutting a release, update EXPECTED_PLUGIN_VERSION in tests/test_manifests.sh in the SAME commit as the bump - that edit is the acknowledgement this check asks for. If you did not mean to change the version, revert it"
+
 # 5. plugin.json .license is MIT.
 assert_json_eq "$plugin_json" '.license' "MIT" "plugin.json .license must be 'MIT'"
 
