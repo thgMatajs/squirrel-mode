@@ -82,14 +82,20 @@ verification pass was worth more than everything it cost. Corrected inline below
 in `RESEARCH.md`.
 
 **Working memory capacity is the bottleneck.** `general working memory`
-Working memory holds ~3–5 chunks and abandons content when new stimuli arrive (Baddeley & Hitch;
-Cowan, 2010, *The Magical Mystery Four*; Sweller, Cognitive Load Theory). Adults with ADHD show
+Concurrent working-memory capacity is small and is exceeded easily (Cowan, 2010, *The Magical
+Mystery Four*). ⚠ **The "~3–5 chunks" figure is no longer stated as settled.** Cowan's discrete-slot
+account is disputed by continuous-resource models holding no fixed number of items at all (Ma,
+Husain & Bays, 2014, *Nature Neuroscience* 17(3)) — a live dispute, not a retraction. Nothing built
+here needs the limit to be a count, only to be small. ⚠ The bare "Sweller, Cognitive Load Theory"
+citation is gone: the 1988 paper is not about chunk capacity at all, and Baddeley & Hitch is cited
+only for working memory having structure, never for the capacity limit itself.
 ⚠ Adolescents and young adults with ADHD show a **disproportionate** accuracy drop as working-memory
 load rises — a significant diagnosis-by-load interaction (Mukherjee et al., 2021, *NeuroImage:
 Clinical* 30). The draft credited this to "Karalunas et al." and then, after the first correction, to
 Roberts, Milich & Fillmore — whose abstract reports **no** group difference in load-driven disruption
 on the working-memory task. Both were wrong; this one was checked against the paper's own result. `ADHD`
-→ **Rules:** max 3–5 items per list; one concept per paragraph; never more than one decision at a time.
+→ **Rules:** cap how many steps are shown at once (`max_list_items`); one concept per paragraph;
+never more than one decision at a time.
 
 **Incremental presentation and external cues reduce load.** `general working memory`
 ⚠ **Retagged, and its ADHD sourcing withdrawn.** No ADHD study tests cues or incremental presentation
