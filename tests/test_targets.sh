@@ -121,6 +121,37 @@ make_full_scratch() {
   printf '%s\n' "$scratch"
 }
 
+# --- NO SCENARIO IN THIS FILE MAY INVOKE THE REAL REPO'S build.sh -------
+#
+# build.sh derives its own repo_root from its own location, so running
+# "$build_script" (the repo's own copy) WRITES all ten generated
+# artifacts into the working tree under test. Scenario 6's idempotence
+# half used to do exactly that; see its own comment for what that cost.
+# Every build.sh invocation in this file goes through make_full_scratch
+# above and runs "$scratch/scripts/build.sh" instead. $build_script is
+# read (and copied) but never executed.
+#
+# generated_target_rel_paths is every generated file under targets/ -
+# the two derived from rules/base-rules.md AND the six ported from
+# skills/*/SKILL.md - and is used both by scenario 6's drift check and
+# by the tripwire at the bottom of this file.
+generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md"
+
+repo_generated_snapshot() {
+  # Prints one "<rel> <cksum>" line per generated targets/ artifact,
+  # with the volatile absolute path stripped (cksum reads stdin, so it
+  # prints no filename), so two calls compare equal iff every one of
+  # those files is byte-identical.
+  for rel in $generated_target_rel_paths; do
+    if [ -f "$repo_root/$rel" ]; then
+      printf '%s %s\n' "$rel" "$(cksum <"$repo_root/$rel")"
+    else
+      printf '%s MISSING\n' "$rel"
+    fi
+  done
+}
+repo_generated_before=$(repo_generated_snapshot)
+
 tree_snapshot() {
   # tree_snapshot <dir>: a deterministic, sorted "<cksum> <size> <path>"
   # line per regular file under <dir>. cksum is used (not md5/md5sum)
@@ -281,29 +312,66 @@ for cmd_name in digest plan; do
 done
 
 # ==========================================================================
-# 6. Idempotence and drift for the six ported artifacts.
+# 6. Idempotence and drift for ALL EIGHT generated artifacts under
+#    targets/.
+#
+#    TWO defects were fixed here, and both are load-bearing:
+#
+#    a) COVERAGE. This scenario used to list only the six PORTED
+#       artifacts (4 Codex SKILL.md + 2 Cursor commands) and omit the
+#       two that targets/ also ships from rules/base-rules.md:
+#       targets/codex/AGENTS.md and targets/cursor/squirrel-mode.mdc.
+#       A hand-edit to either of those - e.g. flipping the .mdc's
+#       `alwaysApply: true` to `false` - passed this whole file clean.
+#       The list below is now every generated file under targets/,
+#       whichever source it derives from.
+#
+#    b) THE TEST MUST NOT WRITE INTO THE TREE IT IS TESTING. The
+#       idempotence half used to invoke "$build_script" - the REPO's own
+#       copy - and build.sh derives its repo_root from its own location,
+#       so that run regenerated all ten artifacts straight into the
+#       working tree under test. A genuine drift was therefore
+#       reportable exactly ONCE: the same run that reported it had
+#       already rewritten the file back to canonical, `git status
+#       --porcelain` came back empty afterwards, and every later run
+#       passed. Idempotence is a property of build.sh, not of the
+#       repository, so it is proven below by building TWICE inside one
+#       make_full_scratch copy. The repository working tree is READ ONLY
+#       for the whole of this file, and the tripwire at the bottom
+#       asserts that outright.
+#
+#    generated_target_rel_paths is defined near the top of this file,
+#    next to repo_generated_snapshot, because the tripwire needs the
+#    same list before scenario 1 runs.
 # ==========================================================================
-ported_rel_paths="targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md"
-
-snap_before=""
-for rel in $ported_rel_paths; do
-  snap_before="$snap_before
-$(cksum "$repo_root/$rel")"
-done
-
-if idem_build_out=$("$build_script" 2>&1); then
+idem_scratch=$(make_full_scratch)
+cleanup_dirs="$cleanup_dirs $idem_scratch"
+if idem_build_out=$("$idem_scratch/scripts/build.sh" 2>&1); then
   idem_build_exit=0
 else
   idem_build_exit=$?
 fi
-assert_eq "0" "$idem_build_exit" "scripts/build.sh must exit 0 when re-run against the real repo -- output: $idem_build_out"
+assert_eq "0" "$idem_build_exit" "scripts/build.sh (first run, scratch) must exit 0 -- output: $idem_build_out"
+
+snap_before=""
+for rel in $generated_target_rel_paths; do
+  snap_before="$snap_before
+$rel $(cksum <"$idem_scratch/$rel")"
+done
+
+if idem_build2_out=$("$idem_scratch/scripts/build.sh" 2>&1); then
+  idem_build2_exit=0
+else
+  idem_build2_exit=$?
+fi
+assert_eq "0" "$idem_build2_exit" "scripts/build.sh (second run, same scratch) must exit 0 -- output: $idem_build2_out"
 
 snap_after=""
-for rel in $ported_rel_paths; do
+for rel in $generated_target_rel_paths; do
   snap_after="$snap_after
-$(cksum "$repo_root/$rel")"
+$rel $(cksum <"$idem_scratch/$rel")"
 done
-assert_eq "$snap_before" "$snap_after" "the six ported artifacts must be byte-identical across two consecutive build.sh runs (idempotence)"
+assert_eq "$snap_before" "$snap_after" "all eight generated targets/ artifacts must be byte-identical across two consecutive build.sh runs (idempotence)"
 
 drift_scratch=$(make_full_scratch)
 cleanup_dirs="$cleanup_dirs $drift_scratch"
@@ -312,15 +380,15 @@ if drift_build_out=$("$drift_scratch/scripts/build.sh" 2>&1); then
 else
   drift_build_exit=$?
 fi
-assert_eq "0" "$drift_build_exit" "regenerating the ported artifacts into a full scratch directory must succeed -- output: $drift_build_out"
+assert_eq "0" "$drift_build_exit" "regenerating the targets/ artifacts into a full scratch directory must succeed -- output: $drift_build_out"
 
-for rel in $ported_rel_paths; do
+for rel in $generated_target_rel_paths; do
   if drift_diff=$(diff -u "$repo_root/$rel" "$drift_scratch/$rel" 2>&1); then
     drift_status=identical
   else
     drift_status="DRIFT DETECTED: $drift_diff"
   fi
-  assert_eq "identical" "$drift_status" "committed $rel must match a fresh regeneration from skills/*/SKILL.md (no drift)"
+  assert_eq "identical" "$drift_status" "committed $rel must match a fresh regeneration from its own source (no drift)"
 done
 
 # ==========================================================================
@@ -1908,5 +1976,21 @@ assert_eq "0" "$exit39c" "39c: --uninstall --yes must exit 0 with unrelated cont
 assert_file_absent "$home39c/.agents/skills" "39c: ~/.agents/skills must still be removed once our four files are gone from it"
 assert_file_exists "$home39c/.agents/notes.md" "39c: an unrelated file directly under ~/.agents must survive - the rmdir of a non-empty ~/.agents must fail harmlessly, never escalate to a recursive removal"
 assert_eq "identical" "$(files_byte_status "$snapshot39c" "$home39c/.agents/notes.md")" "39c: that unrelated file must be byte-unchanged"
+
+# ==========================================================================
+# 40. Tripwire: running this test file must not have written a single
+#     byte into the repository working tree.
+#
+#     The counted, always-on form of the "NO SCENARIO IN THIS FILE MAY
+#     INVOKE THE REAL REPO'S build.sh" note at the top. Against an
+#     already-clean tree it can only pass (build.sh is idempotent, so
+#     even the old repo-targeted run left the bytes unchanged); against
+#     a DRIFTED tree it is the assertion that turns "the test run
+#     silently repaired the drift" - which is how a real hand-edit
+#     stayed reportable exactly once and never again - into a loud,
+#     permanent failure.
+# ==========================================================================
+repo_generated_after=$(repo_generated_snapshot)
+assert_eq "$repo_generated_before" "$repo_generated_after" "running tests/test_targets.sh must leave every generated targets/ artifact in the repository working tree byte-identical (no scenario may build into the real repo)"
 
 assert_report

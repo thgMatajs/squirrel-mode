@@ -128,59 +128,6 @@ read_file() {
   fi
 }
 
-# ==========================================================================
-# 1. scripts/build.sh exists and is executable.
-# ==========================================================================
-assert_file_exists "$build_script" "scripts/build.sh must exist"
-if [ -x "$build_script" ]; then
-  build_script_executable=yes
-else
-  build_script_executable=no
-fi
-assert_eq "yes" "$build_script_executable" "scripts/build.sh must be executable"
-
-# ==========================================================================
-# 2. Idempotence: run the build, snapshot all four artifacts, run again,
-#    assert byte-identical.
-# ==========================================================================
-snapshot_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-idempotence.XXXXXX")
-cleanup_dirs="$cleanup_dirs $snapshot_dir"
-
-if idempotence_run1_output=$("$build_script" 2>&1); then
-  idempotence_run1_exit=0
-else
-  idempotence_run1_exit=$?
-fi
-assert_eq "0" "$idempotence_run1_exit" "scripts/build.sh (first run) must exit 0 -- output: $idempotence_run1_output"
-
-cp "$output_style_file" "$snapshot_dir/output-style.md" 2>/dev/null || true
-cp "$skill_file" "$snapshot_dir/skill.md" 2>/dev/null || true
-cp "$codex_file" "$snapshot_dir/codex.md" 2>/dev/null || true
-cp "$cursor_file" "$snapshot_dir/cursor.mdc" 2>/dev/null || true
-
-if idempotence_run2_output=$("$build_script" 2>&1); then
-  idempotence_run2_exit=0
-else
-  idempotence_run2_exit=$?
-fi
-assert_eq "0" "$idempotence_run2_exit" "scripts/build.sh (second run) must exit 0 -- output: $idempotence_run2_output"
-
-for pair in "output-style.md:$output_style_file" "skill.md:$skill_file" "codex.md:$codex_file" "cursor.mdc:$cursor_file"; do
-  snap_name=${pair%%:*}
-  real_path=${pair#*:}
-  if diff_output=$(diff -u "$snapshot_dir/$snap_name" "$real_path" 2>&1); then
-    idempotent_status=identical
-  else
-    idempotent_status="DIFFERS: $diff_output"
-  fi
-  assert_eq "identical" "$idempotent_status" "$real_path must be byte-identical across two consecutive build.sh runs (idempotence)"
-done
-
-# ==========================================================================
-# 3. Drift: regenerate into a temporary directory and diff against the
-#    committed artifacts. This is the check CI relies on to keep
-#    "generated files are committed" safe.
-# ==========================================================================
 # make_build_scratch: creates a throwaway directory containing
 # scripts/build.sh, rules/base-rules.md, AND the four real
 # skills/{digest,plan,init,tune}/SKILL.md sources (build.sh resolves
@@ -201,6 +148,11 @@ done
 # tolerance is gone from build.sh now - a missing source is a loud,
 # whole-build failure - so this fixture supplies real sources instead
 # of relying on build.sh to cope with their absence.
+#
+# Defined HERE, before the first scenario that needs it, because every
+# scenario in this file that runs build.sh at all now runs it through
+# this fixture -- see the "no scenario in this file may invoke the real
+# repo's build.sh" note just below.
 make_build_scratch() {
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-build-scratch.XXXXXX")
   mkdir -p "$scratch/scripts" "$scratch/rules" "$scratch/skills"
@@ -214,6 +166,103 @@ make_build_scratch() {
   printf '%s\n' "$scratch"
 }
 
+# --- NO SCENARIO IN THIS FILE MAY INVOKE THE REAL REPO'S build.sh -------
+#
+# build.sh derives its own repo_root from its own location, so running
+# "$build_script" (the repo's own copy) WRITES all ten generated
+# artifacts into the working tree under test. Scenarios 2, 13 and 13b
+# used to do exactly that, and the consequence was not theoretical: a
+# real drift -- e.g. a hand-edited `alwaysApply: false` in the committed
+# targets/cursor/squirrel-mode.mdc -- was reported by scenario 3 exactly
+# ONCE, because the very same run had already silently rewritten the
+# file back to canonical. `git status --porcelain` came back empty after
+# the failing run, and every later run passed: a test run REPAIRED the
+# defect it exists to report, destroying the evidence and making the
+# failure unreproducible.
+#
+# Every build.sh invocation below therefore goes through
+# make_build_scratch above and runs "$scratch/scripts/build.sh". The
+# repository working tree is READ ONLY for the whole of this file, and
+# the repo_generated_* tripwire at the bottom asserts that outright.
+repo_generated_rel_paths="output-styles/squirrel-mode.md skills/rules/SKILL.md targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md"
+repo_generated_snapshot() {
+  # Prints one cksum line per generated artifact, with the volatile
+  # absolute path stripped, so the result compares equal across two
+  # calls iff every one of those files is byte-identical.
+  for rel in $repo_generated_rel_paths; do
+    if [ -f "$repo_root/$rel" ]; then
+      printf '%s %s\n' "$rel" "$(cksum <"$repo_root/$rel")"
+    else
+      printf '%s MISSING\n' "$rel"
+    fi
+  done
+}
+repo_generated_before=$(repo_generated_snapshot)
+
+# ==========================================================================
+# 1. scripts/build.sh exists and is executable.
+# ==========================================================================
+assert_file_exists "$build_script" "scripts/build.sh must exist"
+if [ -x "$build_script" ]; then
+  build_script_executable=yes
+else
+  build_script_executable=no
+fi
+assert_eq "yes" "$build_script_executable" "scripts/build.sh must be executable"
+
+# ==========================================================================
+# 2. Idempotence: build twice IN A SCRATCH DIRECTORY, snapshot all four
+#    rules-derived artifacts between the two runs, assert byte-identical.
+#
+#    Deliberately run against a make_build_scratch copy, never against
+#    "$build_script" itself: see the "NO SCENARIO IN THIS FILE MAY
+#    INVOKE THE REAL REPO'S build.sh" note above. Idempotence is a
+#    property of build.sh, not of the repository working tree, so a
+#    scratch copy fed the real rules/base-rules.md and the real
+#    skills/*/SKILL.md proves exactly the same thing without writing a
+#    single byte into the repo.
+# ==========================================================================
+idempotence_scratch=$(make_build_scratch)
+cleanup_dirs="$cleanup_dirs $idempotence_scratch"
+snapshot_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-idempotence.XXXXXX")
+cleanup_dirs="$cleanup_dirs $snapshot_dir"
+
+if idempotence_run1_output=$("$idempotence_scratch/scripts/build.sh" 2>&1); then
+  idempotence_run1_exit=0
+else
+  idempotence_run1_exit=$?
+fi
+assert_eq "0" "$idempotence_run1_exit" "scripts/build.sh (first run) must exit 0 -- output: $idempotence_run1_output"
+
+cp "$idempotence_scratch/output-styles/squirrel-mode.md" "$snapshot_dir/output-style.md" 2>/dev/null || true
+cp "$idempotence_scratch/skills/rules/SKILL.md" "$snapshot_dir/skill.md" 2>/dev/null || true
+cp "$idempotence_scratch/targets/codex/AGENTS.md" "$snapshot_dir/codex.md" 2>/dev/null || true
+cp "$idempotence_scratch/targets/cursor/squirrel-mode.mdc" "$snapshot_dir/cursor.mdc" 2>/dev/null || true
+
+if idempotence_run2_output=$("$idempotence_scratch/scripts/build.sh" 2>&1); then
+  idempotence_run2_exit=0
+else
+  idempotence_run2_exit=$?
+fi
+assert_eq "0" "$idempotence_run2_exit" "scripts/build.sh (second run) must exit 0 -- output: $idempotence_run2_output"
+
+for pair in "output-style.md:output-styles/squirrel-mode.md" "skill.md:skills/rules/SKILL.md" "codex.md:targets/codex/AGENTS.md" "cursor.mdc:targets/cursor/squirrel-mode.mdc"; do
+  snap_name=${pair%%:*}
+  rel_path=${pair#*:}
+  if diff_output=$(diff -u "$snapshot_dir/$snap_name" "$idempotence_scratch/$rel_path" 2>&1); then
+    idempotent_status=identical
+  else
+    idempotent_status="DIFFERS: $diff_output"
+  fi
+  assert_eq "identical" "$idempotent_status" "$rel_path must be byte-identical across two consecutive build.sh runs (idempotence)"
+done
+rm -rf "$idempotence_scratch"
+
+# ==========================================================================
+# 3. Drift: regenerate into a temporary directory and diff against the
+#    committed artifacts. This is the check CI relies on to keep
+#    "generated files are committed" safe.
+# ==========================================================================
 drift_scratch=$(make_build_scratch)
 if drift_build_output=$("$drift_scratch/scripts/build.sh" 2>&1); then
   drift_build_exit=0
@@ -223,10 +272,13 @@ fi
 assert_eq "0" "$drift_build_exit" "regenerating into a scratch directory must succeed -- output: $drift_build_output"
 
 # Compared against the FROZEN committed_snapshot_dir captured at the top
-# of this file, not against "$repo_root/$rel" directly: scenario 2 above
-# already ran build.sh against the real repo, which would have silently
-# regenerated any hand-edited (drifted) artifact back to canonical
-# BEFORE this point, making a live-file comparison here tautological.
+# of this file rather than against "$repo_root/$rel" directly. Scenario
+# 2 no longer builds into the real repo at all (it runs a
+# make_build_scratch copy), so a live-file comparison here would be
+# correct today -- but the freeze is kept deliberately as a second line
+# of defence: it is what makes this drift check independent of anything
+# a scenario running earlier in this same process might do to the
+# working tree, which is exactly the property that failed before.
 for pair in "output-styles/squirrel-mode.md:output-style.md" "skills/rules/SKILL.md:skill.md" "targets/codex/AGENTS.md:codex.md" "targets/cursor/squirrel-mode.mdc:cursor.mdc"; do
   rel=${pair%%:*}
   snap_name=${pair#*:}
@@ -786,40 +838,54 @@ assert_eq "16" "$real_rule_count" "sanity: the real rules/base-rules.md must sti
 
 # ==========================================================================
 # 13. build.sh works from a different cwd.
+#
+#     The property under test is that build.sh resolves its own repo
+#     root from its own LOCATION and never from $PWD, so the artifacts
+#     land next to the script no matter where it was invoked from. That
+#     is proven just as well - and without writing into the repository
+#     working tree, see the note at the top of this file - by invoking a
+#     make_build_scratch copy from an unrelated cwd and asserting the
+#     artifacts landed inside the SCRATCH root.
 # ==========================================================================
-if cwd_run_output=$(cd / && "$build_script" 2>&1); then
+cwd_scratch=$(make_build_scratch)
+cleanup_dirs="$cleanup_dirs $cwd_scratch"
+if cwd_run_output=$(cd / && "$cwd_scratch/scripts/build.sh" 2>&1); then
   cwd_run_exit=0
 else
   cwd_run_exit=$?
 fi
 assert_eq "0" "$cwd_run_exit" "scripts/build.sh must succeed when invoked from a different cwd (/) -- output: $cwd_run_output"
-assert_file_exists "$output_style_file" "output-styles/squirrel-mode.md must still land at the repo path after a run from a different cwd"
-assert_file_exists "$skill_file" "skills/rules/SKILL.md must still land at the repo path after a run from a different cwd"
-assert_file_exists "$codex_file" "targets/codex/AGENTS.md must still land at the repo path after a run from a different cwd"
-assert_file_exists "$cursor_file" "targets/cursor/squirrel-mode.mdc must still land at the repo path after a run from a different cwd"
-assert_eq "16" "$(count_rule_headings "$output_style_file")" "output style must still have 16 rules after a run from a different cwd"
-assert_eq "15" "$(count_rule_headings "$codex_file")" "Codex AGENTS.md must still have 15 rules after a run from a different cwd"
+assert_file_exists "$cwd_scratch/output-styles/squirrel-mode.md" "output-styles/squirrel-mode.md must still land at the script's own repo-root-relative path after a run from a different cwd"
+assert_file_exists "$cwd_scratch/skills/rules/SKILL.md" "skills/rules/SKILL.md must still land at the script's own repo-root-relative path after a run from a different cwd"
+assert_file_exists "$cwd_scratch/targets/codex/AGENTS.md" "targets/codex/AGENTS.md must still land at the script's own repo-root-relative path after a run from a different cwd"
+assert_file_exists "$cwd_scratch/targets/cursor/squirrel-mode.mdc" "targets/cursor/squirrel-mode.mdc must still land at the script's own repo-root-relative path after a run from a different cwd"
+assert_eq "16" "$(count_rule_headings "$cwd_scratch/output-styles/squirrel-mode.md")" "output style must still have 16 rules after a run from a different cwd"
+assert_eq "15" "$(count_rule_headings "$cwd_scratch/targets/codex/AGENTS.md")" "Codex AGENTS.md must still have 15 rules after a run from a different cwd"
 
-if cwd_run2_output=$(cd "$script_dir" && "$build_script" 2>&1); then
+if cwd_run2_output=$(cd "$script_dir" && "$cwd_scratch/scripts/build.sh" 2>&1); then
   cwd_run2_exit=0
 else
   cwd_run2_exit=$?
 fi
 assert_eq "0" "$cwd_run2_exit" "scripts/build.sh must succeed when invoked from tests/ -- output: $cwd_run2_output"
-assert_file_exists "$cursor_file" "targets/cursor/squirrel-mode.mdc must still land at the repo path after a run from tests/"
+assert_file_exists "$cwd_scratch/targets/cursor/squirrel-mode.mdc" "targets/cursor/squirrel-mode.mdc must still land at the script's own repo-root-relative path after a run from tests/"
+rm -rf "$cwd_scratch"
 
 # 13b (A10, S7 review). CDPATH hardening: a CDPATH entry containing "."
-# must not break build.sh. Invoked via a RELATIVE path from repo_root
-# (not $build_script's own absolute path) - CDPATH only affects `cd`
+# must not break build.sh. Invoked via a RELATIVE path from the scratch
+# root (not the script's own absolute path) - CDPATH only affects `cd`
 # when its operand does not already start with "/" or ".", so an
 # absolute invocation (as scenario 13 above uses) would never exercise
 # the bug this guards against.
-if cdpath_run_output=$(cd "$repo_root" && CDPATH=. sh scripts/build.sh 2>&1); then
+cdpath_scratch=$(make_build_scratch)
+cleanup_dirs="$cleanup_dirs $cdpath_scratch"
+if cdpath_run_output=$(cd "$cdpath_scratch" && CDPATH=. sh scripts/build.sh 2>&1); then
   cdpath_run_exit=0
 else
   cdpath_run_exit=$?
 fi
 assert_eq "0" "$cdpath_run_exit" "scripts/build.sh must succeed with CDPATH=. set, invoked via a relative path (A10) -- output: $cdpath_run_output"
+rm -rf "$cdpath_scratch"
 
 # ==========================================================================
 # 14. Atomicity: a write failure on one target must not leave the tree
@@ -1479,5 +1545,22 @@ assert_eq "1" "$ad2_to_exit" "AD2: a synthetic 'rules 13 to 15' range whose inte
 assert_contains "$ad2_to_output" "rule 16" "AD2 ('to' form): the failure must name the citing rule (16) -- output: $ad2_to_output"
 assert_contains "$ad2_to_output" "rule 14" "AD2 ('to' form): the failure must name the cited rule (14) -- output: $ad2_to_output"
 rm -rf "$ad2_to_scratch"
+
+# ==========================================================================
+# 21. Tripwire: running this test file must not have written a single
+#     byte into the repository working tree.
+#
+#     This is the counted, always-on form of the "NO SCENARIO IN THIS
+#     FILE MAY INVOKE THE REAL REPO'S build.sh" note at the top. It
+#     compares the ten generated artifacts' cksums against the snapshot
+#     taken before scenario 1 ran. Against an already-clean tree it can
+#     only pass (build.sh is idempotent, so even the old repo-targeted
+#     runs left the bytes unchanged); against a DRIFTED tree it is the
+#     assertion that turns "the test run silently repaired the drift" -
+#     which is how a real hand-edit stayed reportable exactly once and
+#     never again - into a loud, permanent failure.
+# ==========================================================================
+repo_generated_after=$(repo_generated_snapshot)
+assert_eq "$repo_generated_before" "$repo_generated_after" "running tests/test_build.sh must leave every generated artifact in the repository working tree byte-identical (no scenario may build into the real repo)"
 
 assert_report
