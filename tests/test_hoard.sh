@@ -349,4 +349,48 @@ else
 fi
 assert_eq "yes" "$mutant10_leaks" "FAILURE PROOF (scenarios 9-10): removing the zero-relevance filter must make a non-matching query return results - if it does not, scenario 9's empty result is being produced by something other than the filter"
 
+# ==========================================================================
+# 11. The stash skill's contract. Asserted here rather than in
+#     test_skills.sh because these are hoard semantics, not skill
+#     structure - test_skills.sh already covers frontmatter and naming.
+# ==========================================================================
+stash_file="$repo_root/skills/stash/SKILL.md"
+assert_file_exists "$stash_file" "skills/stash/SKILL.md must exist"
+stash_body=$(cat "$stash_file" 2>/dev/null || printf '')
+
+# shellcheck disable=SC2088 # single-quoted deliberately: this is a
+# literal needle assert_contains searches the file's TEXT for (the
+# documented path as written in prose), never a path this shell opens or
+# expands - a leading "~" here is not tilde-expansion gone wrong.
+assert_contains "$stash_body" '~/.squirrel/hoard/' "stash must name the hoard directory - a memory written anywhere else is not findable"
+assert_contains "$stash_body" "Write" "stash must name the Write tool: only Write, Edit and Read carry the auto-approval, and a Bash heredoc would stop to ask"
+assert_contains "$stash_body" "never inside the project" "stash must state that nothing is ever written inside a project repository"
+assert_contains "$stash_body" "superseded_by" "stash must specify the full frontmatter, superseded_by included - the reader assumes every key is present"
+assert_contains "$stash_body" "date -u +%Y%m%dT%H%M%SZ" "stash must name the exact timestamp command, or two memories written by different sessions get incomparable stamps"
+assert_contains "$stash_body" "supersede" "stash must instruct superseding rather than editing when a fact changed"
+assert_contains "$stash_body" "Show the title and body" "stash must show the user what it is about to write - a memory the user never saw is one they cannot correct"
+
+# The four types, all of them, spelled out.
+for stash_type in feedback decision episode reference; do
+  assert_contains "$stash_body" "$stash_type" "stash must name the '$stash_type' type"
+done
+assert_not_contains "$stash_body" "type: session" "stash must NOT offer a session type - the checkpoint covers that, and a session memory would pollute the store"
+
+# ==========================================================================
+# 11b. FAILURE PROOF: deleting the paragraph that names the Write tool
+#      must remove the phrase, proving the assertion above binds to that
+#      instruction and not to an unrelated mention of the same word.
+# ==========================================================================
+stash_mutant=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-skill.XXXXXX")
+cleanup_paths="$cleanup_paths $stash_mutant"
+grep -vF 'Write' "$stash_file" >"$stash_mutant" || true
+stash_mutant_body=$(cat "$stash_mutant" 2>/dev/null || printf '')
+if printf '%s' "$stash_mutant_body" | grep -qF 'Write'; then
+  stash_mutant_has_write=yes
+else
+  stash_mutant_has_write=no
+fi
+assert_eq "no" "$stash_mutant_has_write" "FAILURE PROOF (scenario 11): a copy with every 'Write' line removed must not contain 'Write' - proving the tool-naming assertion is not matching some other line"
+assert_contains "$stash_mutant_body" "superseded_by" "FAILURE PROOF (scenario 11, independence): removing the Write lines must leave the frontmatter specification intact"
+
 assert_report

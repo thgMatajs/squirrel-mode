@@ -83,12 +83,12 @@ first_byte_offset_in_string() {
 }
 
 # The seven new command skills. Order matches PLAN.md Section 3.
-new_skill_names="init tune digest plan pickup off on"
+new_skill_names="init tune digest plan pickup off on stash"
 
 # Skills that must carry disable-model-invocation: true - the model must
 # never start these on its own initiative (calibration interview, tuning,
 # or flipping the plugin's own on/off state).
-disabled_invocation_names="init tune off on"
+disabled_invocation_names="init tune off on stash"
 # Skills that must NOT carry that key at all - they stay model-invocable,
 # with descriptions tight enough not to hijack ordinary requests.
 model_invocable_names="digest plan pickup"
@@ -775,7 +775,15 @@ done
 #     warm, terse, code-first, ...) contains an underscore, and no other
 #     backtick-quoted token in these skills (paths, session ids, command
 #     names) is written as a bare lowercase-plus-underscore word.
+#
+#     `stash` is deliberately excluded from this scan: it names hoard
+#     frontmatter fields (`last_used`, `superseded_by`, ...), not profile
+#     fields, and those happen to share the same lowercase-plus-underscore
+#     shape - they would false-positive against a list of profile field
+#     names they were never claiming to be. Scenario 15 above still checks
+#     `stash` for the one real cross-cutting field, `language`.
 # ==========================================================================
+profile_field_skill_names="init tune digest plan pickup off on"
 plan_file="$repo_root/PLAN.md"
 valid_fields=$(awk '
   /^### The profile/ { in_section=1 }
@@ -801,7 +809,7 @@ is_valid_field() {
 }
 
 unknown_field_hits=""
-for name in $new_skill_names; do
+for name in $profile_field_skill_names; do
   f=$(skill_file_for "$name")
   # shellcheck disable=SC2016 # single-quoted deliberately: the backtick
   # here is a literal character in the grep pattern (matching a Markdown
@@ -824,7 +832,7 @@ valid_field_count=$(printf '%s\n' "$valid_fields" | sed '/^$/d' | wc -l | awk '{
 assert_eq "11" "$valid_field_count" "PLAN.md's profile example must yield exactly 11 field names (vacuous-pass guard for scenario 16)"
 
 # ==========================================================================
-# 17. skills/ contains exactly the eight expected entries: the seven new
+# 17. skills/ contains exactly the nine expected entries: the eight new
 #     command skills plus the generated rules/. A stray directory (or
 #     file) must fail this.
 # ==========================================================================
@@ -835,7 +843,7 @@ for entry in "$skills_dir"/* "$skills_dir"/.[!.]* "$skills_dir"/..?*; do
   fi
 done
 skills_listing=$(printf '%s\n' "$skills_entries" | tr -s ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//')
-assert_eq "digest init off on pickup plan rules tune" "$skills_listing" "skills/ must contain exactly the 8 expected entries (7 new command skills + generated rules/), nothing else"
+assert_eq "digest init off on pickup plan rules stash tune" "$skills_listing" "skills/ must contain exactly the 9 expected entries (8 new command skills + generated rules/), nothing else"
 
 # ==========================================================================
 # 18. No obsolete .gitkeep remains under skills/ (none of the seven new
