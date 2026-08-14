@@ -312,14 +312,21 @@ given the result rather than the means), applied one level further out. With the
 **Two properties keep the new line from becoming its own surface.**
 
 1. **The block's header carries this session's off-token.** `build_context` quotes `profile.md` into
-   the same `additionalContext` FIRST and VERBATIM, so profile text can spell any line it likes,
-   including a perfect copy of the header followed by paths of an attacker's choosing — and
+   the same `additionalContext` FIRST, so profile text COULD otherwise spell any of these lines
+   exactly, including a perfect copy of the header followed by paths of an attacker's choosing — and
    `/squirrel:tune` writes `profile.md` from user-dictated text, so "the profile is trusted" was
    never available as an answer. The token is derived from the `session_id` this hook was handed on
    stdin, so a `profile.md` written before this session started cannot contain it. It rides on the
    incompleteness marker below for the sharper version of the same reason: a marker is an
    *instruction to go enumerate*, and unbound it would be a way for profile text to spend a
    permission prompt.
+
+   **Amended (task 7b).** The quoting is no longer bare: `neutralise_forged_lines` in
+   `scripts/load-profile.sh` marks any body line that begins with one of squirrel-mode's own
+   injected prefixes — the header's and the marker's included — so such a line no longer reaches the
+   model beginning that way. Nothing above is relaxed on the strength of it, and the token stays
+   exactly as load-bearing as it was: that step fails open, and the token is what holds when it
+   does. Two independent layers, either sufficient alone.
 2. **A block that left something out says so.** It closes with
    `(more checkpoint files exist in that directory than are listed here - session <token>)` on
    exactly two conditions — the `CHECKPOINT_LIST_MAX_FILES` cap, and a real checkpoint whose filename

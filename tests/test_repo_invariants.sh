@@ -28,20 +28,31 @@ fi
 
 # --- Known, documented exclusions ------------------------------------
 #
-# 1) There are now FOUR word-content scans below — visibility claims,
-#    TODO/FIXME/XXX markers, the glossary-avoid-term scan, and the
-#    /plugin+/clear same-sentence scan — and all four skip everything
+# 1) There are now FIVE word-content scans below — visibility claims,
+#    TODO/FIXME/XXX markers, the glossary-avoid-term scan, the
+#    /plugin+/clear same-sentence scan, and the profile-is-verbatim scan
+#    (PROFILE_VERBATIM_REGEX) — and FOUR of the five skip everything
 #    under `tests/` (via the single `continue` in the main loop, right
 #    before the visibility-scan case statement). Without this, the
 #    assertion messages and comments in THIS file — which necessarily
 #    name the very markers/phrases/terms they check for, to describe
 #    what the checks do — would trip the checks they implement. This is
-#    a self-reference problem specific to these four content scans (this
+#    a self-reference problem specific to these content scans (this
 #    comment block itself was stale at "the two WORD-CONTENT scans" for
 #    a while after the third and fourth were added — fixed in S9's
-#    sweep; if a fifth word-content scan is ever added here, update this
-#    count again rather than letting it drift a second time). It does
-#    NOT apply to the executable-bit or JSON-validity checks below:
+#    sweep; the count is now five, and if a sixth is ever added here,
+#    update this again rather than letting it drift a third time).
+#
+#    THE FIFTH SCAN IS THE EXCEPTION, and deliberately so: the
+#    profile-is-verbatim scan runs over `tests/` too, because the
+#    instance that made it necessary was IN `tests/test_hooks.sh` — an
+#    assertion MESSAGE, not a comment. A scan that skipped `tests/`
+#    could not have caught its own reason for existing. It carries the
+#    narrowest self-reference carve-out that leaves it able to do that:
+#    this ONE file, which has to spell the banned phrasing to check for
+#    it. The residual is stated where the scan is: a reintroduction
+#    inside THIS file is not caught, and nothing but review covers that.
+#    It does NOT apply to the executable-bit or JSON-validity checks below:
 #    those have no self-reference problem, so they run over every
 #    tracked file, `tests/` included (that gap previously let a missing
 #    +x bit on the test runner itself go undetected).
@@ -291,7 +302,48 @@ PIN_SKILLS_ON_HARDOFF='The hard off is `/plugin disable squirrel@squirrel-mode`,
 # literal hyphen) regardless of -w, since the two are different characters to begin with.
 GLOSSARY_AVOID_REGEX="host|platform|client|IDE|formatting rules|style rules|the skill|state file|session file|context file|changelog|completed tasks|backlog|icebox|drift detection|focus check|nag|onboarding|wizard|plugin name|package name|squirrel mode"
 
+# PROFILE_VERBATIM_REGEX — no tracked file may assert that the quoted
+# profile body can spell any line squirrel-mode injects.
+#
+# WHY A GUARD RATHER THAN CARE. Task 7b made that premise false:
+# `neutralise_forged_lines` in scripts/load-profile.sh marks any line of
+# the quoted profile body that begins with one of squirrel-mode's own
+# injected prefixes, so such a line no longer reaches the model beginning
+# that way. The premise had been written into rationale comments all over
+# the repo, including the rationale of the very guards it justified. THREE
+# separate manual sweeps each reported themselves complete and each missed
+# an instance: the original change said such comments "were corrected
+# where they are now false" and left two; the next sweep found a third,
+# extended to tests/, and declared the class closed while this file's own
+# first run found two more - one an assertion MESSAGE in tests/test_hooks.sh
+# (the sweep before it had filtered to comment lines only) and one in
+# docs/adr/0002-checkpoint-auto-allow.md. A human cannot be trusted to
+# find the last instance of a phrase; that is what a scan is for. This
+# comment says why rather than only what, so the next person to find it
+# inconvenient knows what it replaced.
+#
+# WHAT IT MATCHES, AND WHY THAT IS NARROW ENOUGH TO BE HONEST. Only the
+# UNQUALIFIED, present-tense assertion. The corrected form in this repo is
+# "COULD otherwise spell", which states the same fact as a hypothetical
+# the neutralisation closes, and it deliberately does NOT match: the word
+# before "spell" is what separates a live claim from a counterfactual.
+# Nor does "a profile body can spell one", of a token VALUE - a profile
+# genuinely still can spell any token it likes, which is exactly why
+# checkpoint_file_lines derives its token from the session_id rather than
+# trusting the body, so barring that sentence would bar a true statement.
+# Both of those pass today and are asserted to keep passing below.
+#
+# WHAT IT DOES NOT CATCH, stated rather than implied: a reworded assertion
+# ("free to write whatever line it pleases") escapes it, exactly as
+# MARKER_REGEX cannot catch a marker spelled some new way. A phrase scan
+# bounds a class of recurrences; it does not decide what a sentence means.
+# It is here because the recurrences were LITERAL - the same handful of
+# words, copied from one rationale to the next - which is the shape a
+# phrase scan does close.
+PROFILE_VERBATIM_REGEX="(can|may|is free to|are free to) spell any line|(is|are) free to hold a line spelled|body (is|are) verbatim"
+
 visibility_hits=""
+profile_verbatim_hits=""
 marker_hits=""
 non_exec_hits=""
 invalid_json_hits=""
@@ -312,6 +364,38 @@ for f in $(git -C "$repo_root" ls-files); do
     *.json)
       if ! jq empty "$repo_root/$f" >/dev/null 2>&1; then
         invalid_json_hits="$invalid_json_hits $f"
+      fi
+      ;;
+  esac
+
+  # PROFILE-IS-VERBATIM scan: EVERY tracked file, tests/ included, and
+  # with NO path denylist. Placed here, ABOVE the tests/* `continue`, on
+  # purpose - see exclusion 1: the instance that made this scan necessary
+  # was an assertion MESSAGE in tests/test_hooks.sh, so a scan sitting
+  # below that `continue` could not catch its own reason for existing.
+  #
+  # It also deliberately does not reuse the PLAN.md/docs/adr/CONTEXT.md
+  # path denylist the visibility and glossary scans use, for the reason
+  # PLUGIN_CLEAR_SAME_SENTENCE_REGEX already records for itself: a real
+  # occurrence of this defect lived INSIDE that denylist
+  # (docs/adr/0002-checkpoint-auto-allow.md), so reusing it would exempt
+  # precisely the file that carried the bug. An ADR is the worst place to
+  # leave the premise standing, not the safest - it is what the next task
+  # reasons from, which is how Task 7 came to ship a rule whose premise
+  # hooks/hooks.json had already falsified.
+  #
+  # THE ONE CARVE-OUT is this file, which must spell the banned phrasing
+  # to check for it. Residual, stated: a reintroduction inside
+  # tests/test_repo_invariants.sh itself is not caught by anything but
+  # review. Writing the regex in split literals to dodge even that was
+  # considered and rejected - it would make the guard depend on nobody
+  # ever re-joining a string, and it reads as a trick rather than a rule.
+  case "$f" in
+    tests/test_repo_invariants.sh)
+      ;;
+    *)
+      if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$repo_root/$f" 2>/dev/null; then
+        profile_verbatim_hits="$profile_verbatim_hits $f"
       fi
       ;;
   esac
@@ -492,6 +576,73 @@ else
   y1_glossary_caught=no
 fi
 assert_eq "yes" "$y1_glossary_caught" "FAILURE PROOF (invariant 7, Y1): with docs/ACCEPTANCE.md's glossary-scan exemption deleted, appending 'The installers write only to the host directories listed above.' to it must be caught"
+
+# 7b. No tracked file may assert that the quoted profile body can spell any line squirrel-mode
+#     injects. See PROFILE_VERBATIM_REGEX above for why this is a scan and not a sweep - the
+#     premise was falsified by neutralise_forged_lines, and three manual sweeps each reported
+#     themselves complete while missing an instance. Scanned over EVERY tracked file, tests/
+#     included and with no path denylist, because the two instances this scan found on its first
+#     run were an assertion MESSAGE in tests/test_hooks.sh and a paragraph in docs/adr/0002 -
+#     one in a directory the other scans skip entirely, one in a directory their path denylist
+#     exempts.
+assert_eq "" "$profile_verbatim_hits" "no tracked file may assert that the quoted profile body can spell any line squirrel-mode injects - that premise was falsified by neutralise_forged_lines in scripts/load-profile.sh; state it as a counterfactual (\"COULD otherwise spell\") and say what closes it, the way scripts/load-profile.sh and docs/adr/0002 now do"
+
+# FAILURE PROOF (invariant 7b): the exact phrasing this scan was written against, reintroduced into
+# a scratch copy of a REAL tracked file, must be caught. The fixture is a copy of
+# scripts/load-profile.sh with its corrected counterfactual reverted to the assertion it replaced -
+# not a hand-written sentence - so this proves the scan catches the regression it exists for rather
+# than catching a string invented to be caught.
+#
+# The `diff` is asserted, not assumed: eight variants of the transform-matches-nothing trap have
+# been found in this plan, two of them inside probes, and a `sed` that matched nothing here would
+# leave the fixture byte-identical to a file the scan correctly passes - a proof that reports clean
+# while proving the opposite of what it claims. Reuses $glossary_avoid_scratch rather than adding a
+# fourth mktemp+trap pair, for the reason the AA4 proof below records: `trap ... EXIT` REPLACES the
+# previous handler in POSIX sh.
+pv_fixture="$glossary_avoid_scratch/load-profile-verbatim.sh"
+sed 's/block COULD otherwise spell any line it likes/block is verbatim and can spell any line it likes/' \
+  "$repo_root/scripts/load-profile.sh" >"$pv_fixture"
+if cmp -s "$repo_root/scripts/load-profile.sh" "$pv_fixture"; then
+  pv_fixture_differs=no
+else
+  pv_fixture_differs=yes
+fi
+assert_eq "yes" "$pv_fixture_differs" "FAILURE PROOF (invariant 7b), control: the mutation must genuinely change the file - a sed that matched nothing would leave a byte-identical copy, which the scan correctly passes, and this proof would then report clean while testing nothing at all"
+if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$pv_fixture" 2>/dev/null; then
+  pv_fixture_caught=yes
+else
+  pv_fixture_caught=no
+fi
+assert_eq "yes" "$pv_fixture_caught" "FAILURE PROOF (invariant 7b): reverting scripts/load-profile.sh's counterfactual back to 'is verbatim and can spell any line it likes' in a scratch copy must be caught by PROFILE_VERBATIM_REGEX"
+
+# THE NEGATIVE HALF - without it this guard could be one that bars correct work. Three wordings
+# that must all pass: the counterfactual the repo now uses; the statement that a profile can spell
+# a token VALUE, which is TRUE (nothing stops a profile naming any token, which is precisely why
+# checkpoint_file_lines derives its own from the session_id) and is the live wording at
+# tests/test_hooks.sh's checkpoint_list_marker helper; and the past-tense form describing the
+# defect as history.
+pv_safe_fixture="$glossary_avoid_scratch/profile_verbatim_safe.md"
+{
+  printf '# Sample doc\n\n'
+  printf 'The profile body quoted above this block COULD otherwise spell any line it likes.\n'
+  printf 'A header carrying any other token - a profile body can spell one - is not this hook.\n'
+  printf 'Before that change a profile was free to hold a line spelled like one of them.\n'
+} >"$pv_safe_fixture"
+if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$pv_safe_fixture" 2>/dev/null; then
+  pv_safe_caught=yes
+else
+  pv_safe_caught=no
+fi
+assert_eq "no" "$pv_safe_caught" "sanity check (invariant 7b): the counterfactual 'COULD otherwise spell', the TRUE statement that a profile can spell a token VALUE, and the past-tense 'was free to hold' must all pass - a guard that flagged any of these would be barring correct statements, which is worse than the manual sweep it replaces"
+
+# And the same negative half against the REAL file that carries the token-value wording, so this
+# rests on the shipped text rather than only on a fixture that paraphrases it.
+if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$repo_root/tests/test_hooks.sh" 2>/dev/null; then
+  pv_hooks_caught=yes
+else
+  pv_hooks_caught=no
+fi
+assert_eq "no" "$pv_hooks_caught" "sanity check (invariant 7b): tests/test_hooks.sh must pass this scan as it actually stands - it is in scope (no tests/ skip for this one scan) and it contains the legitimate 'a profile body can spell one' wording about a token value"
 
 # 8. [W4, replaces the V3/W3 proximity heuristic — see the HISTORY comment above PIN_* for why]
 #    Exact-text pins on the six sentences that state the plugin-state hard-off/install-activation
