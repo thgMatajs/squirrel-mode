@@ -28,6 +28,17 @@ once, in one line, then waits — it never starts the interview on its own.
 If it doesn't, run `/clear` or start a new session; the style loads at session start, not
 mid-conversation, so editing rules first is the wrong place to look.
 
+**Keeping it updated:** auto-update is **off** by default for third-party marketplaces like this
+one, so an install stays on whatever version it first fetched. Turn it on once: `/plugin`, then the
+**Marketplaces** tab, then `squirrel-mode`, then **Enable auto-update**. Claude Code checks after
+session start and tells you to run `/reload-plugins` when a newer version lands; the session you
+are in keeps the version it launched with. To update by hand instead, run `claude plugin update
+squirrel@squirrel-mode` and restart, or `/plugin marketplace update squirrel-mode` to refresh only
+the catalog. This is worth doing rather than tracking a version number yourself: v0.4.0 closed a
+path-traversal in the hook that auto-approves checkpoint writes, and an install left on v0.3.2
+keeps that hole with nothing to signal it is there. A `--plugin-dir` checkout needs none of this —
+it reads the directory live, so it is always whatever you last saved.
+
 **Uninstalling:** see [Privacy and what it writes](#privacy-and-what-it-writes) below.
 
 ### Codex
