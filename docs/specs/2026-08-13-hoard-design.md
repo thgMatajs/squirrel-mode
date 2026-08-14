@@ -55,7 +55,7 @@ name of the product.
 | **candidate** | An automatically captured item in the inbox. Not yet a memory. | draft, suggestion, proposal |
 | **brief** | The budgeted block of memories injected at session start. | dump, context, digest |
 
-`digest` is already taken by the skill that restructures inbound content; the brief is the opposite
+`digest` is already taken by the command that restructures inbound content; the brief is the opposite
 direction and never borrows that word.
 
 ## 4. Storage
@@ -164,8 +164,8 @@ files remain the source of truth either way.
 ### 6.2 Why the inbox exists
 
 Automatic capture never becomes truth on its own. A wrong lesson written automatically contaminates
-every later session in every later project, and its provenance is invisible by the time it does
-damage. Promotion is always per-item, with the user reading the text.
+every later session in every later project, and by the time it does damage nobody can tell where it
+came from. Promotion is always per-item, with the user reading the text.
 
 The correction matcher is calibrated for *precision before recall*, and the reason is structural:
 the inbox is human triage, and a matcher that cries wolf destroys the user's willingness to triage

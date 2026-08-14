@@ -1286,7 +1286,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Create: `skills/stash/SKILL.md`
 - Modify: `tests/test_skills.sh:86`, `:91`, `:838`
-- Modify: `tests/test_hoard.sh` (append the skill-contract scenarios)
+- Modify: `tests/test_hoard.sh` (append the command-contract scenarios)
 
 **Interfaces:**
 - Consumes: the auto-approval from tasks 4 and 5.
@@ -1297,7 +1297,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing test**
 
-First, register the skill. In `tests/test_skills.sh`:
+First, register the command. In `tests/test_skills.sh`:
 
 - line 86: `new_skill_names="init tune digest plan pickup off on stash"`
 - line 91: `disabled_invocation_names="init tune off on stash"`
@@ -1470,13 +1470,13 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Modify: `scripts/load-profile.sh:2242-2247` (inject the search command's absolute path)
 - Modify: `tests/test_skills.sh:86`, `:91`, `:838`
 - Modify: `tests/test_hooks.sh` (assert the injected line, and that it cannot be forged)
-- Modify: `tests/test_hoard.sh` (append the skill-contract scenarios)
+- Modify: `tests/test_hoard.sh` (append the command-contract scenarios)
 
 **Interfaces:**
 - Consumes: `scripts/hoard-search.sh` from tasks 1-3; the `Read` auto-approval from task 4.
 - Produces: a `Hoard search command: <absolute path>` line in the session-start context, and a skill that runs it, shows ranked titles only, and hydrates a body only when the user asks — updating that memory's `uses` and `last_used` when it does.
 
-**Why the path is injected rather than written into the skill.** `${CLAUDE_PLUGIN_ROOT}` is set for hook processes; a `Bash` call the model makes from a skill does not inherit it, so a skill that hard-codes that variable would run `/scripts/hoard-search.sh` and fail on every machine. The plugin's install path is not knowable at authoring time either. `load-profile.sh` already resolves its own directory and already injects four absolute paths this same way, so this is the existing idiom rather than a new mechanism.
+**Why the path is injected rather than written into the command.** `${CLAUDE_PLUGIN_ROOT}` is set for hook processes; a `Bash` call the model makes from a command does not inherit it, so a command that hard-codes that variable would run `/scripts/hoard-search.sh` and fail on every machine. The plugin's install path is not knowable at authoring time either. `load-profile.sh` already resolves its own directory and already injects four absolute paths this same way, so this is the existing idiom rather than a new mechanism.
 
 **That line is forgeable, and it names a command that gets executed.** The profile body is quoted into the same context block, above these lines, and a profile can contain any text at all — including a line spelled exactly like this one, naming any command. `/squirrel:pickup` already carries a position rule for exactly this class of attack, and this task copies it and adds a second, narrower check, because the consequence here is command execution rather than a stray file read.
 
@@ -1509,7 +1509,7 @@ assert_contains "$dig_body" "one permission prompt" "dig must disclose that runn
 assert_contains "$dig_body" "uses" "dig must update the memory's uses counter when a body is actually read - reinforcement is what keeps a used memory ranked"
 assert_contains "$dig_body" "last_used" "dig must update last_used when a body is actually read"
 assert_contains "$dig_body" "never" "dig must state at least one thing it never does"
-assert_contains "$dig_body" "Automatic injection never counts" "dig must state that automatic injection never counts as a use - without it the store's ranking feeds itself. Matched on the whole sentence, not the bare word: assert_contains is case-sensitive, and the skill capitalises it at the start of a sentence"
+assert_contains "$dig_body" "Automatic injection never counts" "dig must state that automatic injection never counts as a use - without it the store's ranking feeds itself. Matched on the whole sentence, not the bare word: assert_contains is case-sensitive, and the command's instructions capitalise it at the start of a sentence"
 
 # ==========================================================================
 # 12b. FAILURE PROOF: a copy with the reinforcement paragraph removed must
@@ -1783,7 +1783,7 @@ Two things are different from the checkpoint, and both change the decision.
 
 ## Consequences
 
-**Stated honestly: this is not a complete secret scanner, and does not claim to be.** It matches unambiguous shapes - PEM headers, provider token prefixes, and one assignment-shaped rule for opaque strings that carry no prefix. A credential in a shape it does not know will be auto-approved, and the skill's own instruction not to write one is the only thing in front of it.
+**Stated honestly: this is not a complete secret scanner, and does not claim to be.** It matches unambiguous shapes - PEM headers, provider token prefixes, and one assignment-shaped rule for opaque strings that carry no prefix. A credential in a shape it does not know will be auto-approved, and the command's own instructions not to write one are the only thing in front of it.
 
 That asymmetry is the design. A false positive costs one permission prompt on one write. A false negative writes a credential into a store re-read in every future session. Those two costs are not comparable, so the scan is tuned to catch the clear cases with certainty rather than to catch every case with judgement.
 
