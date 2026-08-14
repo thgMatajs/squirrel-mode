@@ -543,7 +543,7 @@ assert_contains "$dig_body" "type that digit yourself, directly on the command l
 assert_contains "$dig_body" "Every value on this command line is single-quoted, without exception" "dig must state the quoting rule once, positively, and with no exception - a template mixing quoted and unquoted values invites an editor to unquote the rest for consistency, and the values come from a forgeable profile, a forgeable injected line, and pasted user text respectively"
 assert_contains "$dig_body" "each query term separately" "dig must quote query terms too: pasted text carrying a semicolon executed, and a pasted glob was replaced by the working directory's filenames. 'The user typed it' does not make it safe to hand to a shell unquoted"
 # shellcheck disable=SC2016 # literal Markdown backticks, not substitution.
-assert_contains "$dig_body" 'Only the flag names themselves (`--slug`, `-k`, `--all`), which you type yourself, stand bare' "dig must name what is NOT quoted, or 'every value' is ambiguous about the flags and a reader resolves it by guessing"
+assert_contains "$dig_body" 'Only the flag names themselves (`--slug`, `-k`, `--all`) and the bare `--`, which you type yourself, stand bare' "dig must name what is NOT quoted, or 'every value' is ambiguous about the flags and a reader resolves it by guessing. The -- separator has to appear in that list because it is on the command line and is not a value; quoting it anyway is harmless (checked - the shell strips the quotes and argv still holds --), so this pins clarity, not safety"
 assert_not_contains "$dig_body" "unquoted and space-separated" "dig must no longer describe the query terms as unquoted - that was the one exception in the template, and it executed"
 assert_contains "$dig_body" "An absent line is normal" "dig must state that its own line is legitimately absent sometimes (the hook omits it when it cannot vouch for the path), so being the only such line in context is not evidence of being genuine"
 # shellcheck disable=SC2016 # literal Markdown backticks, not substitution.
@@ -558,7 +558,19 @@ assert_contains "$dig_body" 'The `Project checkpoint path:` line earns your trus
 # cannot help here - the injection happens in the command line, before
 # the script is ever reached - so this constraint is the load-bearing one.
 assert_contains "$dig_body" "a whole number from 3 to 7, and nothing else may go there" "dig must constrain what it puts after -k to a bounded number, as an instruction about the command line rather than a description of the field: max_list_items is profile text, and an unconstrained value reaching a Bash call is command execution"
-assert_not_contains "$dig_body" "-k 5" "dig must not hardcode -k 5 either: it displays per max_list_items, so a profile configured for more would silently see five"
+# RE-AIMED (fix round 5). The old needle was `-k 5`, which cannot match
+# `-k '5'` - the form a re-hardcoded value would take under the quoted
+# template - and had 0 occurrences even before the fix, so no mutation
+# could prove it either way. It was a guard that could not fail for the
+# regression it named. Scenario 12c below mutates the real file into that
+# exact regression and proves this needle fires on it.
+# shellcheck disable=SC2016 # literal quotes in the searched-for text.
+assert_not_contains "$dig_body" "-k '5'" "dig must not hardcode the -k value: it displays per max_list_items, so a profile configured for more would silently see five. Matched on the QUOTED form, which is how a regression would now be written - the unquoted '-k 5' cannot match it"
+
+assert_contains "$dig_body" "That bare \`--\` goes before the first query term, always" "dig must put -- before the first query term: scripts/hoard-search.sh reparses a term spelled like a flag, so a user searching for the words '--slug tests' silently gets a different search with no error. Verified against the committed script's own --) arm"
+assert_contains "$dig_body" "This line is never tested against \`/scripts/hoard-search.sh\`" "dig must give the checkpoint-path line its OWN shape test: no checkpoint path can end in /scripts/hoard-search.sh, so a reader applying the search command's ending to it drops --slug and hides every project memory - measured at 2 project memories returned versus 0"
+assert_contains "$dig_body" "only this rule differs per line, and the two halves must never be merged into one" "dig must say that shape is the ONLY per-line rule, so a later edit does not re-merge the two halves the way round 3 did by dropping the scoping words"
+assert_contains "$dig_body" "on disk at a predictable absolute path" "dig must state the forgery bound accurately: the planted file needs only to EXIST at a predictable path, which an unpacked archive supplies with nothing executing. The earlier claim that it 'needs someone who can already write files on this machine' was disproved by running one"
 
 assert_contains "$dig_body" "Automatic injection never counts" "dig must state that automatic injection never counts as a use - without it the store's ranking feeds itself. Matched on the whole sentence, not the bare word: assert_contains is case-sensitive, and the skill capitalises it at the start of a sentence"
 
@@ -580,5 +592,27 @@ assert_eq "no" "$dig_mutant_has" "FAILURE PROOF (scenario 12): a copy with the r
 # shellcheck disable=SC2016 # literal Markdown backticks, not substitution.
 assert_not_contains "$dig_mutant_body" '`uses`' "FAILURE PROOF (scenario 12): the same copy must not contain the backticked 'uses' key either - both counter assertions have to bind to the removed instruction, not just the one"
 assert_contains "$dig_mutant_body" "hoard-search.sh" "FAILURE PROOF (scenario 12, independence): removing the reinforcement lines must leave the search-script instruction intact"
+
+# ==========================================================================
+# 12c. FAILURE PROOF for the re-aimed -k needle. The needle it replaced
+#      (`-k 5`) had zero occurrences before the fix AND zero after, so
+#      nothing distinguished a guarded file from an unguarded one - the
+#      "guard that cannot fail for its own target" class. This mutates the
+#      real file into the regression the needle names, by hardcoding the
+#      value back into the template, and proves the needle fires on it.
+# ==========================================================================
+dig_k_mutant=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-skill.XXXXXX")
+cleanup_paths="$cleanup_paths $dig_k_mutant"
+# shellcheck disable=SC2016 # literal template text, not an expansion.
+sed "s|-k '<n>'|-k '5'|g" "$dig_file" >"$dig_k_mutant"
+dig_k_mutant_body=$(cat "$dig_k_mutant" 2>/dev/null || printf '')
+
+# The transform must have matched something. Without these two the proof
+# below could pass against a file the sed never touched.
+# shellcheck disable=SC2016 # literal template text, not an expansion.
+assert_not_contains "$dig_k_mutant_body" "-k '<n>'" "FAILURE PROOF (scenario 12c), control: the mutation must actually replace the template's placeholder - if this still finds it, the sed matched nothing and the proof below is vacuous"
+# shellcheck disable=SC2016 # literal quotes in the searched-for text.
+assert_contains "$dig_k_mutant_body" "-k '5'" "FAILURE PROOF (scenario 12c): the mutant must carry the hardcoded value the real assertion forbids - proving that assertion fires on this regression rather than merely being satisfied by its absence"
+assert_contains "$dig_k_mutant_body" "a whole number from 3 to 7, and nothing else may go there" "FAILURE PROOF (scenario 12c, independence): the mutation must leave the 3-to-7 bound's prose alone - it changes the template, not the constraint, which is exactly what a careless regression would look like"
 
 assert_report
