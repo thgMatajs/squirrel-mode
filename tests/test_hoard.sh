@@ -615,4 +615,222 @@ assert_not_contains "$dig_k_mutant_body" "-k '<n>'" "FAILURE PROOF (scenario 12c
 assert_contains "$dig_k_mutant_body" "-k '5'" "FAILURE PROOF (scenario 12c): the mutant must carry the hardcoded value the real assertion forbids - proving that assertion fires on this regression rather than merely being satisfied by its absence"
 assert_contains "$dig_k_mutant_body" "a whole number from 3 to 7, and nothing else may go there" "FAILURE PROOF (scenario 12c, independence): the mutation must leave the 3-to-7 bound's prose alone - it changes the template, not the constraint, which is exactly what a careless regression would look like"
 
+# ==========================================================================
+# 13. The published promises match what phase 1 actually does.
+#
+#     This is Task 8's floor, not its ceiling. The scenarios after it check
+#     each corrected claim against the CODE, the hook, or the JSON it is a
+#     claim about, rather than against another document - a citation that
+#     is bibliographically perfect and substantively wrong is this repo's
+#     most common documentation failure, and it happened twice in this
+#     plan alone.
+# ==========================================================================
+readme_body=$(cat "$repo_root/README.md" 2>/dev/null || printf '')
+assert_contains "$readme_body" "hoard" "README must describe the hoard - it is a new kind of file written under ~/.squirrel/"
+assert_not_contains "$readme_body" "exactly four kinds of file" "README's 'exactly four kinds of file' is false once hoard/ exists - it must be updated, not left standing"
+assert_contains "$readme_body" "/squirrel:stash" "README's command table must list the new commands"
+assert_contains "$readme_body" "/squirrel:dig" "README's command table must list the new commands"
+assert_contains "$readme_body" "never pruned" "README must state that memories are never pruned - the pruning section currently describes only files that ARE pruned"
+
+adr8_file="$repo_root/docs/adr/0008-hoard-auto-allow.md"
+adr8_body=$(cat "$adr8_file" 2>/dev/null || printf '')
+assert_contains "$adr8_body" "ADR-0002" "ADR-0008 must cite the ADR it extends"
+assert_contains "$adr8_body" "refuses auto-approval" "ADR-0008 must state that the secret scan withholds approval rather than denying"
+assert_contains "$adr8_body" "not a complete secret scanner" "ADR-0008 must state the limit of the secret scan rather than overstating its guarantee"
+
+context_body=$(cat "$repo_root/CONTEXT.md" 2>/dev/null || printf '')
+assert_contains "$context_body" "**hoard**" "CONTEXT.md must define the hoard in its vocabulary, or the term drifts"
+assert_contains "$context_body" "**Memory**" "CONTEXT.md must define a memory as a term distinct from the checkpoint"
+assert_contains "$context_body" "**Layer**" "CONTEXT.md must define the layer too - global and project are the two values scripts/hoard-search.sh reads, and an undefined term is how 'shared layer' got written in the first place"
+
+# ==========================================================================
+# 13b. ADR-0008 states what the secret scan does NOT catch.
+#
+#      Each of the three limits below was found by RUNNING the scan, not by
+#      reading it. An ADR that lists what a scan catches and omits what it
+#      stops catching is the half-true guarantee this repository's ADR trail
+#      exists to prevent.
+#
+#      Every needle is cross-checked against scripts/allow-checkpoint.sh in
+#      13c, so none of them can be true of the ADR and false of the hook.
+# ==========================================================================
+assert_contains "$adr8_body" "With \`grep\` absent from \`PATH\`" "ADR-0008 must state the degradation: without grep the assignment rule drops out and an api_key line is auto-approved, while the PEM and prefix rules still defer through the pure-shell case"
+assert_contains "$adr8_body" "MAKIAVELIAN" "ADR-0008 must give the concrete false positives a reviewer found, not a hand-wave - the prefixes are matched as SUBSTRINGS, so an ordinary word containing AKIA defers"
+assert_contains "$adr8_body" "a memory about this guard itself would defer" "ADR-0008 must name the self-referential false positive: the ADR's own vocabulary (AKIA, AIza, sk-ant, ghp_) is exactly what the scan matches"
+assert_contains "$adr8_body" "counts characters, not bytes" "ADR-0008 must state that \${#var} is a character count, so the 65536-BYTE cap is loose by up to roughly 4x in a multibyte locale - still bounded, still never growing with attacker input"
+assert_contains "$adr8_body" "Both fields are read and both are scanned" "ADR-0008 must describe the scan as it is written: reading content and only FALLING BACK to new_string is the field-shadowing bypass, and the plan's own draft described that broken shape"
+
+# ==========================================================================
+# 13c. The ADR's claims about the hook are checked against the HOOK.
+#
+#      This is the check the plan keeps needing and keeps skipping. A needle
+#      that only proves the ADR says something proves nothing about whether
+#      it is true.
+# ==========================================================================
+allow_hook_body=$(cat "$repo_root/scripts/allow-checkpoint.sh" 2>/dev/null || printf '')
+# shellcheck disable=SC2016 # every needle below is single-quoted deliberately: it is the LITERAL
+# source text of scripts/allow-checkpoint.sh being searched for, '$phs_re' and '$input' included,
+# never a shell expansion. Expanding any of them would search for whatever the test happens to hold
+# in a variable of that name, which is nothing, and assert_contains rejects an empty needle.
+assert_contains "$allow_hook_body" 'grep -qiE "$phs_re"' "the assignment rule really is the only part of payload_has_secret that shells out - which is what makes ADR-0008's grep-absent paragraph true rather than plausible"
+assert_contains "$allow_hook_body" '*AKIA* | *xoxb-* | *xoxp-* | *AIza*' "the provider prefixes really are matched by an unanchored case pattern, so the substring false positives ADR-0008 names are the shell's behaviour and not a guess"
+# shellcheck disable=SC2016 # literal source text, see above.
+assert_contains "$allow_hook_body" 'written=$(extract_tool_input_field "$input" "content")' "the hook really does read content on its own line..."
+# shellcheck disable=SC2016 # literal source text, see above.
+assert_contains "$allow_hook_body" 'written_new=$(extract_tool_input_field "$input" "new_string")' "...and new_string on its own line, unconditionally - which is what ADR-0008's 'Both fields are read and both are scanned' asserts"
+# shellcheck disable=SC2016 # literal source text, see above.
+assert_contains "$allow_hook_body" 'payload_has_secret "$written" || payload_has_secret "$written_new"' "and both are SCANNED, not just both read - an || over two scans, never one scan over a fallback"
+assert_contains "$allow_hook_body" 'MAX_SCAN_LEN=65536' "the cap ADR-0008 calls 65536 bytes must really be 65536, and \${#written} above must really be the character count that makes ADR-0008's multibyte note true"
+
+# ==========================================================================
+# 13d. ADR-0008 and the two-layer design.
+#
+#      Task 7b moved the primary defence into scripts/load-profile.sh.
+#      The reading rules in skills/dig/SKILL.md and skills/pickup/SKILL.md
+#      stayed exactly as strict. Describing one without the other invites
+#      the next reader to relax whichever they have not read about.
+# ==========================================================================
+assert_contains "$adr8_body" "neutralise_forged_lines" "ADR-0008 must name the hook-side layer by the function that implements it, so a reader can go and check the code rather than take the ADR's word"
+assert_contains "$adr8_body" "neither is allowed to justify weakening the other" "ADR-0008 must say WHY both layers exist - either alone is sufficient, which is exactly the argument someone will use to delete one"
+adr2_body=$(cat "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" 2>/dev/null || printf '')
+assert_contains "$adr2_body" "Two independent layers, either sufficient alone" "ADR-0002's task-7b amendment must still carry the same two-layer statement ADR-0008 makes - two ADRs describing one mechanism must not disagree about it"
+assert_contains "$adr2_body" "0008-hoard-auto-allow.md" "ADR-0002 must point at ADR-0008: its first Consequences bullet said the scope was one directory and nothing else, which stopped being true when hoard/ became a second root"
+
+# ==========================================================================
+# 13e. The spec says what phase 1 actually shipped.
+#
+#      Its status line said "design approved, not implemented" while seven
+#      tasks of it were on disk, and its parity table promised Codex and
+#      Cursor a surface phase 1 does not build.
+# ==========================================================================
+spec_file="$repo_root/docs/specs/2026-08-13-hoard-design.md"
+spec_body=$(cat "$spec_file" 2>/dev/null || printf '')
+assert_not_contains "$spec_body" "Status: design approved, not implemented." "the spec's status line must stop saying the design is not implemented - phase 1 is on disk"
+assert_contains "$spec_body" "Status: phase 1 implemented" "the spec must say which phase shipped..."
+assert_contains "$spec_body" "phases 2-4 are not started" "...and what the remaining phases still owe, so 'implemented' is not read as 'finished'"
+assert_contains "$spec_body" "the feature's end state, not what phase 1 ships" "spec section 8 must be marked as the end state - phase 1 ships Claude Code only, and a table read as current would have a porter looking for skills that do not exist"
+assert_contains "$spec_body" "cannot reuse that wording" "the spec must record that a Codex variant of stash/dig is a REWRITE: both commands name the Write and Read tools because those carry Claude Code's auto-approval, and Codex has neither"
+
+# The context-block delivery facts, which until now lived only in
+# hooks/hooks.json and one shell function - and this plan has already
+# shipped a rule whose premise hooks.json had falsified.
+assert_contains "$spec_body" "startup|resume|clear|compact" "the spec must name the four SessionStart sources verbatim, as hooks/hooks.json spells them"
+assert_contains "$spec_body" "all four emit a full context block" "the spec must state that all four sources emit a block - a later block is not suspect for being later, and a reading rule built on 'once per session' would reject a genuine line"
+assert_contains "$spec_body" "session lines appended after the quoted profile" "the spec must state the discriminator both commands rely on: a genuine block carries squirrel-mode's own session lines after the profile it quotes, and the re-show channel carries none"
+assert_contains "$spec_body" "needs only to exist at a predictable absolute path" "the spec must state the MEASURED forgery bound: the planted file need only exist, which an unpacked archive supplies with nothing executing"
+assert_not_contains "$spec_body" "already write files on this machine" "the spec must not restate the forgery bound that was disproved by running it"
+
+# hooks/hooks.json is the thing that sentence describes. Read it.
+hooks_json_body=$(cat "$repo_root/hooks/hooks.json" 2>/dev/null || printf '')
+assert_contains "$hooks_json_body" '"matcher": "startup|resume|clear|compact"' "and hooks.json must really register those four sources - the spec's sentence is a claim about this file, so it is checked against this file"
+
+# ==========================================================================
+# 13f. The layer is called `global`, in the skill as in the code.
+#
+#      skills/dig/SKILL.md said "only the shared layer was searched" in the
+#      one normative sentence in that file with nothing pinning it, while
+#      its own neighbouring prose and scripts/hoard-search.sh both call it
+#      `global`. CONTEXT.md exists to stop one thing having two names.
+# ==========================================================================
+hoard_search_body=$(cat "$hoard_search_script" 2>/dev/null || printf '')
+# shellcheck disable=SC2016 # single-quoted deliberately: the literal glob in
+# scripts/hoard-search.sh, '$hoard_dir' included, not an expansion.
+assert_contains "$hoard_search_body" '"$hoard_dir"/global/*.md' "the code's own name for the layer is 'global' - that, not another document, is what the skill has to agree with"
+assert_contains "$dig_body" "only the global layer was searched" "dig must name the layer the way the script and the directory do; 'shared' is a second name for one thing, which is the drift CONTEXT.md's glossary exists to stop"
+assert_not_contains "$dig_body" "shared layer" "and the old name must be gone, not merely joined by the new one"
+
+# ==========================================================================
+# 13g. docs/RESEARCH.md registers the scoring weights, and names the
+#      constants the code actually has.
+#
+#      The plan's own draft for this entry named "the importance exponent".
+#      scripts/hoard-search.sh has no exponent: importance enters the score
+#      linearly, as imp/5, and enters lambda through the factor 0.8. An
+#      entry written to stop a later reader mistaking an arbitrary constant
+#      for a result must at least name the constants that exist.
+# ==========================================================================
+research_body=$(cat "$repo_root/docs/RESEARCH.md" 2>/dev/null || printf '')
+assert_contains "$research_body" "The hoard's scoring weights" "docs/RESEARCH.md must register the weights as a design decision with no finding behind it"
+assert_contains "$research_body" "scripts/hoard-search.sh" "and must name the file that carries them, so the register can be checked against the code"
+assert_not_contains "$research_body" "importance exponent" "docs/RESEARCH.md must not name a constant the code does not have - importance enters the score as imp/5 and lambda as a factor of 0.8; there is no exponent anywhere in scripts/hoard-search.sh"
+assert_contains "$hoard_search_body" "lambda = 0.16 * (1 - imp * 0.8 / 5)" "the decay constant and the importance factor, read from the code"
+assert_contains "$hoard_search_body" "(1 + 0.2 * log(1 + (m_uses + 0)))" "and the reinforcement coefficient, read from the code"
+for weight13g in "0.16" "0.8" "0.2"; do
+  assert_contains "$research_body" "$weight13g" "docs/RESEARCH.md must name the constant $weight13g, which scripts/hoard-search.sh really carries - a register that names no numbers registers nothing"
+done
+
+# ==========================================================================
+# 13h. FAILURE PROOFS. Every guard above is mutated against the CURRENT
+#      text of the file it guards, and each mutant is diffed before it is
+#      trusted: a sed that matched nothing leaves a byte-identical copy,
+#      which the guard correctly passes, and the proof would then report
+#      clean while proving the opposite of what it claims.
+# ==========================================================================
+doc_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hoard-doc-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $doc_mutant_dir"
+
+# (i) The vocabulary fix. Reverting `global` to `shared` in that one
+#     sentence must make the new needle fail and the old one fire.
+mut_dig="$doc_mutant_dir/dig-shared.md"
+sed 's/only the global layer was searched/only the shared layer was searched/' "$dig_file" >"$mut_dig"
+if cmp -s "$dig_file" "$mut_dig"; then mut_dig_differs=no; else mut_dig_differs=yes; fi
+assert_eq "yes" "$mut_dig_differs" "FAILURE PROOF (13f), control: the mutation must genuinely change skills/dig/SKILL.md - a sed that matched nothing would leave a byte-identical copy the guard correctly passes"
+mut_dig_body=$(cat "$mut_dig" 2>/dev/null || printf '')
+assert_not_contains "$mut_dig_body" "only the global layer was searched" "FAILURE PROOF (13f): the reverted copy must lose the corrected wording"
+assert_contains "$mut_dig_body" "shared layer" "FAILURE PROOF (13f): and must carry the drift the assert_not_contains above forbids, proving that assertion fires on the regression rather than merely being satisfied by its absence"
+assert_contains "$mut_dig_body" "hoard-search.sh" "FAILURE PROOF (13f, isolation): the mutation must leave the rest of the skill alone - it changes one word in one sentence"
+
+# (ii) The scan-limit paragraphs. Deleting the grep-absent limit must not
+#      take the other two with it, or one needle is covering for three.
+mut_adr8="$doc_mutant_dir/adr8-nogrep.md"
+# shellcheck disable=SC2016 # single-quoted deliberately: the backticks are literal Markdown
+# characters in ADR-0008's own text, not command substitution.
+grep -vF 'With `grep` absent from `PATH`' "$adr8_file" >"$mut_adr8" || true
+if cmp -s "$adr8_file" "$mut_adr8"; then mut_adr8_differs=no; else mut_adr8_differs=yes; fi
+assert_eq "yes" "$mut_adr8_differs" "FAILURE PROOF (13b), control: the mutation must genuinely change ADR-0008"
+mut_adr8_body=$(cat "$mut_adr8" 2>/dev/null || printf '')
+assert_not_contains "$mut_adr8_body" "With \`grep\` absent from \`PATH\`" "FAILURE PROOF (13b): a copy with the grep-absent limit deleted must lose that needle"
+assert_contains "$mut_adr8_body" "counts characters, not bytes" "FAILURE PROOF (13b, independence): and must keep the multibyte limit - three limits, three assertions, none of them standing in for another"
+assert_contains "$mut_adr8_body" "MAKIAVELIAN" "FAILURE PROOF (13b, independence): and the false-positive examples too"
+
+# (iii) The two-layer statement. Removing it must not disturb the scan
+#       limits, and vice versa.
+mut_adr8b="$doc_mutant_dir/adr8-onelayer.md"
+grep -vF 'neither is allowed to justify weakening the other' "$adr8_file" >"$mut_adr8b" || true
+if cmp -s "$adr8_file" "$mut_adr8b"; then mut_adr8b_differs=no; else mut_adr8b_differs=yes; fi
+assert_eq "yes" "$mut_adr8b_differs" "FAILURE PROOF (13d), control: the mutation must genuinely change ADR-0008"
+mut_adr8b_body=$(cat "$mut_adr8b" 2>/dev/null || printf '')
+assert_not_contains "$mut_adr8b_body" "neither is allowed to justify weakening the other" "FAILURE PROOF (13d): a copy with the two-layer justification deleted must lose that needle"
+assert_contains "$mut_adr8b_body" "not a complete secret scanner" "FAILURE PROOF (13d, independence): and must keep the scan's own honesty statement"
+
+# (iv) The spec's status line. Restoring the old one must fire the
+#      assert_not_contains, and take the new one with it.
+mut_spec="$doc_mutant_dir/spec-status.md"
+sed 's/^Status: phase 1 implemented.*$/Status: design approved, not implemented./' "$spec_file" >"$mut_spec"
+if cmp -s "$spec_file" "$mut_spec"; then mut_spec_differs=no; else mut_spec_differs=yes; fi
+assert_eq "yes" "$mut_spec_differs" "FAILURE PROOF (13e), control: the mutation must genuinely change the spec"
+mut_spec_body=$(cat "$mut_spec" 2>/dev/null || printf '')
+assert_contains "$mut_spec_body" "Status: design approved, not implemented." "FAILURE PROOF (13e): the reverted copy must carry the stale status line the assert_not_contains above forbids"
+assert_not_contains "$mut_spec_body" "Status: phase 1 implemented" "FAILURE PROOF (13e): and must lose the corrected one"
+assert_contains "$mut_spec_body" "all four emit a full context block" "FAILURE PROOF (13e, independence): the status-line mutation must leave the context-block paragraph standing"
+
+# (v) The RESEARCH.md register. Deleting its bullet must lose the entry
+#     without touching the six base-rule bullets that share the section.
+mut_research="$doc_mutant_dir/research-noweights.md"
+grep -vF "The hoard's scoring weights" "$repo_root/docs/RESEARCH.md" >"$mut_research" || true
+if cmp -s "$repo_root/docs/RESEARCH.md" "$mut_research"; then mut_research_differs=no; else mut_research_differs=yes; fi
+assert_eq "yes" "$mut_research_differs" "FAILURE PROOF (13g), control: the mutation must genuinely change docs/RESEARCH.md"
+mut_research_body=$(cat "$mut_research" 2>/dev/null || printf '')
+assert_not_contains "$mut_research_body" "The hoard's scoring weights" "FAILURE PROOF (13g): a copy with the register deleted must lose that needle"
+assert_contains "$mut_research_body" "Rule 13 (Safety override)" "FAILURE PROOF (13g, independence): and must keep the six base-rule design decisions the same section carries - the register is an addition to that section, not a replacement of it"
+
+# (vi) The README's five-kinds claim, reverted.
+mut_readme="$doc_mutant_dir/README-four.md"
+sed 's/exactly five kinds of file/exactly four kinds of file/' "$repo_root/README.md" >"$mut_readme"
+if cmp -s "$repo_root/README.md" "$mut_readme"; then mut_readme_differs=no; else mut_readme_differs=yes; fi
+assert_eq "yes" "$mut_readme_differs" "FAILURE PROOF (13), control: the mutation must genuinely change README.md - if it does not, README no longer says 'exactly five kinds of file' and the assert_not_contains above is passing for a reason nobody chose"
+mut_readme_body=$(cat "$mut_readme" 2>/dev/null || printf '')
+assert_contains "$mut_readme_body" "exactly four kinds of file" "FAILURE PROOF (13): the reverted copy must carry the false count the assertion above forbids"
+assert_contains "$mut_readme_body" "never pruned" "FAILURE PROOF (13, independence): and must keep the pruning statement - the two claims are separate sentences and separate assertions"
+
 assert_report

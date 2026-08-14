@@ -67,7 +67,7 @@ terms. Cursor's project-scoped `/digest` and `/plan` commands are a separate mec
 to be copied into a project's own `.cursor/commands/` if you want them there too —
 [docs/OTHER-TOOLS.md](./docs/OTHER-TOOLS.md) has the two file paths.
 
-## The eight commands
+## The ten commands
 
 | Command | What it does |
 | :-- | :-- |
@@ -79,8 +79,10 @@ to be copied into a project's own `.cursor/commands/` if you want them there too
 | `/squirrel:off` | Turns the base rules off for the rest of the current session. |
 | `/squirrel:on` | Turns them back on in the current session. |
 | `/squirrel:rules` | Pulls the base rules into the current conversation by hand. A recovery path only — see below. |
+| `/squirrel:stash` | Records one durable memory — a correction, a decision, a bug and its fix — in your cross-project hoard. |
+| `/squirrel:dig` | Searches that hoard and shows ranked titles, then fetches only the one you open. Costs one permission prompt, because no hook can auto-approve the search command. |
 
-All eight exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`. Cursor gets
+All ten exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`. Cursor gets
 `digest` and `plan` only — see the parity table below for why. On Cursor they are `/squirrel-digest`
 and `/squirrel-plan`: Cursor has no command namespace, so the prefix is part of the name.
 
@@ -95,11 +97,17 @@ type it.
 
 ## Parity across targets
 
-| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
-| :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
-| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no |
+| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints | Hoard |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
+| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
+| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no | no |
+
+The hoard's own files are plain markdown under `~/.squirrel/`, so any target can read them; what
+Codex and Cursor lack is the two commands, which is what this phase ships and only for Claude Code.
+Porting them is not a copy: both name the `Write` and `Read` tools explicitly because those are what
+Claude Code's auto-approval covers, and a Codex or Cursor variant has neither that tool nor that
+auto-approval, so those sentences have to be rewritten rather than carried across.
 
 Codex and Cursor have no lifecycle hooks, so neither gets automatic checkpoints, session-scoped
 off/on, or profile reinjection after a tune — a change elsewhere can leave their view stale until
@@ -146,7 +154,7 @@ docs/RESEARCH.md's "Corrections" section for what got cut when a citation didn't
 No network calls. No telemetry. Every script squirrel-mode ships is plain POSIX `sh` or Markdown.
 
 The Claude Code plugin's runtime writes to exactly one place — `~/.squirrel/` — and, inside it, to
-exactly four kinds of file:
+exactly five kinds of file:
 
 - `profile.md` — your calibration, written by `/squirrel:init` and edited by `/squirrel:tune`.
 - `checkpoints/<slug>/<session-id>.md` — one checkpoint file per session
@@ -157,6 +165,9 @@ exactly four kinds of file:
 - `profile-seen/<session-id>` — an empty marker whose timestamp is all that matters: it is how a
   session knows whether it has already been shown the current `profile.md`, and it is what makes a
   `/squirrel:tune` in one session reach the others.
+- `hoard/global/<id>.md`, `hoard/projects/<slug>/<id>.md` — durable memories, written by
+  `/squirrel:stash` and read by `/squirrel:dig`. One file per memory. These are the only files
+  squirrel-mode writes that are meant to outlive the project they were written in.
 
 Installs from before this location moved have their data at an older path instead — see the note at
 the end of this section; squirrel-mode detects that and tells you, once per session, rather than
@@ -173,6 +184,11 @@ only there — never on an ordinary message:
   modified checkpoints for that project. However long a project lies untouched, its ten newest
   checkpoints always survive. At most 100 candidates are examined per session start, so a huge
   directory cannot stall the hook.
+
+**Memories are never pruned.** Nothing under `hoard/` is deleted by squirrel-mode, on any schedule,
+at any age. Losing a memory loses something that cannot be reconstructed, and a memory that has lost
+its relevance already stops appearing in results by its own score — which is reversible, and deletion
+is not.
 
 Nothing else in `~/.squirrel/` is ever deleted by squirrel-mode, and `profile.md` never is.
 
@@ -220,13 +236,32 @@ The auto-approval only covers paths that genuinely resolve inside that directory
 `checkpoints/` itself, or anywhere below it, is never auto-approved — that write falls back to the
 normal permission prompt instead of being silently redirected through the symlink.
 
-The auto-approval requires `jq` to be installed and on `PATH`. A regex cannot safely parse nested
-JSON, so on a machine without `jq` the hook never guesses — every checkpoint read and write falls
-back to the normal permission prompt instead. This is a deliberate, graceful fallback, not a crash;
-`jq` is already a hard prerequisite for this project's own test suite.
+The same auto-approval covers `~/.squirrel/hoard/`, on the same terms and through the same layers
+([ADR-0008](./docs/adr/0008-hoard-auto-allow.md)) — the same `..` rejection, the same length cap,
+the same prefix check, the same symlink walk, applied to whichever of the two directories the path
+resolved into. A symlink at `hoard/` itself, or anywhere below it, falls back to the normal
+permission prompt exactly as one at `checkpoints/` does. Two things are stricter for the hoard, and
+both add refusals rather than removing any: a file sitting directly inside `hoard/` rather than one
+level down is refused auto-approval for every tool, `Read` included, and a `Write` or `Edit` whose
+text looks like it carries a credential is refused too — that write falls back to the normal
+permission prompt and you decide, rather than going through without one.
 
-The base rules that trigger these writes also cap them at one checkpoint write per turn. Nothing
-else is auto-approved; full rationale in [ADR-0002](./docs/adr/0002-checkpoint-auto-allow.md).
+That credential check matches unambiguous shapes only — private-key headers, a handful of provider
+token prefixes, and one `key = <long opaque string>` rule — and **it is not a complete secret
+scanner.** It also has the opposite failure: any memory whose text merely mentions one of those
+prefixes, including a memory about this feature, will ask for permission it did not need. That
+costs one prompt and never a refusal to write, which is the trade it was tuned for. ADR-0008 states
+exactly what it does and does not catch, including what stops working when `grep` is missing.
+
+The auto-approval requires `jq` to be installed and on `PATH`. A regex cannot safely parse nested
+JSON, so on a machine without `jq` the hook never guesses — every checkpoint and hoard read and
+write falls back to the normal permission prompt instead. This is a deliberate, graceful fallback,
+not a crash; `jq` is already a hard prerequisite for this project's own test suite.
+
+The base rules that trigger these writes also cap them at one checkpoint write per turn. Those two
+directories are the whole of what is auto-approved; full rationale in
+[ADR-0002](./docs/adr/0002-checkpoint-auto-allow.md) and
+[ADR-0008](./docs/adr/0008-hoard-auto-allow.md).
 
 squirrel-mode replaces your Claude Code output style while it's enabled. `keep-coding-instructions:
 true` keeps its coding behavior untouched, but Explanatory or Learning mode is overridden for as

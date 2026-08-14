@@ -39,10 +39,15 @@
 # /squirrel:tune came back completely empty in live runs: the first
 # tool call each of them makes was being parked, not permitted.
 #
-# ONLY THE NO-OPINION PATH CHANGED. The `allow` branch's JSON is
-# byte-for-byte what it always was - it was verified working by live
-# probe both before and after this fix, and was deliberately left
-# untouched. decide() below likewise still speaks in the two internal
+# ONLY THE NO-OPINION PATH CHANGED (at v0.3.1). The `allow` branch's
+# JSON was byte-for-byte what it always was - verified working by live
+# probe both before and after that fix, and deliberately left untouched
+# by it. AMENDED, Task 8 of the hoard phase: its
+# permissionDecisionReason TEXT has since changed, because it named the
+# checkpoint directory for a hoard write too. The JSON's SHAPE - the
+# three keys, their order, one object on one line - is what the probe
+# froze and is still exactly that; see "THE `allow` ARM'S JSON SHAPE IS
+# UNCHANGED" at the emission layer below. decide() below likewise still speaks in the two internal
 # tokens `allow` and `defer`; "defer" remains the right word for the
 # CONCEPT (this hook declines to decide) and is used that way
 # throughout this file. What changed is one thing: what the process
@@ -84,8 +89,18 @@
 # inside it.
 #
 # THIS SCRIPT IS A SECURITY BOUNDARY. `allow` must only ever come back
-# for a path that genuinely, after normalisation, resolves inside
-# $HOME/.squirrel/checkpoints/. A gate and two layers enforce that:
+# for a path that genuinely, after normalisation, resolves inside one of
+# the two roots this script governs -
+# $HOME/.squirrel/checkpoints/ or $HOME/.squirrel/hoard/. A gate and two
+# layers enforce that, identically for whichever root matched:
+#
+# (CORRECTED, Task 8 of the hoard phase. This sentence named only
+# checkpoints/ until then, so the file's own primary statement of what it
+# guarantees UNDERSTATED the boundary from the moment Task 4 added the
+# second root. The gate and both layers below were already shared by both
+# roots in code; only this description was behind. tests/test_hooks.sh
+# HOARD-13c pins the corrected wording and HOARD-13d proves the pin fires
+# on the stale one.)
 #
 #   Layer 0 (the `..` gate, always active, no external tool): a
 #   file_path carrying a `..` PATH COMPONENT defers outright, before
@@ -98,7 +113,10 @@
 #   normalize_path() lexically resolves "." and ".." segments in the
 #   given absolute path AGAINST THE PATH TEXT ITSELF - no filesystem
 #   access, no symlink awareness - and the result is compared against
-#   the checkpoints directory via a LITERAL (non-glob) prefix strip,
+#   EACH GOVERNED ROOT IN TURN (the checkpoints directory, then the
+#   hoard directory; the first one that matches is the root the rest of
+#   decide() reasons about, and no match at all defers) via a LITERAL
+#   (non-glob) prefix strip,
 #   `${normalized#"$prefix"}`, not a `case`/glob pattern match. This
 #   matters: quoting a variable inside a `${var#pattern}` pattern makes
 #   its glob-metacharacters (`*`, `?`, `[`) literal per POSIX, which a
@@ -107,8 +125,11 @@
 #     - prefix-escape: ".../checkpoints-evil/x" is rejected by the
 #       literal prefix strip because "checkpoints-evil" is not
 #       "checkpoints" followed by "/" - the boundary character is
-#       checked, not merely the substring. Layer 1 is the WHOLE defence
-#       here, and its `..` handling is not involved at all.
+#       checked, not merely the substring. ".../hoard-evil/x" is
+#       rejected by the identical strip against the identical boundary
+#       character, which is the whole point of the roots sharing one
+#       loop rather than each getting its own test. Layer 1 is the WHOLE
+#       defence here, and its `..` handling is not involved at all.
 #     - traversal: ".../checkpoints/../../../.ssh/id_rsa" normalizes to
 #       "/.../.ssh/id_rsa", which does not start with the checkpoints
 #       prefix at all - so this defers at Layer 1 too. But Layer 1 is NO
@@ -121,15 +142,16 @@
 #       does not control.
 #   Layer 1 has no symlink awareness at all - a symlink's target is a
 #   filesystem fact, not something present in the path's own text - so
-#   it cannot by itself defeat a symlink planted AT or BELOW
-#   checkpoints_dir.
+#   it cannot by itself defeat a symlink planted AT or BELOW whichever
+#   root matched.
 #
 #   Layer 2 (ALWAYS ACTIVE, the only fallback, zero external tools):
-#   component_walk_has_symlink() tests checkpoints_dir ITSELF, then
-#   walks every path component between checkpoints_dir and the leaf -
+#   component_walk_has_symlink() tests THE MATCHED ROOT ITSELF -
+#   checkpoints_dir or hoard_dir, whichever Layer 1 selected - then
+#   walks every path component between that root and the leaf -
 #   "escape-dir", then "escape-dir/evil.md", and so on - and defers the
 #   instant `[ -L ... ]` (a POSIX shell builtin, not an external
-#   command) finds ANY of them, INCLUDING checkpoints_dir, to be a
+#   command) finds ANY of them, INCLUDING the root itself, to be a
 #   symlink, regardless of where it points. It never calls `realpath`
 #   or `readlink` at all, so it works identically with an empty PATH.
 #   Layer 2 walks the NORMALISED remainder, which is only the same set
@@ -483,11 +505,23 @@ set -eu
 MAX_FILE_PATH_LEN=4096
 
 # MAX_SCAN_LEN: the bound on how much written text is scanned for
-# credentials. A memory body is a title and a short paragraph; 65536
-# bytes is far past anything legitimate. Beyond it, the write DEFERS
+# credentials. A memory body is a title and a short paragraph; 65536 is
+# far past anything legitimate. Beyond it, the write DEFERS
 # rather than being scanned - an unbounded scan of attacker-controlled
 # text is the same shape of exposure MAX_FILE_PATH_LEN exists to close,
 # and deferring is this script's cost for every answer it will not give.
+#
+# THE UNIT IS CHARACTERS, NOT BYTES, and the difference is stated rather
+# than glossed. The cap is applied as `${#written}`, POSIX parameter
+# length, which POSIX defines as the length in CHARACTERS. Under a
+# multibyte locale a 65536-character body can therefore be up to roughly
+# four times that many bytes, so this is a loose bound, not an exact
+# one. It is still a bound, it still does not grow with attacker input,
+# and tightening it would mean counting bytes with an external command
+# on the hot path of every hoard write - which is the wrong trade for a
+# cap whose only job is to keep an unbounded string away from `case` and
+# `grep`. MAX_FILE_PATH_LEN above is measured the same way and carries
+# the same slack.
 MAX_SCAN_LEN=65536
 
 extract_field() {
@@ -718,10 +752,12 @@ normalize_path() {
 # component_walk_has_symlink <base> <relative-path>: THE Layer 2
 # defence, and - since the cycle-3 fix - the ONLY symlink defence this
 # script has (see "LAYER 3 WAS REMOVED" above). First tests <base>
-# ITSELF (this is the cycle-3 BLOCKER fix: <base> is always
-# checkpoints_dir at the one call site below, and a symlink planted
-# there is never legitimate - see the header's trust-boundary note for
-# why this stops at <base> and never inspects anything above it). Then
+# ITSELF (this is the cycle-3 BLOCKER fix: <base> is the root Layer 1
+# matched - checkpoints_dir or hoard_dir, never a fixed one - at the one
+# call site below, and a symlink planted at either root is never
+# legitimate, because this plugin creates both directories itself - see
+# the header's trust-boundary note for why this stops at <base> and
+# never inspects anything above it). Then
 # walks every component of <relative-path> - for "escape-dir/evil.md"
 # that is "escape-dir", then "escape-dir/evil.md" - joined onto <base>,
 # and returns 0 (true - a symlink WAS found) the instant `[ -L ... ]`
@@ -781,6 +817,23 @@ payload_has_secret() {
   # The caller is responsible for bounding <text> to MAX_SCAN_LEN BEFORE
   # calling this: neither the `case` below nor `grep` is given an
   # unbounded attacker-controlled string to walk.
+  #
+  # WHAT IT STOPS CATCHING WITH `grep` ABSENT FROM PATH, stated here and
+  # in docs/adr/0008-hoard-auto-allow.md rather than left for someone to
+  # find. The `case` arms are pure shell and always run, so PEM headers
+  # and provider token prefixes still defer. The assignment rule below
+  # is the only part that shells out, and with no `grep` on PATH the
+  # pipeline fails, `-q` reports no match, and `api_key = <opaque
+  # string>` is auto-approved. It degrades safely - it never crashes,
+  # never denies, and never turns a defer into a wrong allow for a
+  # credential the `case` arms know - but that class stops being caught.
+  #
+  # AND WHAT IT CATCHES THAT IS NOT A CREDENTIAL. The prefixes above are
+  # matched as SUBSTRINGS, unanchored, so ordinary prose containing
+  # AKIA, AIza, sk-ant or ghp_ defers - a memory ABOUT this guard would,
+  # and so would the word MAKIAVELIAN. Each costs one permission prompt,
+  # never a denial. That asymmetry is the design and is argued in full
+  # in ADR-0008.
   phs_text=$1
   case "$phs_text" in
     *"BEGIN RSA PRIVATE KEY"* | *"BEGIN OPENSSH PRIVATE KEY"* | \
@@ -882,16 +935,24 @@ decide() {
   # governs `checkpoints/` and `hoard/`. Every layer above and below is
   # shared verbatim: the `..` rejection, the length cap, the literal
   # prefix strip and the component symlink walk all run identically on
-  # whichever root matched. Only the direct-child rule differs between
-  # them, and that difference is stated where it is applied, below.
+  # whichever root matched. Two rules differ between
+  # them - the direct-child rule below, and the secret refusal further
+  # down - and each difference is stated where it is applied. (This said
+  # "Only the direct-child rule differs" until Task 8. It was false the
+  # moment the secret refusal landed; the file's header was corrected
+  # then and this comment was not, which is the whole reason a list that
+  # claims to be complete has to be checked against the code below it.)
   #
   # THIS SCRIPT'S NAME NOW NAMES ONLY ONE OF THE TWO ROOTS IT GOVERNS.
   # That is a known, deliberate mismatch, not an oversight: renaming it
-  # touches hooks/hooks.json and roughly forty references in
-  # tests/test_hooks.sh, and doing that in the same change that widens a
-  # security boundary braids two risky edits together. The rename is
-  # deferred to the phase that rewrites this file's ADR trail. Recorded
-  # here so the mismatch is documented rather than discovered.
+  # touches hooks/hooks.json and, in tests/test_hooks.sh, 103
+  # occurrences of the literal filename plus 136 uses of the variable
+  # built from it - counted, not estimated, against the 8300-line file
+  # this note was written beside, because the figure it replaced
+  # ("roughly forty") was neither. Doing that in the same change that
+  # widens a security boundary braids two risky edits together. The
+  # rename is deferred to the phase that rewrites this file's ADR trail.
+  # Recorded here so the mismatch is documented rather than discovered.
   checkpoints_dir=$(normalize_path "$home_dir/.squirrel/checkpoints") || checkpoints_dir="$home_dir/.squirrel/checkpoints"
   hoard_dir=$(normalize_path "$home_dir/.squirrel/hoard") || hoard_dir="$home_dir/.squirrel/hoard"
 
@@ -918,7 +979,9 @@ decide() {
     return 0
   fi
 
-  # Layer 1b, and the ONE place the two roots diverge.
+  # Layer 1b, and the first of the TWO places the two roots diverge (the
+  # secret refusal below is the second; this comment said "the ONE
+  # place" until Task 8, which the secret refusal had already falsified).
   #
   # checkpoints/: a direct child file is the pre-P1 flat layout. Reading
   # one is legitimate (that is how the legacy file gets folded in);
@@ -948,9 +1011,13 @@ decide() {
   esac
 
   # Layer 2: unconditional POSIX component walk (see header) - the
-  # only, always-active fallback, zero external tools. Tests
-  # checkpoints_dir itself first, then defers the instant any component
-  # between checkpoints_dir and the leaf is itself a symlink.
+  # only, always-active fallback, zero external tools. Tests $root -
+  # whichever of checkpoints_dir and hoard_dir the loop above matched -
+  # itself first, then defers the instant any component between that
+  # root and the leaf is itself a symlink. One call, one walk, both
+  # roots: a symlink planted AT hoard/ defers exactly as one planted at
+  # checkpoints/ does, and that is a property of passing $root here
+  # rather than of a second copy of this check.
   if component_walk_has_symlink "$root" "$after"; then
     printf 'defer'
     return 0
@@ -1005,13 +1072,30 @@ fi
 # THE EMISSION LAYER (see "HOW 'NO OPINION' IS EXPRESSED" in the header).
 # decide() still speaks in the two internal tokens `allow` and `defer`;
 # only the translation into what this process actually WRITES changed.
-# The `allow` arm is byte-for-byte the JSON it has always been - it is
-# the verified-working half and was deliberately not touched. The
-# no-opinion arm prints NOTHING at all, which is the documented way for
-# a PreToolUse hook to decline to decide.
+# The no-opinion arm prints NOTHING at all, which is the documented way
+# for a PreToolUse hook to decline to decide.
+#
+# THE `allow` ARM'S JSON SHAPE IS UNCHANGED; ITS REASON TEXT IS NOT
+# (Task 8). Until then this comment said the arm was byte-for-byte what
+# it had always been, and that stopped being accurate here rather than
+# staying true by being left alone. What was frozen after the v0.3.1
+# live probe is the SHAPE - the same three keys, in the same order, in
+# one object on one line - and that is untouched: same
+# hookSpecificOutput, same hookEventName, same permissionDecision. Only
+# permissionDecisionReason's text changed, because the old text told the
+# user that a HOARD write "targets its own checkpoint directory", which
+# is not where that write was going. It is a string the user reads.
+#
+# ONE ARM, ONE STRING, NO BRANCH. The reason names both governed
+# directories rather than the one that matched, so there is still
+# exactly one `allow` emission in this file and no place for two
+# spellings to drift apart. tests/test_hooks.sh HOARD-13 pins the whole
+# line byte for byte, asserts a hoard allow and a checkpoint allow emit
+# the IDENTICAL line, and asserts this file carries exactly one such
+# emission - none of which was pinned by anything before Task 8.
 case "$decision" in
   allow)
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: operation targets its own checkpoint directory (ADR-0002)."}}\n'
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: operation targets one of its own data directories - checkpoints or hoard (ADR-0002, ADR-0008)."}}\n'
     ;;
   *)
     :

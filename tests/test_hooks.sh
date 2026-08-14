@@ -6127,8 +6127,8 @@ assert_eq "yes" "$fpP1q_kept4" "FAILURE PROOF isolation (scenario 6g6 vs M1): th
 fpP1k_script=$(make_script_scratch "$allow_checkpoint_script")
 # shellcheck disable=SC2016 # single-quoted deliberately: literal source
 # text of allow-checkpoint.sh.
-fpP1k_start=$(line_of "$fpP1k_script" '  # Layer 1b, and the ONE place the two roots diverge.')
-assert_eq "yes" "$(if [ -n "$fpP1k_start" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (P1k) must find Layer 1b's own opening comment in allow-checkpoint.sh - the hoard, phase 1, rewrote that comment when hoard/ joined checkpoints/ under the same block, and an anchor left pinned to the old wording would silently stop mutating anything and take scenario 14d's proof vacuous with it"
+fpP1k_start=$(line_of "$fpP1k_script" '  # Layer 1b, and the first of the TWO places the two roots diverge (the')
+assert_eq "yes" "$(if [ -n "$fpP1k_start" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (P1k) must find Layer 1b's own opening comment in allow-checkpoint.sh - the hoard, phase 1, rewrote that comment when hoard/ joined checkpoints/ under the same block, and Task 8 rewrote it AGAIN when the comment's claim to be the ONE point of divergence turned out to be false; an anchor left pinned to either older wording would silently stop mutating anything and take scenario 14d's proof vacuous with it"
 [ -n "$fpP1k_start" ] || fpP1k_start=0
 # The `  esac` sought here is the OUTER one (two-space indent), which
 # closes `case "$after" in`. The hoard's direct-child guard added an
@@ -8318,5 +8318,193 @@ ctx12k=$(extract_ctx "$(capture_stdout "$fp12k_script" "$home12e" "$stdin12e")")
 assert_contains "$ctx12k" "Brand new injected line: whatever it likes" "FAILURE PROOF (HOARD-12k), control: the mutant must actually emit its new line, or there is nothing for the coverage check to catch"
 assert_contains "$(uncovered_context_lines "$ctx12k" "$prefixes12" "PB12E")" "Brand new injected line: whatever it likes" "FAILURE PROOF (HOARD-12k): the coverage check must REPORT a newly injected line that no entry of SQUIRREL_RESERVED_LINE_PREFIXES covers - proving HOARD-12e is a live drift guard and not an assertion that happens to be empty"
 assert_eq "0" "$(capture_exit "$fp12k_script" "$home12e" "$stdin12e")" "FAILURE PROOF (HOARD-12k), isolation: the mutant must still exit 0"
+
+# ==========================================================================
+# HOARD-13. The permissionDecisionReason the user is shown.
+#
+#   This string reaches the USER, unlike the stale comments beside it. It
+#   said "operation targets its own checkpoint directory (ADR-0002)" for a
+#   hoard write as well, which is simply not where that write was going.
+#
+#   NOTHING PINNED IT BEFORE THIS SCENARIO. The v0.3.1 fix froze the allow
+#   branch's JSON deliberately, after a live probe, and then left the only
+#   evidence of that freeze in a comment - so the next edit to it, this one
+#   included, was unguarded. Three things are asserted, in increasing
+#   strength:
+#
+#     1. The whole emitted line, byte for byte. That is the shape freeze:
+#        change the reason and this fails; change a KEY, the ordering, the
+#        spacing, or add a field, and this fails too.
+#     2. The line is IDENTICAL for a hoard allow and a checkpoint allow.
+#        That is the "root-agnostic, one allow path" requirement stated as
+#        a property of the output rather than of the source: a branch that
+#        emitted two different strings would satisfy assertion 1 for one
+#        root and fail this one.
+#     3. The source carries exactly ONE emission of an allow decision, so
+#        assertion 2 cannot be satisfied by two branches that happen to
+#        agree today.
+# ==========================================================================
+HOARD13_ALLOW_JSON='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: operation targets one of its own data directories - checkpoints or hoard (ADR-0002, ADR-0008)."}}'
+
+homeH13=$(new_home)
+mkdir -p "$homeH13/.squirrel/hoard/global" "$homeH13/.squirrel/checkpoints/repo-abc"
+
+stdinH13_hoard=$(jq -n --arg p "$homeH13/.squirrel/hoard/global/20260101T000000Z-x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"an ordinary memory body"}}')
+stdinH13_ckpt=$(jq -n --arg p "$homeH13/.squirrel/checkpoints/repo-abc/session-1.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"an ordinary checkpoint body"}}')
+
+outH13_hoard=$(capture_stdout "$allow_checkpoint_script" "$homeH13" "$stdinH13_hoard")
+outH13_ckpt=$(capture_stdout "$allow_checkpoint_script" "$homeH13" "$stdinH13_ckpt")
+
+assert_eq "$HOARD13_ALLOW_JSON" "$outH13_hoard" "HOARD-13: a hoard allow must emit exactly this line - the reason names BOTH data directories and both ADRs, because the old one told the user a hoard write targeted the checkpoint directory. The JSON's SHAPE is unchanged from the byte-frozen v0.3.1 form; only the reason text differs"
+assert_eq "$HOARD13_ALLOW_JSON" "$outH13_ckpt" "HOARD-13: a checkpoint allow must emit the byte-identical line - one allow path, one string, no branch on which root matched. A reason that named only the root it matched would be two strings to keep in sync and two paths to keep correct"
+assert_eq "$outH13_hoard" "$outH13_ckpt" "HOARD-13: stated the other way round, so this fails even if the constant above is edited to match a newly-branched implementation - the two roots must be indistinguishable in what the user is shown"
+
+printf '%s' "$outH13_hoard" >"$homeH13/allow.json"
+assert_json_valid "$homeH13/allow.json" "HOARD-13: and the emitted line must still be valid JSON - the reason text carries a hyphen, parentheses and commas, and an unescaped character here would break the decision rather than merely misword it"
+assert_eq "PreToolUse" "$(printf '%s' "$outH13_hoard" | jq -r '.hookSpecificOutput.hookEventName')" "HOARD-13: hookEventName must still be PreToolUse - the shape freeze covers the keys, not only the reason"
+assert_eq "allow" "$(printf '%s' "$outH13_hoard" | jq -r '.hookSpecificOutput.permissionDecision')" "HOARD-13: and permissionDecision must still be allow"
+
+allow_src_H13=$(cat "$allow_checkpoint_script" 2>/dev/null || printf '')
+emissionsH13=$(printf '%s\n' "$allow_src_H13" | grep -cF '"permissionDecision":"allow"' || true)
+assert_eq "1" "$emissionsH13" "HOARD-13: scripts/allow-checkpoint.sh must contain exactly ONE allow emission. Two would let the byte-equality above hold today and drift tomorrow, which is the whole reason the reason string is root-agnostic instead of branched"
+
+# --- HOARD-13b. FAILURE PROOF: the old, checkpoint-only reason, restored
+#     in a scratch copy, must be what the hoard write comes back with -
+#     proving HOARD-13 fires on the regression rather than being satisfied
+#     by a string nobody can change. The `cmp` control is asserted, not
+#     assumed: a sed that matched nothing would leave a byte-identical copy
+#     that passes HOARD-13 for the right reason and this proof for none.
+mutantH13=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutantH13"
+sed 's/operation targets one of its own data directories - checkpoints or hoard (ADR-0002, ADR-0008)./operation targets its own checkpoint directory (ADR-0002)./' \
+  "$allow_checkpoint_script" >"$mutantH13"
+chmod +x "$mutantH13"
+if cmp -s "$allow_checkpoint_script" "$mutantH13"; then mutantH13_differs=no; else mutantH13_differs=yes; fi
+assert_eq "yes" "$mutantH13_differs" "FAILURE PROOF (HOARD-13), control: the mutation must genuinely change the script - a sed that matched nothing would leave a byte-identical copy and this proof would report clean while testing nothing"
+
+outH13_mut=$(printf '%s' "$stdinH13_hoard" | HOME="$homeH13" "$mutantH13" 2>/dev/null) || true
+assert_contains "$outH13_mut" "targets its own checkpoint directory (ADR-0002)." "FAILURE PROOF (HOARD-13): the mutant must tell the user a hoard write targeted the CHECKPOINT directory - the exact false statement this change removes"
+assert_not_contains "$outH13_mut" "checkpoints or hoard" "FAILURE PROOF (HOARD-13): and must not carry the corrected reason, so HOARD-13's byte equality above is what would catch this"
+
+# --- HOARD-13c. The five stale comments Task 4 flagged. Each named the
+#     checkpoint root as the only one, and the sharpest of them is the
+#     file's own headline statement of what it guarantees. Pinned by the
+#     corrected text, and mutation-proved by restoring the stale one.
+# shellcheck disable=SC2016 # the needles here and below are single-quoted deliberately: they are
+# the LITERAL comment text of scripts/allow-checkpoint.sh, in which '$HOME' is two words of prose,
+# not a variable this test wants expanded.
+assert_contains "$allow_src_H13" '$HOME/.squirrel/checkpoints/ or $HOME/.squirrel/hoard/' "HOARD-13c: the headline security statement must name both roots - it is this file's primary statement of what an allow means, and it understated the boundary Task 4 widened"
+# shellcheck disable=SC2016 # literal comment text, see above.
+assert_not_contains "$allow_src_H13" '$HOME/.squirrel/checkpoints/. A gate and two layers' "HOARD-13c: and the checkpoint-only version of that sentence must be gone, not merely joined by a wider one"
+assert_contains "$allow_src_H13" 'checkpoints_dir or hoard_dir, never a fixed one' "HOARD-13c: component_walk_has_symlink's doc comment must stop saying <base> is always checkpoints_dir - Task 4 gave it a second value at the one call site"
+assert_not_contains "$allow_src_H13" 'checkpoints_dir at the one call site' "HOARD-13c: and the stale wording must be gone"
+assert_not_contains "$allow_src_H13" 'the ONE place the two roots diverge' "HOARD-13c: the Layer 1b comment claimed to be the ONE place the roots diverge, which the secret refusal below it had already falsified - the header was corrected when that refusal landed and this comment was not"
+assert_not_contains "$allow_src_H13" 'Only the direct-child rule differs between' "HOARD-13c: and the same false claim in the two-roots comment beside checkpoints_dir - two rules differ, and a list that says it is complete must be. Matched on the fragment that fits ONE comment line: the full sentence wraps, so a needle spelling it out could never match this file's text and would be a guard that cannot fail for its own target"
+
+mutantH13c=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutantH13c"
+# shellcheck disable=SC2016 # single-quoted deliberately: a literal sed program, not substitution.
+sed 's|\$HOME/\.squirrel/checkpoints/ or \$HOME/\.squirrel/hoard/|$HOME/.squirrel/checkpoints/|' \
+  "$allow_checkpoint_script" >"$mutantH13c"
+if cmp -s "$allow_checkpoint_script" "$mutantH13c"; then mutantH13c_differs=no; else mutantH13c_differs=yes; fi
+assert_eq "yes" "$mutantH13c_differs" "FAILURE PROOF (HOARD-13c), control: the mutation must genuinely change the script"
+mutantH13c_body=$(cat "$mutantH13c" 2>/dev/null || printf '')
+# shellcheck disable=SC2016 # literal comment text, not an expansion.
+assert_not_contains "$mutantH13c_body" '$HOME/.squirrel/checkpoints/ or $HOME/.squirrel/hoard/' "FAILURE PROOF (HOARD-13c): the copy with the headline statement narrowed back to one root must lose the pinned text"
+assert_contains "$mutantH13c_body" 'checkpoints_dir or hoard_dir, never a fixed one' "FAILURE PROOF (HOARD-13c, independence): narrowing the headline must leave component_walk_has_symlink's own corrected comment standing - five separate comments, not one sentence repeated"
+
+# --- HOARD-13d. FAILURE PROOF for the four NEGATIVE assertions above. A
+#     negative that never matched anything is the "guard that cannot fail
+#     for its own target" class this plan has now hit eight times, and one
+#     of these four WAS that guard on its first draft: the stale sentence
+#     wraps across two comment lines, so the needle spelling it out in full
+#     could not have matched this file however stale it got. This mutant
+#     restores all four stale phrasings and asserts each needle finds its
+#     own, so every one of the four is proven live against real text.
+mutantH13d=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutantH13d"
+# shellcheck disable=SC2016 # single-quoted deliberately: literal sed programs, not substitution.
+sed -e 's|\$HOME/\.squirrel/checkpoints/ or \$HOME/\.squirrel/hoard/\. A gate and two|$HOME/.squirrel/checkpoints/. A gate and two layers|' \
+  -e 's|checkpoints_dir or hoard_dir, never a fixed one|checkpoints_dir at the one call site|' \
+  -e 's|the first of the TWO places the two roots diverge|the ONE place the two roots diverge|' \
+  -e 's|Two rules differ between|Only the direct-child rule differs between|' \
+  "$allow_checkpoint_script" >"$mutantH13d"
+if cmp -s "$allow_checkpoint_script" "$mutantH13d"; then mutantH13d_differs=no; else mutantH13d_differs=yes; fi
+assert_eq "yes" "$mutantH13d_differs" "FAILURE PROOF (HOARD-13d), control: the mutation must genuinely change the script"
+mutantH13d_body=$(cat "$mutantH13d" 2>/dev/null || printf '')
+# shellcheck disable=SC2016 # literal comment text, not an expansion.
+for staleH13d in '$HOME/.squirrel/checkpoints/. A gate and two layers' \
+  'checkpoints_dir at the one call site' \
+  'the ONE place the two roots diverge' \
+  'Only the direct-child rule differs between'; do
+  assert_contains "$mutantH13d_body" "$staleH13d" "FAILURE PROOF (HOARD-13d): restoring the stale comment '$staleH13d' must be findable by the exact needle the assertion above forbids - proving that assertion is a live guard and not a phrase this file could never contain"
+done
+
+# ==========================================================================
+# HOARD-13e. The secret scan's degradation with `grep` absent, PINNED.
+#
+#   docs/adr/0008-hoard-auto-allow.md states this as a limit of the guard:
+#   the `case` arms are pure shell and always run, so PEM headers and
+#   provider token prefixes still defer, while the assignment rule is the
+#   only part that shells out and silently drops out with no `grep` on
+#   PATH. That was established by RUNNING it, and it is pinned here so the
+#   ADR's stated limit and the hook's actual behaviour cannot drift apart
+#   in either direction - if a later change closes this gap, this scenario
+#   fails and the ADR gets corrected with it.
+#
+#   The shim PATH holds ONLY jq and cat, which is everything this hook
+#   needs on the allow path (every other tool it uses is a shell builtin).
+#   The control assertion below is what makes that claim visible rather
+#   than assumed: an ordinary memory must still ALLOW on this PATH, or a
+#   defer proved by a broken hook would look like a defer proved by the
+#   scan.
+# ==========================================================================
+shimH13e=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-nogrep.XXXXXX")
+cleanup_paths="$cleanup_paths $shimH13e"
+for toolH13e in jq cat; do
+  realH13e=$(command -v "$toolH13e" 2>/dev/null) || realH13e=""
+  [ -n "$realH13e" ] && ln -sf "$realH13e" "$shimH13e/$toolH13e"
+done
+if PATH="$shimH13e" command -v grep >/dev/null 2>&1; then grep_gone_H13e=no; else grep_gone_H13e=yes; fi
+assert_eq "yes" "$grep_gone_H13e" "HOARD-13e, control: grep must genuinely be off the shim PATH, or every assertion below is about a PATH that still has it"
+
+nogrep_decision_H13e() {
+  ng_out=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH13" "$shimH13e" "$1")
+  if [ -z "$ng_out" ]; then printf 'defer'; else printf 'allow'; fi
+}
+
+assert_eq "allow" "$(nogrep_decision_H13e "$stdinH13_hoard")" "HOARD-13e, control: an ordinary memory must still be auto-approved on the shim PATH - without this, every defer below could be a hook that simply could not run"
+
+stdinH13e_pem=$(jq -n --arg p "$homeH13/.squirrel/hoard/global/20260101T000000Z-x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"a body\n-----BEGIN RSA PRIVATE KEY-----\nmore"}}')
+assert_eq "defer" "$(nogrep_decision_H13e "$stdinH13e_pem")" "HOARD-13e: a PEM header must still defer with grep absent - that arm is a pure-shell \`case\`, which is exactly why ADR-0008 says the degradation is partial rather than total"
+
+stdinH13e_prefix=$(jq -n --arg p "$homeH13/.squirrel/hoard/global/20260101T000000Z-x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"a body ghp_EXAMPLE-NOT-A-REAL-TOKEN more"}}')
+assert_eq "defer" "$(nogrep_decision_H13e "$stdinH13e_prefix")" "HOARD-13e: and a provider token prefix must still defer with grep absent, for the same reason"
+
+stdinH13e_assign=$(jq -n --arg p "$homeH13/.squirrel/hoard/global/20260101T000000Z-x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"api_key = 0123456789abcdefghijklmnop"}}')
+assert_eq "defer" "$(hoard_decision "$homeH13" "$stdinH13e_assign")" "HOARD-13e, baseline: with grep PRESENT the assignment rule catches an opaque api_key value - the class that is about to be shown dropping out"
+assert_eq "allow" "$(nogrep_decision_H13e "$stdinH13e_assign")" "HOARD-13e: and with grep ABSENT the identical payload is AUTO-APPROVED. This is the limit ADR-0008 states, asserted rather than described: the guard degrades safely - no crash, no denial, no wrong allow for a shape the \`case\` arms know - and it stops catching this one"
+
+# --- HOARD-13f. The false-positive breadth ADR-0008 names, asserted.
+#     Each of these is ordinary prose, none of them is a credential, and
+#     every one costs the user exactly one permission prompt. The last row
+#     is the honest half: ordinary prose is clean, so this is breadth and
+#     not a guard that refuses everything.
+for proseH13f in "a MAKIAVELIAN plan for the release" \
+  "this guard matches the AKIA and AIza prefixes" \
+  "it also matches sk-ant and ghp_ prefixes" \
+  "token: 3f786850e387550fdab836ed7e6dc881de23001b"; do
+  stdinH13f=$(jq -n --arg p "$homeH13/.squirrel/hoard/global/20260101T000000Z-x.md" --arg c "$proseH13f" \
+    '{tool_name:"Write", tool_input:{file_path:$p, content:$c}}')
+  assert_eq "defer" "$(hoard_decision "$homeH13" "$stdinH13f")" "HOARD-13f: '$proseH13f' carries no credential and still defers - the prefixes are matched as substrings, so a memory ABOUT this guard is exactly the shape that trips it. ADR-0008 names each of these; this asserts they are real"
+done
+stdinH13f_clean=$(jq -n --arg p "$homeH13/.squirrel/hoard/global/20260101T000000Z-x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"never commit without running the test suite; two releases went out broken"}}')
+assert_eq "allow" "$(hoard_decision "$homeH13" "$stdinH13f_clean")" "HOARD-13f, the other half: ordinary prose must still be auto-approved, or the breadth ADR-0008 admits to would be a guard that bars correct work rather than one that occasionally costs a prompt"
 
 assert_report

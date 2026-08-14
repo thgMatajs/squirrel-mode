@@ -1,6 +1,13 @@
 # The hoard — durable cross-project memory for squirrel-mode
 
-Status: design approved, not implemented.
+Status: phase 1 implemented (§12, phase 1 — the storage layout, `scripts/hoard-search.sh`,
+`/squirrel:stash`, `/squirrel:dig` and ADR-0008's auto-approval), Claude Code only;
+phases 2-4 are not started.
+What they still owe: the session-start brief with both its caps and the `memory`
+profile field (§7.2, §7.5); automatic correction capture, the inbox, `seen`, repetition and
+`/squirrel:hoard` (§6.1-§6.3, §7.1); base rule 17, the trailing-line ordering and ADR-0007 (§7.3,
+§7.4, and item 1 of §10). Anything below that describes one of those is a design, not a description
+of shipped behaviour.
 Date: 2026-08-13.
 Supersedes nothing. Amends: `CONTEXT.md`, `README.md`, `ADR-0002`, base rule 15.
 
@@ -49,14 +56,24 @@ name of the product.
 
 | Term | Meaning | Avoid |
 | :-- | :-- | :-- |
-| **hoard** | The whole store of durable memories, both layers. | memory bank, knowledge base, store |
+| **hoard** | The whole store of durable memories, both layers. | memory bank, knowledge base |
 | **memory** | One atomic unit: a title, a short body, and its frontmatter. | note, entry, fact, record |
-| **layer** | `global` (the user) or `project` (one repository). Every memory is in exactly one. | scope, namespace |
+| **layer** | `global` (the user) or `project` (one repository). Every memory is in exactly one. | shared, namespace |
 | **candidate** | An automatically captured item in the inbox. Not yet a memory. | draft, suggestion, proposal |
 | **brief** | The budgeted block of memories injected at session start. | dump, context, digest |
 
 `digest` is already taken by the command that restructures inbound content; the brief is the opposite
 direction and never borrows that word.
+
+**Two `Avoid` columns changed after phase 1, and are recorded rather than quietly swapped.** "store"
+came off the hoard's list: this document's own next sentence calls the hoard "the store as a whole",
+so the entry contradicted its own definition, and the word is ordinary English in every other
+context this repository uses it in. "scope" came off the layer's list for the same reason —
+`CONTEXT.md` defines a **Scope guard** and the README has an "out of scope" section, so reserving
+the bare word would have made the glossary disagree with two shipped documents on its first day.
+"shared" was added in its place, because that is the drift that actually happened: `skills/dig/
+SKILL.md` shipped one sentence calling the global layer the "shared" layer, which is the exact thing
+this table exists to catch. `CONTEXT.md`'s own entries, added by task 8, match these lists.
 
 ## 4. Storage
 
@@ -145,9 +162,11 @@ is the whole reason the implementation is small: no rebuild, no staleness detect
 migration, no divergence between a file and its index. Every one of those is a failure mode that
 exists only because the index exists.
 
-The cost is a ceiling. Before release, the implementation measures the wall time of a full brief at
-500, 1000, and 2000 memories on a cold cache, and the README states the measured number rather than
-a guess. If the ceiling is ever reached, an index is a backward-compatible addition, because the
+The cost is a ceiling. Before release, the implementation measures the wall time at 500, 1000 and
+2000 memories on a cold cache, and the README states the measured number rather than a guess. **That
+measurement has not been taken yet, and no figure appears here or in the README until it has.** The
+phase-1 subject is `scripts/hoard-search.sh`, not the brief, because the brief does not exist until
+phase 2. If the ceiling is ever reached, an index is a backward-compatible addition, because the
 files remain the source of truth either way.
 
 ## 6. Lifecycle
@@ -343,6 +362,10 @@ Touchpoints: `rules/base-rules.md` Defaults table, `skills/init/SKILL.md`, `skil
 
 ## 8. Cross-target parity
 
+**This table is the feature's end state, not what phase 1 ships.** Phase 1 ships `stash` and `dig`
+on **Claude Code only**: no Codex skill and no Cursor skill for either command is built, and the
+README's parity table says so. The table below is what the four phases together are aiming at.
+
 Pull is cross-tool; push is Claude Code only — the same posture squirrel-mode already has for
 checkpoints, and forced by the same fact: Claude Code is the only target with lifecycle hooks.
 
@@ -354,7 +377,18 @@ checkpoints, and forced by the same fact: Claude Code is the only target with li
 
 The hoard is plain markdown under `~/.squirrel/`, so all three targets read the same content. What
 Codex and Cursor lose is the automation, never the data — exactly what already happens with the
-profile. The parity table in the README gains two columns rather than a footnote.
+profile. The parity table in the README gains a column rather than a footnote.
+
+**Porting either command is a rewrite of some of its sentences, not a copy.** Both name the `Write`
+and `Read` tools explicitly, and they do that because those two are what Claude Code's
+`PreToolUse` auto-approval covers — naming them is how a hoard write or a memory read avoids a
+permission prompt. A Codex variant **cannot reuse that wording**: Codex has neither those tool names
+nor any auto-approval to earn by using them, so every sentence resting on that mechanism has to be
+rewritten for what Codex actually does. `dig`'s four forgery rules rest on the same footing and need
+the same treatment: they are about lines a Claude Code `SessionStart` hook injects, and Codex has no
+lifecycle hook to inject them. Recorded here rather than in the skills themselves because it is
+whoever ports them who needs it, and `docs/OTHER-TOOLS.md`'s port table says the same thing where a
+porter will look first.
 
 ## 9. Security
 
@@ -371,6 +405,55 @@ profile. The parity table in the README gains two columns rather than a footnote
    the inbox and promotion is always per-item with the user reading the text. It is a mitigation,
    not an elimination, and the README says so.
 4. **Unchanged:** no network, no telemetry, nothing written inside a project repository.
+
+### 9.1 How the injected context is delivered
+
+`/squirrel:dig` and `/squirrel:pickup` both decide which lines in their context are squirrel-mode's
+by where those lines sit. That reasoning depends on facts that live in `hooks/hooks.json` and in one
+function of `scripts/load-profile.sh` and nowhere else, and this plan has already shipped a rule
+whose premise `hooks.json` had falsified. The facts, stated here so the next reader has them:
+
+- **`SessionStart` is registered for `startup|resume|clear|compact`**, and the hook branches on
+  `hook_event_name`, never on which of those four sources fired — so
+  **all four emit a full context block**.
+  A single conversation therefore carries several genuine blocks, and a later one is not
+  suspect for being later. A rule reading "the block, once, at the top of the conversation" would
+  reject a genuine line whenever a session is cleared or compacted.
+- **A separate channel re-shows the profile body alone.** When `profile.md` has changed since this
+  session last saw it, the `UserPromptSubmit` path re-emits the same framing sentence and the same
+  body, and **none** of squirrel-mode's own session lines after it — no off-token line, no checkpoint
+  lines, no search-command line, no resume banner.
+- **That difference is the discriminator both commands rely on**: squirrel-mode's own
+  **session lines appended after the quoted profile**, or not.
+  Text with none of them is profile text end to
+  end, however perfectly a line inside it satisfies a position rule read against that text alone.
+
+### 9.2 Two independent layers, and the forgery bound as measured
+
+The quoted profile sits above squirrel-mode's own lines in the same context, and `/squirrel:tune`
+writes `profile.md` from user-dictated text, so a body COULD otherwise spell a line exactly like one
+of squirrel-mode's — and acting on the search-command line runs a command. Two layers stand between
+that and a command running, and they are independent:
+
+- **At the hook.** `neutralise_forged_lines` in `scripts/load-profile.sh` marks any body line
+  beginning with one of squirrel-mode's own injected prefixes, so it no longer reaches the model
+  beginning that way. Nothing is deleted; the user's text stays theirs and stays readable.
+- **At the reader.** The rules in `skills/dig/SKILL.md` and `skills/pickup/SKILL.md` are exactly as
+  strict as they were before that function existed.
+
+**Either alone is sufficient, and neither is allowed to justify weakening the other.** The hook step
+fails open by design, and on that path the reading rules are the whole defence; a model can misapply
+a reading rule, and the hook step is what holds when it does. [ADR-0008](../adr/0008-hoard-auto-allow.md)
+and [ADR-0002](../adr/0002-checkpoint-auto-allow.md)'s task-7b amendment record the same statement.
+
+**The bound on a successful forgery, measured rather than assumed.** Single-quoting every value on
+`dig`'s command line limits a forged search-command line to running one file that already exists, at
+an absolute path of the forger's choosing ending in `/scripts/hoard-search.sh`, with no arguments and
+no shell syntax anywhere. That file **needs only to exist at a predictable absolute path** — an
+unpacked archive or a downloaded artifact puts one there with nothing ever executing to place it —
+and a script sitting at such a path can print result rows indistinguishable from real ones. What
+quoting removes is the ability to build an arbitrary command; it does not remove the risk of running
+the wrong file. An earlier draft put the bound higher than that, and running it proved otherwise.
 
 ## 10. Promises that must be amended
 

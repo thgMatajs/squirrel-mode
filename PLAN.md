@@ -4,8 +4,9 @@
 > *"Read PLAN.md and build it exactly as specified. Work through the Build Steps in order."*
 >
 > Read [CONTEXT.md](./CONTEXT.md) for the vocabulary and [docs/adr/](./docs/adr/) for why the
-> architecture looks the way it does. The six ADRs record decisions a reader would otherwise
-> assume were oversights and try to "fix".
+> architecture looks the way it does. The ADRs in that directory record decisions a reader would
+> otherwise assume were oversights and try to "fix". (This said "the six ADRs" until the hoard's
+> phase 1 added a seventh; a count here has no reason to exist and is not replaced with a new one.)
 
 ---
 
@@ -625,11 +626,11 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 
 ### Codex and Cursor (ADR-0004)
 
-| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
-| :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
-| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no |
+| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints | Hoard |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
+| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
+| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no | no |
 
 **Which commands port, and why the other four cannot.**
 

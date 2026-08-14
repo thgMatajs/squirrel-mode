@@ -1940,8 +1940,9 @@ assert_file_absent "$home32f/.cursor/.squirrel-install.lock" "the lock must be a
 #    in PLAN.md Section 3 ("Codex and Cursor (ADR-0004)") - pinned here
 #    too, as a third copy of the identical table. It is NOT extended to
 #    docs/adr/0004-tiered-parity-across-targets.md's own copy: that one
-#    is a deliberately different rendering (unbolded "8 namespaced
-#    skills", "skills in `~/.agents/skills/`" instead of the specific
+#    is a deliberately different rendering (unbolded "10 namespaced
+#    skills", no Hoard column,
+#    "skills in `~/.agents/skills/`" instead of the specific
 #    per-file path, "instructed file read only" without ", best-effort",
 #    no `**N**` counts) written when the ADR was drafted, before the
 #    paths were finalized - a design-history record, not a
@@ -1959,13 +1960,23 @@ assert_file_exists "$plan_doc" "PLAN.md must exist"
 
 extract_parity_table() {
   # extract_parity_table <file> - prints the 5-line "| Target | Always-on
-  # rules | Commands | Auto profile injection | Auto checkpoints |" table
-  # (header, separator, and the three target rows) verbatim, or nothing
-  # if no such table exists in <file>.
+  # rules | Commands | Auto profile injection | Auto checkpoints | Hoard |"
+  # table (header, separator, and the three target rows) verbatim, or
+  # nothing if no such table exists in <file>.
+  #
+  # THE HEADER GAINED A SIXTH COLUMN in phase 1 of the hoard, and this
+  # exact-match pattern moved with it, in all three files at once. That is
+  # the point of the pattern being exact: adding a column to one copy makes
+  # the extractor return NOTHING for that file, and the equality assertions
+  # below then fail loudly rather than comparing two tables that happen to
+  # share five columns. What this guard exists to catch is one copy drifting
+  # from the other two, not the column set being frozen forever - the same
+  # distinction tests/test_research.sh's docs/ listing assertion draws for
+  # itself.
   file=$1
   awk '
     BEGIN { capture = 0 }
-    /^\| Target \| Always-on rules \| Commands \| Auto profile injection \| Auto checkpoints \|$/ { capture = 1; print; next }
+    /^\| Target \| Always-on rules \| Commands \| Auto profile injection \| Auto checkpoints \| Hoard \|$/ { capture = 1; print; next }
     capture == 1 && /^\|/ { print; next }
     capture == 1 { capture = 0 }
   ' "$file" 2>/dev/null
@@ -2008,7 +2019,7 @@ assert_eq "no" "$parity_mutant_matches" "FAILURE PROOF (scenario 33): editing on
 plan_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-plan-parity-mutant.XXXXXX")
 cleanup_dirs="$cleanup_dirs $plan_mutant_dir"
 plan_mutant="$plan_mutant_dir/PLAN.md"
-sed 's/| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |/| Target | Always-on rules | Commands | Auto profile | Auto checkpoints |/' "$plan_doc" >"$plan_mutant"
+sed 's/| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints | Hoard |/| Target | Always-on rules | Commands | Auto profile | Auto checkpoints | Hoard |/' "$plan_doc" >"$plan_mutant"
 plan_mutant_table=$(extract_parity_table "$plan_mutant")
 plan_mutant_line_count=$(printf '%s\n' "$plan_mutant_table" | sed '/^$/d' | wc -l | awk '{print $1}')
 assert_eq "0" "$plan_mutant_line_count" "FAILURE PROOF (scenario 33, PLAN.md): reverting PLAN.md's table header to the old 'Auto profile' wording in a scratch copy must make the exact-header extractor find no table at all"
