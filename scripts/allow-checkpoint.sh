@@ -425,6 +425,32 @@
 # carry. The shape test is also the more conservative of the two: it
 # covers every flat child of checkpoints/, not just the one this project
 # happens to own.
+#
+# ======================================================================
+# ADDED BY THE HOARD, PHASE 1. Self-contained; nothing above this line is
+# restated or amended by it.
+# ======================================================================
+#
+# This script now governs TWO roots under $HOME/.squirrel/: the original
+# `checkpoints/` and the new `hoard/` (durable cross-project memory - see
+# docs/adr/0008-hoard-auto-allow.md and
+# docs/specs/2026-08-13-hoard-design.md).
+#
+# THE SECURITY BOUNDARY DID NOT LOOSEN, IT WAS COPIED. Layer 0 (the `..`
+# rejection), the length cap, Layer 1 (literal prefix strip) and Layer 2
+# (component symlink walk) are shared verbatim by both roots; the walk
+# starts at whichever root matched and, exactly as before, tests that
+# root ITSELF first, so a symlink planted AT hoard/ defers the same way
+# one planted at checkpoints/ does. The whole attack matrix was re-run
+# against the hoard shape rather than assumed to transfer - see
+# tests/test_hooks.sh's HOARD-* scenarios.
+#
+# ONE RULE DIFFERS, deliberately: a DIRECT CHILD FILE of hoard/ defers
+# for EVERY tool, including Read, while the same shape under
+# checkpoints/ still allows a Read (the pre-P1 legacy fold, decision D1
+# above). The hoard has no legacy flat layout - every memory lives one
+# level down in global/ or projects/<slug>/ - so the Read exception has
+# nothing to serve there and is not granted.
 set -eu
 
 # MAX_FILE_PATH_LEN: the DoS cap (see "FIXED MAJOR" above). 4096 bytes
@@ -780,26 +806,65 @@ decide() {
   # producing a false "defer" for an otherwise legitimate write - a
   # safe failure mode (never a false "allow"), but still a correctness
   # bug worth closing rather than shipping.
+  # TWO ROOTS, ONE BOUNDARY (phase 1 of the hoard). This script now
+  # governs `checkpoints/` and `hoard/`. Every layer above and below is
+  # shared verbatim: the `..` rejection, the length cap, the literal
+  # prefix strip and the component symlink walk all run identically on
+  # whichever root matched. Only the direct-child rule differs between
+  # them, and that difference is stated where it is applied, below.
+  #
+  # THIS SCRIPT'S NAME NOW NAMES ONLY ONE OF THE TWO ROOTS IT GOVERNS.
+  # That is a known, deliberate mismatch, not an oversight: renaming it
+  # touches hooks/hooks.json and roughly forty references in
+  # tests/test_hooks.sh, and doing that in the same change that widens a
+  # security boundary braids two risky edits together. The rename is
+  # deferred to the phase that rewrites this file's ADR trail. Recorded
+  # here so the mismatch is documented rather than discovered.
   checkpoints_dir=$(normalize_path "$home_dir/.squirrel/checkpoints") || checkpoints_dir="$home_dir/.squirrel/checkpoints"
+  hoard_dir=$(normalize_path "$home_dir/.squirrel/hoard") || hoard_dir="$home_dir/.squirrel/hoard"
 
   normalized=$(normalize_path "$file_path") || { printf 'defer'; return 0; }
 
-  # Layer 1: literal (non-glob) prefix containment.
-  prefix="$checkpoints_dir/"
-  after=${normalized#"$prefix"}
-  if [ "$after" = "$normalized" ] || [ -z "$after" ]; then
+  # Layer 1: literal (non-glob) prefix containment, against each root in
+  # turn. `${normalized#"$prefix"}` with the variable QUOTED inside the
+  # pattern is what keeps a `*` or `[` in $HOME literal - see the Layer 1
+  # paragraph in this file's header; a `case ... in $prefix*)` would not
+  # guarantee that.
+  root=""
+  after=""
+  for candidate in "$checkpoints_dir" "$hoard_dir"; do
+    prefix="$candidate/"
+    rest=${normalized#"$prefix"}
+    if [ "$rest" != "$normalized" ] && [ -n "$rest" ]; then
+      root=$candidate
+      after=$rest
+      break
+    fi
+  done
+  if [ -z "$root" ]; then
     printf 'defer'
     return 0
   fi
 
-  # Layer 1b (P1, tech-lead decision D1): a DIRECT CHILD FILE of
-  # checkpoints/ - no further "/" in the remainder - is the pre-P1 flat
-  # layout. Reading one is legitimate (that is how the legacy file gets
-  # folded in); writing one is not, because post-P1 nothing correct
-  # targets it. See the P1 paragraph in this file's header.
+  # Layer 1b, and the ONE place the two roots diverge.
+  #
+  # checkpoints/: a direct child file is the pre-P1 flat layout. Reading
+  # one is legitimate (that is how the legacy file gets folded in);
+  # writing one is not. Unchanged from before the hoard existed.
+  #
+  # hoard/: a direct child file is legitimate for NOTHING. Every memory
+  # lives one level down, in global/ or projects/<slug>/, and there is no
+  # legacy flat layout to fold in - so the Read exception has nothing to
+  # serve here and is not granted. Both are tripwires with no correct
+  # traffic behind them, and the cost when either fires is one ordinary
+  # permission prompt, never a denial.
   case "$after" in
     */*) ;;
     *)
+      if [ "$root" = "$hoard_dir" ]; then
+        printf 'defer'
+        return 0
+      fi
       case "$tool_name" in
         Read) ;;
         *)
@@ -814,7 +879,7 @@ decide() {
   # only, always-active fallback, zero external tools. Tests
   # checkpoints_dir itself first, then defers the instant any component
   # between checkpoints_dir and the leaf is itself a symlink.
-  if component_walk_has_symlink "$checkpoints_dir" "$after"; then
+  if component_walk_has_symlink "$root" "$after"; then
     printf 'defer'
     return 0
   fi

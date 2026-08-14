@@ -3131,10 +3131,11 @@ assert_eq "0" "$exit32r" "WRAPPER FAIL-SAFE CONTRACT, not Read-decision coverage
 # ==========================================================================
 fp31_script=$(make_script_scratch "$allow_checkpoint_script")
 # shellcheck disable=SC2016 # single-quoted deliberately: literal source text to locate, not shell expansion
-fp31_call_line=$(line_of "$fp31_script" '  if component_walk_has_symlink "$checkpoints_dir" "$after"; then')
+fp31_call_line=$(line_of "$fp31_script" '  if component_walk_has_symlink "$root" "$after"; then')
+assert_eq "yes" "$(if [ -n "$fp31_call_line" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (31) must find the Layer 2 call line in allow-checkpoint.sh - the hoard, phase 1, renamed its first argument from \$checkpoints_dir to \$root (the matched root), and an anchor left pinned to the old text would silently stop mutating anything and take scenario 31's proof vacuous with it"
 [ -n "$fp31_call_line" ] || fp31_call_line=0
 # shellcheck disable=SC2016 # single-quoted deliberately: literal replacement source text, not shell expansion
-replace_block "$fp31_script" "$fp31_call_line" "$fp31_call_line" '  if [ -L "$home_dir/.squirrel" ] || component_walk_has_symlink "$checkpoints_dir" "$after"; then'
+replace_block "$fp31_script" "$fp31_call_line" "$fp31_call_line" '  if [ -L "$home_dir/.squirrel" ] || component_walk_has_symlink "$root" "$after"; then'
 
 fp31_out=$(capture_stdout "$fp31_script" "$home31" "$stdin31")
 fp31_exit=$(capture_exit "$fp31_script" "$home31" "$stdin31")
@@ -6108,8 +6109,15 @@ assert_eq "yes" "$fpP1q_kept4" "FAILURE PROOF isolation (scenario 6g6 vs M1): th
 fpP1k_script=$(make_script_scratch "$allow_checkpoint_script")
 # shellcheck disable=SC2016 # single-quoted deliberately: literal source
 # text of allow-checkpoint.sh.
-fpP1k_start=$(line_of "$fpP1k_script" '  # Layer 1b (P1, tech-lead decision D1): a DIRECT CHILD FILE of')
+fpP1k_start=$(line_of "$fpP1k_script" '  # Layer 1b, and the ONE place the two roots diverge.')
+assert_eq "yes" "$(if [ -n "$fpP1k_start" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (P1k) must find Layer 1b's own opening comment in allow-checkpoint.sh - the hoard, phase 1, rewrote that comment when hoard/ joined checkpoints/ under the same block, and an anchor left pinned to the old wording would silently stop mutating anything and take scenario 14d's proof vacuous with it"
 [ -n "$fpP1k_start" ] || fpP1k_start=0
+# The `  esac` sought here is the OUTER one (two-space indent), which
+# closes `case "$after" in`. The hoard's direct-child guard added an
+# INNER `      esac` at six spaces inside the same block, and line_of_after
+# is whole-line-exact, so it is not a candidate - the deletion still spans
+# the whole of Layer 1b, hoard guard included, which is what this proof
+# wants: it asserts only on flat CHECKPOINT paths.
 fpP1k_end=$(line_of_after "$fpP1k_script" "$fpP1k_start" '  esac')
 [ -n "$fpP1k_end" ] || fpP1k_end=0
 replace_block "$fpP1k_script" "$fpP1k_start" "$fpP1k_end" ''
@@ -7315,5 +7323,111 @@ assert_contains "$ctx6h14" "(more checkpoint files exist in that directory than 
 # files would satisfy the assertion above.
 ctx6h14_real=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6h14" "$stdin6h14")")
 assert_eq "$expected6h14" "$(extract_checkpoint_list_block "$ctx6h14_real")" "6h14: the chunked reduction must return exactly what an unrestricted single \`ls\` returns for the same directory - a tournament on mtime, not an approximation of one"
+
+# ==========================================================================
+# HOARD-1. The hoard is a second auto-approved root, on the same terms.
+# ==========================================================================
+hoard_decision() {
+  # hoard_decision <home> <stdin_json> - "allow" or "defer". An empty
+  # stdout IS the no-opinion answer (see this script's header), so it is
+  # translated to "defer" here rather than treated as a parse failure.
+  hd_out=$(capture_stdout "$allow_checkpoint_script" "$1" "$2")
+  if [ -z "$hd_out" ]; then
+    printf 'defer'
+  else
+    printf '%s' "$hd_out" | jq -r '.hookSpecificOutput.permissionDecision // "defer"' 2>/dev/null
+  fi
+}
+
+homeH1=$(new_home)
+mkdir -p "$homeH1/.squirrel/hoard/global"
+
+stdinH1_write=$(jq -n --arg p "$homeH1/.squirrel/hoard/global/20260101T000000Z-x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"---\ntype: feedback\n---\n"}}')
+assert_eq "allow" "$(hoard_decision "$homeH1" "$stdinH1_write")" "a Write inside hoard/global/ must be auto-approved"
+
+stdinH1_read=$(jq -n --arg p "$homeH1/.squirrel/hoard/global/20260101T000000Z-x.md" \
+  '{tool_name:"Read", tool_input:{file_path:$p}}')
+assert_eq "allow" "$(hoard_decision "$homeH1" "$stdinH1_read")" "a Read inside hoard/global/ must be auto-approved"
+
+stdinH1_proj=$(jq -n --arg p "$homeH1/.squirrel/hoard/projects/repo-abc/20260101T000000Z-y.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+assert_eq "allow" "$(hoard_decision "$homeH1" "$stdinH1_proj")" "a Write inside hoard/projects/<slug>/ must be auto-approved"
+
+# The checkpoint root must still behave exactly as it did.
+mkdir -p "$homeH1/.squirrel/checkpoints/repo-abc"
+stdinH1_ckpt=$(jq -n --arg p "$homeH1/.squirrel/checkpoints/repo-abc/session-1.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+assert_eq "allow" "$(hoard_decision "$homeH1" "$stdinH1_ckpt")" "REGRESSION: a nested checkpoint Write must still be auto-approved after the hoard root was added"
+
+# ==========================================================================
+# HOARD-2. A direct child file of hoard/ defers for EVERY tool.
+#
+#     Nothing correct writes or reads hoard/<file>.md: every memory lives
+#     one level down, in global/ or projects/<slug>/. There is no legacy
+#     flat layout to fold in, so unlike checkpoints/ the Read side has no
+#     reason to be excepted, and a tripwire with no legitimate traffic
+#     behind it is worth more than a convenience nobody needs.
+# ==========================================================================
+homeH2=$(new_home)
+mkdir -p "$homeH2/.squirrel/hoard"
+for toolH2 in Write Edit Read; do
+  stdinH2=$(jq -n --arg p "$homeH2/.squirrel/hoard/loose.md" --arg t "$toolH2" \
+    '{tool_name:$t, tool_input:{file_path:$p, content:"x", new_string:"x"}}')
+  assert_eq "defer" "$(hoard_decision "$homeH2" "$stdinH2")" "a direct child file of hoard/ must defer for $toolH2 - every memory lives one level down"
+done
+
+# ==========================================================================
+# HOARD-3. Every existing layer still applies to the new root.
+# ==========================================================================
+homeH3=$(new_home)
+mkdir -p "$homeH3/.squirrel/hoard/global"
+
+# Layer 0: a `..` component.
+stdinH3_dots=$(jq -n --arg p "$homeH3/.squirrel/hoard/global/../../../.ssh/id_rsa" \
+  '{tool_name:"Read", tool_input:{file_path:$p}}')
+assert_eq "defer" "$(hoard_decision "$homeH3" "$stdinH3_dots")" "Layer 0: a .. component in a hoard path must defer"
+
+# Layer 1: prefix escape.
+stdinH3_prefix=$(jq -n --arg p "$homeH3/.squirrel/hoard-evil/x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+assert_eq "defer" "$(hoard_decision "$homeH3" "$stdinH3_prefix")" "Layer 1: hoard-evil/ is not hoard/ - the boundary character must be checked, not the substring"
+
+# Layer 2: a symlink below hoard/.
+ln -s "$homeH3" "$homeH3/.squirrel/hoard/global/escape"
+stdinH3_link=$(jq -n --arg p "$homeH3/.squirrel/hoard/global/escape/stolen.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+assert_eq "defer" "$(hoard_decision "$homeH3" "$stdinH3_link")" "Layer 2: a symlink component below hoard/ must defer"
+
+# Layer 2: a symlink AT hoard/ itself.
+homeH3b=$(new_home)
+mkdir -p "$homeH3b/.squirrel" "$homeH3b/outside"
+ln -s "$homeH3b/outside" "$homeH3b/.squirrel/hoard"
+stdinH3b=$(jq -n --arg p "$homeH3b/.squirrel/hoard/global/x.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+assert_eq "defer" "$(hoard_decision "$homeH3b" "$stdinH3b")" "Layer 2: a symlink AT hoard/ itself must defer, exactly as one at checkpoints/ does"
+
+# ==========================================================================
+# HOARD-4. FAILURE PROOF: a mutant that drops the direct-child guard for
+#          the hoard root must allow the loose file HOARD-2 rejects.
+# ==========================================================================
+mutantH4=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutantH4"
+# The six-space indent is PINNED on purpose. A later phase adds a second
+# line carrying this same text at a shallower indent, and an unpinned
+# pattern would neutralise both at once - which would leave this proof
+# passing while measuring something wider than the guard it names.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal source text of allow-checkpoint.sh to match, not shell expansion
+sed 's/^      if \[ "\$root" = "\$hoard_dir" \]; then$/      if false; then/' "$allow_checkpoint_script" >"$mutantH4"
+chmod +x "$mutantH4"
+stdinH4=$(jq -n --arg p "$homeH2/.squirrel/hoard/loose.md" \
+  '{tool_name:"Read", tool_input:{file_path:$p}}')
+outH4=$(printf '%s' "$stdinH4" | HOME="$homeH2" "$mutantH4" 2>/dev/null) || true
+if printf '%s' "$outH4" | grep -qF '"allow"'; then
+  mutantH4_allows=yes
+else
+  mutantH4_allows=no
+fi
+assert_eq "yes" "$mutantH4_allows" "FAILURE PROOF (HOARD-2): removing the hoard-specific direct-child guard must make the loose file allow - if it still defers, HOARD-2 is passing for some other reason and the guard is untested"
 
 assert_report
