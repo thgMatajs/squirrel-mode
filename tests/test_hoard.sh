@@ -367,7 +367,7 @@ assert_contains "$stash_body" "Write" "stash must name the Write tool: only Writ
 assert_contains "$stash_body" "never inside the project" "stash must state that nothing is ever written inside a project repository"
 assert_contains "$stash_body" "superseded_by" "stash must specify the full frontmatter, superseded_by included - the reader assumes every key is present"
 assert_contains "$stash_body" "date -u +%Y%m%dT%H%M%SZ" "stash must name the exact timestamp command, or two memories written by different sessions get incomparable stamps"
-assert_contains "$stash_body" "supersede" "stash must instruct superseding rather than editing when a fact changed"
+assert_contains "$stash_body" "Never rewrite an existing memory" "stash must instruct superseding rather than editing when a fact changed - matched on the instruction's own prose, because the phrase 'supersede' alone is also a prefix of the 'superseded_by' frontmatter key that a separate assertion already requires, so it would pass with the whole instruction deleted"
 assert_contains "$stash_body" "Show the title and body" "stash must show the user what it is about to write - a memory the user never saw is one they cannot correct"
 
 # The four types, all of them, spelled out.
@@ -392,5 +392,26 @@ else
 fi
 assert_eq "no" "$stash_mutant_has_write" "FAILURE PROOF (scenario 11): a copy with every 'Write' line removed must not contain 'Write' - proving the tool-naming assertion is not matching some other line"
 assert_contains "$stash_mutant_body" "superseded_by" "FAILURE PROOF (scenario 11, independence): removing the Write lines must leave the frontmatter specification intact"
+
+# ==========================================================================
+# 11c. FAILURE PROOF for scenario 11's supersede assertion: deleting the
+#      instruction must make it fail. The obvious needle 'supersede' does
+#      NOT have this property - it is a prefix of the 'superseded_by'
+#      frontmatter key, which another assertion independently requires, so
+#      it passes against a file with the whole instruction removed. This
+#      proof is what distinguishes the two.
+# ==========================================================================
+supersede_mutant=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-skill.XXXXXX")
+cleanup_paths="$cleanup_paths $supersede_mutant"
+awk '
+  /^## When a fact changed/ { skip = 1; next }
+  skip && /^## / { skip = 0 }
+  skip { next }
+  { print }
+' "$stash_file" >"$supersede_mutant"
+supersede_mutant_body=$(cat "$supersede_mutant" 2>/dev/null || printf '')
+
+assert_not_contains "$supersede_mutant_body" "Never rewrite an existing memory" "FAILURE PROOF (scenario 11c): removing the 'When a fact changed, supersede instead of editing' section must remove its instructional prose"
+assert_contains "$supersede_mutant_body" "superseded_by" "FAILURE PROOF (scenario 11c, independence): the frontmatter key 'superseded_by' must still be present after removing the supersede instruction - proving the instruction and the field name are independent needles, so the new assertion is testing the instruction and not the field"
 
 assert_report
