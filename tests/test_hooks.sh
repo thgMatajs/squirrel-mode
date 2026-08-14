@@ -1391,41 +1391,70 @@ count_files() {
   find "$1" -type f 2>/dev/null | wc -l | awk '{print $1}'
 }
 
-count_mtime_maxima() {
-  # How many of <dir>'s regular files have NO strictly-newer peer. It is
-  # exactly 1 when every mtime is distinct, and equal to the file count
-  # when they have all collapsed onto one timestamp.
+count_without_newer() {
+  # count_without_newer <dir> <subject_glob> <peer_glob> - how many files
+  # matching <subject_glob> in <dir> have NO strictly-newer file among
+  # those matching <peer_glob>. Two globs, not one, because the two
+  # questions these fixtures actually depend on are different shapes:
   #
-  # ASKED WITH `find -newer`, NOT BY READING `ls -l`. The first version
-  # of this helper counted distinct "$6 $7 $8" columns of `ls -l` output
-  # and was wrong in the one case it existed for: `ls -l` prints a YEAR
-  # instead of a time for files more than six months old, so an entire
-  # ladder of thirty rungs one minute apart came back as ONE mtime group
-  # and the fixture assertion failed on a fixture that was perfectly
-  # correct. `find -newer` is the comparison the pruner itself makes, so
-  # this measures the property that actually matters rather than a
-  # rendering of it.
-  cmm_dir=$1
-  cmm_maxima=0
-  for cmm_a in "$cmm_dir"/*; do
-    if [ ! -f "$cmm_a" ] || [ -L "$cmm_a" ]; then
+  #   count_without_newer d 'old-*.md' 'old-*.md'  == 1
+  #     "this ladder is STRICT" - exactly one rung, the newest, has no
+  #     newer rung. Two rungs sharing an mtime makes it 2.
+  #   count_without_newer d 'old-*.md' 'fresh-*.md' == 0
+  #     "every rung is strictly older than the fresh group", which is
+  #     what fixes each rung's rank.
+  #
+  # ASKED WITH `find -newer`, NOT BY READING `ls -l`. An earlier version
+  # counted distinct "$6 $7 $8" columns of `ls -l` output and was wrong
+  # in the one case it existed for: `ls -l` prints a YEAR instead of a
+  # time for files more than six months old, so a ladder of thirty rungs
+  # one minute apart came back as ONE mtime group and the assertion
+  # failed on a fixture that was perfectly correct. `find -newer` is the
+  # comparison the pruner itself makes.
+  #
+  # WHY IT IS SCOPED TO A GROUP, AND WHY THAT IS NOT A RELAXATION. The
+  # single-glob version asked "is there exactly one newest file in this
+  # directory", which is a STRICTLY STRONGER claim than any of these
+  # fixtures needs - and it is false on Linux for a reason that has
+  # nothing to do with the property under test. Reproduced in an
+  # ubuntu:24.04 container: five files created back to back with no
+  # `touch` all landed on the SAME nanosecond,
+  # "03:09:54.643198893" - not a rounding artefact, the kernel serves
+  # file timestamps from a clock cached at timer-tick granularity, so
+  # everything written inside one tick is genuinely simultaneous. On
+  # APFS the same five files get five distinct stamps, which is why this
+  # was green on a Mac and red on CI. The rank rule does not care: those
+  # five are inside the 30-day floor, so they are never candidates, and
+  # they are all newer than every rung either way. Asking per group asks
+  # for exactly what the arithmetic below relies on and nothing more - a
+  # genuinely collapsed LADDER still comes back as 2 or more and still
+  # fails.
+  cwn_dir=$1
+  cwn_subject=$2
+  cwn_peer=$3
+  cwn_count=0
+  # shellcheck disable=SC2231 # the globs are the POINT: both patterns are
+  # deliberately unquoted so the shell expands them against <dir>.
+  for cwn_a in "$cwn_dir"/$cwn_subject; do
+    if [ ! -f "$cwn_a" ] || [ -L "$cwn_a" ]; then
       continue
     fi
-    cmm_has_newer=0
-    for cmm_b in "$cmm_dir"/*; do
-      if [ ! -f "$cmm_b" ] || [ -L "$cmm_b" ]; then
+    cwn_has_newer=0
+    # shellcheck disable=SC2231
+    for cwn_b in "$cwn_dir"/$cwn_peer; do
+      if [ ! -f "$cwn_b" ] || [ -L "$cwn_b" ]; then
         continue
       fi
-      if [ -n "$(find "$cmm_b" -newer "$cmm_a" 2>/dev/null)" ]; then
-        cmm_has_newer=1
+      if [ -n "$(find "$cwn_b" -newer "$cwn_a" 2>/dev/null)" ]; then
+        cwn_has_newer=1
         break
       fi
     done
-    if [ "$cmm_has_newer" -eq 0 ]; then
-      cmm_maxima=$((cmm_maxima + 1))
+    if [ "$cwn_has_newer" -eq 0 ]; then
+      cwn_count=$((cwn_count + 1))
     fi
   done
-  printf '%s' "$cmm_maxima"
+  printf '%s' "$cwn_count"
 }
 
 count_slug_dirs() {
@@ -1464,7 +1493,8 @@ make_aged_ladder "$dir6g8a" 12
 # to one timestamp would make every count below come out "12" for a
 # reason that has nothing to do with the sweep.
 assert_eq "12" "$(count_files "$dir6g8b")" "6g8 fixture sanity: the abandoned project must hold 12 checkpoint files before the run under test"
-assert_eq "1" "$(count_mtime_maxima "$dir6g8b")" "6g8 fixture sanity: the abandoned project's ladder must be STRICT - exactly one file with no strictly-newer peer. \`find -newer\` is strictly-greater, so a collapsed ladder makes the rank rule inert and this scenario would pass without pruning anything"
+assert_eq "1" "$(count_without_newer "$dir6g8b" 'old-*.md' 'old-*.md')" "6g8 fixture sanity: the abandoned project's ladder must be STRICT - exactly one rung with no strictly-newer rung. \`find -newer\` is strictly-greater, so a collapsed ladder makes the rank rule inert and this scenario would pass without pruning anything"
+assert_eq "1" "$(count_without_newer "$dir6g8a" 'old-*.md' 'old-*.md')" "6g8 fixture sanity: the OPEN project's ladder must be strict too - its 'still pruned to 10' assertion below is the isolation half and would pass vacuously against a collapsed ladder for the opposite reason"
 assert_eq "12" "$(find "$dir6g8b" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8 fixture sanity: all 12 of the abandoned project's files must be older than the 30-day floor, or the age conjunct - not the sweep - is what left them alone"
 
 capture_stdout "$load_profile_script" "$home6g8" "$stdin6g8" >/dev/null
@@ -1498,7 +1528,7 @@ while [ "$i6g8b" -le 13 ]; do
   i6g8b=$((i6g8b + 1))
 done
 assert_eq "14" "$(count_files "$dir6g8b_peer")" "6g8b fixture sanity: the busy peer must hold 14 files before the run under test"
-assert_eq "1" "$(count_mtime_maxima "$dir6g8b_peer")" "6g8b fixture sanity: the busy peer's 14 files must have distinct mtimes (exactly one with no strictly-newer peer), or a rank-only mutant would find nothing to rank and this scenario would pass vacuously"
+assert_eq "1" "$(count_without_newer "$dir6g8b_peer" 'today-*.md' 'today-*.md')" "6g8b fixture sanity: the busy peer's 14 files must be strictly ordered among themselves - they are stamped one minute apart with \`touch -t\` rather than left to the clock, and without that a rank-only mutant would find nothing to rank and this scenario would pass vacuously"
 assert_eq "0" "$(find "$dir6g8b_peer" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8b fixture sanity: none of the busy peer's files may be older than the 30-day floor"
 
 stdin6g8b=$(printf '{"session_id":"sess-6g8b","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8b_open")
@@ -1545,6 +1575,7 @@ done
 # would put all seventeen dormant files outside the newest ten.
 assert_eq "5" "$(count_files "$dir6g8c_small")" "6g8c fixture sanity: the small dormant peer must hold 5 files"
 assert_eq "12" "$(count_files "$dir6g8c_big")" "6g8c fixture sanity: the big dormant peer must hold 12 files"
+assert_eq "1" "$(count_without_newer "$dir6g8c_big" 'old-*.md' 'old-*.md')" "6g8c fixture sanity: its ladder must be strict, or 'keeps its own 10 newest' is not a rank at all"
 assert_eq "20" "$(count_files "$dir6g8c_open")" "6g8c fixture sanity: the open project must hold 20 files, all newer than both dormant projects, or a global rank would have nothing to outrank them with"
 assert_eq "0" "$(find "$dir6g8c_open" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8c fixture sanity: the open project's 20 files must all be fresh, so nothing there is a deletion candidate and every deletion below is the sweep's doing"
 
@@ -1575,7 +1606,7 @@ mkdir -p "$home6g8d/.squirrel/checkpoints" "$home6g8d/victim-6g8d"
 make_aged_ladder "$home6g8d/victim-6g8d" 12
 ln -s "$home6g8d/victim-6g8d" "$home6g8d/.squirrel/checkpoints/peer-slug-6g8d"
 assert_eq "12" "$(count_files "$home6g8d/victim-6g8d")" "6g8d fixture sanity: the unrelated directory must hold 12 files, on a ladder the age-and-rank rule WOULD select from, before the run under test"
-assert_eq "1" "$(count_mtime_maxima "$home6g8d/victim-6g8d")" "6g8d fixture sanity: the unrelated directory's ladder must be strict, or the rank rule could not select any of its files and this scenario would prove nothing about the symlink guard"
+assert_eq "1" "$(count_without_newer "$home6g8d/victim-6g8d" 'old-*.md' 'old-*.md')" "6g8d fixture sanity: the unrelated directory's ladder must be strict, or the rank rule could not select any of its files and this scenario would prove nothing about the symlink guard"
 
 stdin6g8d=$(printf '{"session_id":"sess-6g8d","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8d")
 exit6g8d=$(capture_exit "$load_profile_script" "$home6g8d" "$stdin6g8d")
@@ -1593,6 +1624,7 @@ mkdir -p "$home6g8d2/.squirrel"
 ln -s "$home6g8d2/real-checkpoints-elsewhere" "$home6g8d2/.squirrel/checkpoints"
 stdin6g8d2=$(printf '{"session_id":"sess-6g8d2","cwd":"%s/opened-project","hook_event_name":"SessionStart"}' "$home6g8d2")
 assert_eq "12" "$(count_files "$home6g8d2/real-checkpoints-elsewhere/stranger-slug")" "6g8d2 fixture sanity: the stranger's directory must hold 12 files before the run under test"
+assert_eq "1" "$(count_without_newer "$home6g8d2/real-checkpoints-elsewhere/stranger-slug" 'old-*.md' 'old-*.md')" "6g8d2 fixture sanity: and its ladder must be strict - the assertion below counts SURVIVORS, so a collapsed ladder nothing could ever select would satisfy it for entirely the wrong reason"
 capture_stdout "$load_profile_script" "$home6g8d2" "$stdin6g8d2" >/dev/null
 assert_eq "12" "$(count_files "$home6g8d2/real-checkpoints-elsewhere/stranger-slug")" "SWEEP (trust boundary): a symlinked checkpoints/ must stop the sweep before it enumerates anything - all twelve of the stranger's files must survive"
 
@@ -1639,14 +1671,26 @@ home6g8e=$(new_home)
 cwd6g8e="$home6g8e/opened-project"
 dir6g8e=$(peer_slug_dir "$home6g8e" "$home6g8e/huge-abandoned-project")
 make_aged_ladder "$dir6g8e" 30
+# STAMPED, not left to the clock. These five were originally created back
+# to back with no `touch`, which is fine on APFS and is NOT on Linux: an
+# ubuntu:24.04 container gives all five the identical nanosecond, because
+# file timestamps come from a clock cached at timer-tick granularity.
+# Nothing about the pruning depended on it - they are inside the 30-day
+# floor and so never candidates - but the fixture assertion did, and it
+# went red on CI while green on a Mac. The ladder above was explicit from
+# the start; these are now explicit for the same reason.
+today6g8e=$(date +%Y%m%d)
 i6g8e=1
 while [ "$i6g8e" -le 5 ]; do
   printf 'x\n' >"$dir6g8e/fresh-$i6g8e.md"
+  touch -t "${today6g8e}120$((i6g8e - 1))" "$dir6g8e/fresh-$i6g8e.md"
   i6g8e=$((i6g8e + 1))
 done
 assert_eq "35" "$(count_files "$dir6g8e")" "6g8e fixture sanity: the abandoned project must hold 35 files before the run under test"
 assert_eq "30" "$(find "$dir6g8e" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8e fixture sanity: exactly 30 of them must be past the 30-day floor, or the run has fewer candidates than this scenario's arithmetic assumes"
-assert_eq "1" "$(count_mtime_maxima "$dir6g8e")" "6g8e fixture sanity: the 30-rung ladder plus 5 fresh files must be strictly ordered - a collapsed ladder would stall the pruner outright and this scenario would then be measuring the stall, not the budget"
+assert_eq "1" "$(count_without_newer "$dir6g8e" 'old-*.md' 'old-*.md')" "6g8e fixture sanity: the 30-rung ladder must be STRICT - a collapsed ladder would stall the pruner outright and this scenario would then be measuring the stall, not the budget"
+assert_eq "0" "$(count_without_newer "$dir6g8e" 'old-*.md' 'fresh-*.md')" "6g8e fixture sanity: every rung must be strictly older than the fresh group - that is what fixes each rung's rank, and so what makes 'the ten survivors are the 5 fresh plus old-26..old-30' a prediction rather than a guess"
+assert_eq "1" "$(count_without_newer "$dir6g8e" 'fresh-*.md' 'fresh-*.md')" "6g8e fixture sanity: and the 5 fresh files must be strictly ordered among themselves - not because the rank rule needs it (they are inside the 30-day floor and never candidates) but because leaving them to the wall clock is exactly what made this fixture behave differently on Linux and macOS"
 
 stdin6g8e=$(printf '{"session_id":"sess-6g8e","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8e")
 capture_stdout "$load_profile_script" "$home6g8e" "$stdin6g8e" >/dev/null
@@ -1746,6 +1790,7 @@ case "${dir6g8g_open##*/}" in
 esac
 assert_eq "yes" "$sorts6g8g" "6g8g fixture sanity: the open project's slug must sort ahead of every sweepdir-NNN, or the exact directory-cap arithmetic below is measuring a different hundred entries than it claims"
 assert_eq "12" "$(count_files "$dir6g8g_tail")" "6g8g fixture sanity: the tail project must hold 12 prunable checkpoints before the run under test"
+assert_eq "1" "$(count_without_newer "$dir6g8g_tail" 'old-*.md' 'old-*.md')" "6g8g fixture sanity: PRUNABLE means its ladder is strict - the directory-cap assertion below counts survivors, so a ladder the rank rule could never select from would look exactly like a cap that held"
 
 capture_stdout "$load_profile_script" "$home6g8g" "$stdin6g8g" >/dev/null
 assert_eq "12" "$(count_files "$dir6g8g_tail")" "SWEEP (directory cap): one session start must look at no more than 100 entries - the open project plus sweepdir-000..098 - so the project sorting last must be untouched by the first run, or nothing bounds the walk across a machine with hundreds of projects"
