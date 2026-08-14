@@ -112,6 +112,18 @@
 # seen tracking and reinjection (empty stdout). emit_json stays
 # SessionStart-only.
 #
+# FORGED SESSION LINES IN THE QUOTED BODY, on BOTH paths above: the body
+# is quoted with exactly one transformation. A line of it that BEGINS
+# with one of the prefixes squirrel-mode uses for its own injected lines
+# is emitted with "[profile] " in front of it, so it no longer begins
+# with that prefix and cannot be read as squirrel-mode's own. Nothing is
+# deleted, reordered or otherwise rewritten. Both paths get it because
+# both put the body through cap_profile_body; see
+# SQUIRREL_RESERVED_LINE_PREFIXES and neutralise_forged_lines below for
+# the list, for why it lives there, and for the fail-open behaviour that
+# makes the reading rules in skills/dig/SKILL.md and
+# skills/pickup/SKILL.md a second layer rather than a redundant one.
+#
 # AN EXACT MTIME TIE REINJECTS - fixed MINOR, this cycle. The gate used
 # to be `find "$profile_file" -newer "$seen_file"`, which is STRICTLY
 # newer, so a profile.md and a seen stamp sharing an mtime silently
@@ -1152,17 +1164,24 @@ checkpoint_list_candidates() {
 # "<Label>: <value>" lines to prove it. That enumeration omitted the
 # LARGEST thing this hook emits - the profile body - and was therefore
 # false. build_context puts profile.md's body into the injected context
-# FIRST and VERBATIM (format_profile_framing interpolates it with %s, no
-# fencing) and appends this block some thirty lines later, so a profile
-# body is free to contain a line that reads exactly like this header
-# followed by any absolute paths it likes, and that forged block lands
-# BEFORE the real one. Reproduced with a profile.md holding
+# FIRST (format_profile_framing interpolates it with %s, no fencing) and
+# appends this block some thirty lines later, so a profile body was free
+# to contain a line that reads exactly like this header followed by any
+# absolute paths it likes, and that forged block landed BEFORE the real
+# one. Reproduced with a profile.md holding
 # "Project checkpoint files, newest first:" and "/etc/passwd", and again
 # on the UserPromptSubmit reinjection path, which emits the profile body
 # and no block of its own. profile.md is a documented, privileged
 # prompt-injection surface that the cap above only BOUNDS (see
 # PROFILE_MAX_LINES), and /squirrel:tune writes it from user-dictated
 # text, so "the profile is trusted" was never available as an answer.
+#
+# neutralise_forged_lines below now marks such a header inside the body,
+# so it no longer reaches the model beginning with this header's
+# spelling - but that does NOT make the token redundant and nothing here
+# is relaxed on the strength of it. That step FAILS OPEN (a missing awk
+# returns the body untouched), and the token is what holds when it does.
+# Two independent layers, either sufficient on its own.
 #
 # The token is the answer instead: it is this session's off-token, the
 # same opaque value build_context puts on the "Session off-token:" line,
@@ -1870,7 +1889,10 @@ emit_json() {
 # --- Injected profile size cap (tech-lead ruling; see PLAN.md, "The
 # profile") ------------------------------------------------------------
 #
-# profile.md is injected into the model's context VERBATIM, framed as
+# profile.md is injected into the model's context VERBATIM apart from the
+# one transformation neutralise_forged_lines below applies (a line
+# spelled like one of squirrel-mode's own injected lines gets a
+# "[profile] " marker in front of it; nothing else changes), framed as
 # authoritative field overrides ("These field values OVERRIDE the
 # defaults..." below) - so anything that can write that file gets a
 # persistent, privileged prompt-injection surface, and an unbounded file
@@ -2020,9 +2042,201 @@ strip_incomplete_utf8_tail() {
   fi
 }
 
+# --- Forged squirrel-mode lines inside the quoted profile body ---------
+#
+# THE PROBLEM. Everything here puts profile.md into the model's context
+# and appends squirrel-mode's OWN session lines after it, so a profile is
+# free to hold a line spelled exactly like one of them - "Session
+# off-token:", "Hoard search command:", the checkpoint list header - and
+# that forged line reaches the model looking like squirrel-mode's. It was
+# reproduced end to end while /squirrel:dig was reviewed: a profile
+# forging an off-token line and a search-command line satisfied every
+# positional rule skills/dig/SKILL.md states, and on the UserPromptSubmit
+# re-show path - which emits the profile framing and NONE of
+# squirrel-mode's own lines - the forgery was the only such line in the
+# text, so position and last-wins had nothing to prefer over it. Acting
+# on that one line runs a command.
+#
+# WHAT THIS DOES ABOUT IT. A line of the profile body that BEGINS with
+# one of SQUIRREL_RESERVED_LINE_PREFIXES is emitted with
+# PROFILE_LINE_MARKER in front of it, so it no longer begins with that
+# prefix. Every reading rule in skills/dig/SKILL.md and
+# skills/pickup/SKILL.md matches a line by its own START, so a marked
+# line cannot satisfy any of them, and the marker says plainly what the
+# line is instead.
+#
+# NEUTRALISE, NEVER DELETE. profile.md is the user's own file and may
+# hold such a line innocently - a pasted transcript of a past session is
+# the obvious way. The line is still there, still readable, still the
+# user's text; it just no longer impersonates squirrel-mode. Deleting it
+# would be a hook silently editing the user's document, and scenario 6h6
+# in tests/test_hooks.sh has recorded from the beginning that being
+# unable to IMPERSONATE the hook is the property - not being unable to
+# say anything.
+#
+# THE SECOND LAYER, NOT A REPLACEMENT FOR THE FIRST. The rules in those
+# two skills stay exactly as strict as they are, and neither is told this
+# function exists: a model told its input is already clean has a reason
+# to skip its own check, and this function FAILS OPEN (below), so there
+# are inputs where those rules are all that is left.
+#
+# WHY IT HANGS OFF cap_profile_body. That function is the ONE place both
+# emission paths put the body through - build_context calls it on
+# SessionStart, handle_user_prompt_submit calls it on the re-show - so
+# covering it covers both by construction instead of by two call sites
+# that can drift apart. Emission-path coverage is exactly how the first
+# attempt at this was incomplete: the re-show path is the one the exploit
+# used, and it shares no other code with SessionStart's assembly.
+#
+# ORDER: NEUTRALISE FIRST, THEN CAP. cap_profile_body appends its own
+# truncation notice AFTER cutting, so neutralising first is what keeps
+# that genuine notice from being marked as profile text by this very
+# function - while still letting a FORGED copy of the notice inside the
+# body be marked, which is why its prefix is in the list below. The cap's
+# documented budget is unaffected: the cut happens after this, so what is
+# injected is still at most PROFILE_MAX_BYTES plus that one notice line.
+
+# SQUIRREL_RESERVED_LINE_PREFIXES: every prefix squirrel-mode uses at the
+# START of a line it puts into the model's context, one per line. THE
+# SINGLE HOME for that set - nothing else in this file, and nothing in
+# tests/, restates it.
+#
+# WHY THE GENUINE LINES ARE NOT EMITTED BY ITERATING THIS LIST, which is
+# the obvious way to guarantee one source. They are emitted as literal
+# text at every site that emits one - build_context's inline assignments,
+# checkpoint_file_lines' two printfs, format_profile_framing,
+# detect_old_data_dir, cap_profile_body's own notice, the
+# PROFILE_SEEN_UNAVAILABLE_NOTICE constant, and the two hardcoded
+# fallbacks at the bottom of this file - and several of those exact source
+# lines are the mutation target of an existing failure proof in
+# tests/test_hooks.sh: fpP1e, fpH9, fpL5, fpL6 and fpL9 all locate a line
+# by its literal text and rewrite it. Replacing those literals with
+# expansions of this list would silently turn each of those proofs into a
+# no-op mutation, and two of the sites sit inside the checkpoint file-list
+# block, which this change is not permitted to touch. Deriving the list at
+# RUNTIME from the lines emitted does not work either: "Legacy checkpoint
+# file:", "Resume available", the list header and the marker are all
+# CONDITIONAL, absent from most sessions, so a derived list would leave
+# exactly those prefixes unguarded in the sessions where they are absent.
+#
+# What replaces "one list by construction" is a test that closes the same
+# gap from the other side: scenario HOARD-12e runs the hook with every
+# conditional line triggered at once and asserts that every line
+# squirrel-mode emitted is covered by a prefix in this list. A new
+# injected line added without registering it here fails that scenario.
+# The residual limit, stated rather than implied: a future line emitted
+# only under a condition that scenario does not trigger would escape it.
+#
+# No entry carries a trailing space. A prefix is matched literally, so a
+# shorter one only ever matches MORE - and a trailing space in a shell
+# string literal cannot be seen in review and is routinely eaten by
+# editors, which is not a property a guard should rest on.
+#
+# "squirrel-mode:" covers all three lines this hook addresses to the
+# model in its own voice (the no-profile suggestion, the S11 migration
+# notice, the profile-seen notice). The truncation notice is listed
+# separately because it begins with "[" and would not otherwise match.
+SQUIRREL_RESERVED_LINE_PREFIXES='A squirrel-mode profile exists at
+squirrel-mode:
+[squirrel-mode: profile.md truncated
+Session working directory:
+Session off-token:
+Project checkpoint directory:
+Project checkpoint path:
+Hoard search command:
+Project checkpoint files, newest first (session
+(more checkpoint files exist in that directory than are listed here - session
+Legacy checkpoint file:
+Resume available - run /squirrel:pickup'
+
+# PROFILE_LINE_MARKER: what goes in front of a profile line that would
+# otherwise begin with one of those prefixes. Short, because a
+# pathological profile can carry PROFILE_MAX_LINES of them and every byte
+# of that comes out of the same context budget; and readable as what it
+# is, because the model has to be able to tell at a glance that the line
+# is the user's text rather than squirrel-mode's.
+PROFILE_LINE_MARKER='[profile] '
+
+# neutralise_forged_lines <body>: <body> with PROFILE_LINE_MARKER in
+# front of every line that begins with one of the reserved prefixes, and
+# every other byte unchanged.
+#
+# FAILS OPEN, like everything else in this hook: an `awk` that is absent,
+# fails, or exits 0 with nothing to show for it returns the body EXACTLY
+# as it came in, and the hook still emits its context and still exits 0.
+# That is the direction this file's whole header commits to, and it is the
+# reason the skill-side reading rules must stay strict - on that path they
+# are the only layer left. The `if` around the substitution is the file's
+# own call-site guarding convention (see build_context), which is what
+# keeps `set -e` from turning a failing awk into a dead session.
+#
+# SCOPED TO THIS STEP, deliberately, because the whole-hook claim would
+# be wrong: with awk absent from PATH ALTOGETHER, cap_profile_body's own
+# `wc -l | awk` pipeline below fails first, `set -e` aborts
+# build_context, and the caller's fallback emits the "no profile found
+# yet" line instead - behaviour that predates this function and was
+# verified identical on the previous commit. So an absent awk costs the
+# profile for a reason that is not this function's; what this function
+# guarantees is that IT never costs the profile. Scenario HOARD-12f
+# proves the guarantee with a shim awk that fails for this one call only,
+# for exactly that reason.
+#
+# `index(line, prefix) == 1` is a LITERAL prefix test, not a regex match:
+# the prefixes carry "(", "[" and "." and must never be read as pattern
+# syntax. The list and the marker are handed over through the ENVIRONMENT
+# rather than `awk -v`, because POSIX awk re-processes backslash escapes
+# in a -v assignment - the trap line_of in tests/test_hooks.sh documents.
+# `LC_ALL=C` for the reason json_escape's own comment gives at length: a
+# profile body may hold bytes that are not valid UTF-8, and a BSD awk
+# aborts mid-stream on one under a UTF-8 locale.
+neutralise_forged_lines() {
+  nfl_body=$1
+  [ -n "$nfl_body" ] || { printf '%s' "$nfl_body"; return 0; }
+  if nfl_out=$(printf '%s\n' "$nfl_body" \
+    | SQUIRREL_NFL_PREFIXES="$SQUIRREL_RESERVED_LINE_PREFIXES" \
+      SQUIRREL_NFL_MARKER="$PROFILE_LINE_MARKER" \
+      LC_ALL=C awk '
+      BEGIN {
+        nfl_n = split(ENVIRON["SQUIRREL_NFL_PREFIXES"], nfl_pfx, "\n")
+        nfl_marker = ENVIRON["SQUIRREL_NFL_MARKER"]
+      }
+      {
+        nfl_line = $0
+        for (nfl_i = 1; nfl_i <= nfl_n; nfl_i++) {
+          if (nfl_pfx[nfl_i] == "") { continue }
+          if (index(nfl_line, nfl_pfx[nfl_i]) == 1) {
+            nfl_line = nfl_marker nfl_line
+            break
+          }
+        }
+        print nfl_line
+      }
+    ' 2>/dev/null); then
+    # An awk that exits 0 having printed nothing for a non-empty body is
+    # treated as a FAILURE of this step, not as an empty profile - the
+    # same shape emit_json already refuses to trust from jq. Returning
+    # the input is the fail-open direction; returning "" would delete
+    # the user's profile, which is the one outcome this must not have.
+    if [ -n "$nfl_out" ]; then
+      printf '%s' "$nfl_out"
+      return 0
+    fi
+  fi
+  printf '%s' "$nfl_body"
+  return 0
+}
+
 cap_profile_body() {
   body=$1
   truncated=0
+
+  # See "Forged squirrel-mode lines inside the quoted profile body"
+  # above: this is the single point both emission paths share, and it
+  # runs BEFORE the cut so the truncation notice appended below is never
+  # itself marked. Guarded at the call site the way every fallible step
+  # in this file is - a failure here leaves $body exactly as it arrived.
+  cap_raw_body=$body
+  body=$(neutralise_forged_lines "$cap_raw_body") || body=$cap_raw_body
 
   line_count=$(printf '%s\n' "$body" | wc -l | awk '{print $1}')
   if [ "$line_count" -gt "$PROFILE_MAX_LINES" ]; then
@@ -2277,13 +2491,16 @@ Project checkpoint path: $checkpoint_file"
   # EMITTED BELOW THE "Session off-token:" LINE, deliberately and not
   # incidentally. skills/dig/SKILL.md decides which of several lines
   # spelled like this one is squirrel-mode's by POSITION - only a line
-  # standing below the LAST off-token line counts - because the profile
-  # body quoted above these lines may spell this one exactly, naming any
-  # command it likes, and acting on this line RUNS that command. A hook
-  # that emitted it above the off-token line would hand a forged copy the
-  # win. tests/test_hooks.sh HOARD-7 asserts the ordering rather than
-  # trusting this comment; HOARD-8 asserts a forging profile cannot
-  # displace it.
+  # standing below the LAST off-token line counts - because a profile body
+  # quoted above these lines could otherwise spell this one exactly,
+  # naming any command it likes, and acting on this line RUNS that
+  # command. A hook that emitted it above the off-token line would hand a
+  # forged copy the win. neutralise_forged_lines above now marks such a
+  # line inside the body as well, and this ordering is kept exactly as it
+  # was rather than relied on less: that step fails open, and on that path
+  # position is what is left. tests/test_hooks.sh HOARD-7 asserts the
+  # ordering rather than trusting this comment; HOARD-8 asserts a forging
+  # profile cannot displace it, and HOARD-12 that it cannot spell it.
   #
   # Its own `if`, guarded at the call site like every other fallible step
   # in this function: an empty $script_dir (a failed `cd` at the top) or a
