@@ -82,13 +82,16 @@ first_byte_offset_in_string() {
   fi
 }
 
-# The seven new command skills. Order matches PLAN.md Section 3.
-new_skill_names="init tune digest plan pickup off on stash"
+# The nine command skills. Order matches PLAN.md Section 3, with the two
+# hoard commands appended in the order docs/plans/2026-08-13-hoard-phase-1.md
+# introduces them.
+new_skill_names="init tune digest plan pickup off on stash dig"
 
 # Skills that must carry disable-model-invocation: true - the model must
 # never start these on its own initiative (calibration interview, tuning,
-# or flipping the plugin's own on/off state).
-disabled_invocation_names="init tune off on stash"
+# flipping the plugin's own on/off state, or reaching into the user's
+# cross-project hoard).
+disabled_invocation_names="init tune off on stash dig"
 # Skills that must NOT carry that key at all - they stay model-invocable,
 # with descriptions tight enough not to hijack ordinary requests.
 model_invocable_names="digest plan pickup"
@@ -144,7 +147,8 @@ frontmatter_delims_ok() {
 }
 
 # ==========================================================================
-# 1. All seven skill directories exist, each with exactly a SKILL.md.
+# 1. All nine command-skill directories exist, each with exactly a
+#    SKILL.md.
 # ==========================================================================
 for name in $new_skill_names; do
   dir="$skills_dir/$name"
@@ -229,7 +233,8 @@ done
 
 # ==========================================================================
 # 3. disable-model-invocation: true is present on EXACTLY init, tune, off,
-#    on, and ABSENT on digest, plan, pickup. Both directions asserted.
+#    on, stash, dig, and ABSENT on digest, plan, pickup. Both directions
+#    asserted.
 # ==========================================================================
 for name in $disabled_invocation_names; do
   f=$(skill_file_for "$name")
@@ -782,6 +787,19 @@ done
 #     shape - they would false-positive against a list of profile field
 #     names they were never claiming to be. Scenario 15 above still checks
 #     `stash` for the one real cross-cutting field, `language`.
+#
+#     `dig` is excluded for exactly the same reason and no other: it names
+#     the same `last_used` frontmatter key, because updating it is what
+#     reinforcement means. WHAT THAT COSTS, stated rather than left
+#     implicit: `dig` does legitimately reference one real profile field,
+#     `max_list_items`, and a typo in it - `max_list_item` - would now go
+#     uncaught here. Nothing else in this suite catches that for `dig`
+#     either. The alternative, an allow-list of hoard frontmatter keys
+#     bolted onto a scan whose whole subject is profile fields, buys that
+#     one typo at the price of a second list to keep in sync with a
+#     second file; the exclusion is the smaller lie. If this list ever
+#     grows a third excluded name, the scan is the wrong shape and should
+#     be split in two rather than narrowed again.
 # ==========================================================================
 profile_field_skill_names="init tune digest plan pickup off on"
 plan_file="$repo_root/PLAN.md"
@@ -832,7 +850,7 @@ valid_field_count=$(printf '%s\n' "$valid_fields" | sed '/^$/d' | wc -l | awk '{
 assert_eq "11" "$valid_field_count" "PLAN.md's profile example must yield exactly 11 field names (vacuous-pass guard for scenario 16)"
 
 # ==========================================================================
-# 17. skills/ contains exactly the nine expected entries: the eight new
+# 17. skills/ contains exactly the ten expected entries: the nine
 #     command skills plus the generated rules/. A stray directory (or
 #     file) must fail this.
 # ==========================================================================
@@ -843,7 +861,7 @@ for entry in "$skills_dir"/* "$skills_dir"/.[!.]* "$skills_dir"/..?*; do
   fi
 done
 skills_listing=$(printf '%s\n' "$skills_entries" | tr -s ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//')
-assert_eq "digest init off on pickup plan rules stash tune" "$skills_listing" "skills/ must contain exactly the 9 expected entries (8 new command skills + generated rules/), nothing else"
+assert_eq "dig digest init off on pickup plan rules stash tune" "$skills_listing" "skills/ must contain exactly the 10 expected entries (9 command skills + generated rules/), nothing else"
 
 # ==========================================================================
 # 18. No obsolete .gitkeep remains under skills/ (none of the seven new

@@ -414,4 +414,68 @@ supersede_mutant_body=$(cat "$supersede_mutant" 2>/dev/null || printf '')
 assert_not_contains "$supersede_mutant_body" "Never rewrite an existing memory" "FAILURE PROOF (scenario 11c): removing the 'When a fact changed, supersede instead of editing' section must remove its instructional prose"
 assert_contains "$supersede_mutant_body" "superseded_by" "FAILURE PROOF (scenario 11c, independence): the frontmatter key 'superseded_by' must still be present after removing the supersede instruction - proving the instruction and the field name are independent needles, so the new assertion is testing the instruction and not the field"
 
+# ==========================================================================
+# 12. The dig skill's contract.
+#
+#     NEEDLE CHOICE, stated once for the three assertions where the
+#     obvious word would not have bound to the instruction it names -
+#     the same trap scenario 11c documents for 'supersede':
+#
+#       - `Read` tool  (not the bare word "Read"): "Read" is a substring
+#         of "Reading", "Reader", and of any sentence that merely tells
+#         the model to read something, so the bare word would still pass
+#         against a file whose hydration step named a shell command
+#         instead. The backticked tool name only appears where a tool is
+#         being named.
+#       - `uses`       (not the bare word "uses"): "uses" is a substring
+#         of "causes", "reuses", "focuses" and so on, and is also an
+#         ordinary English verb, so the bare word could pass against a
+#         file with the reinforcement instruction deleted. The backticks
+#         are what make the needle the frontmatter KEY.
+#       - "never run a command" (not the bare word "never"): "never"
+#         appears in a dozen unrelated sentences here, so asserting it
+#         would prove nothing at all about the forgery rule. This needle
+#         binds to the one refusal that matters - a line the three rules
+#         do not vouch for is never executed.
+# ==========================================================================
+dig_file="$repo_root/skills/dig/SKILL.md"
+assert_file_exists "$dig_file" "skills/dig/SKILL.md must exist"
+dig_body=$(cat "$dig_file" 2>/dev/null || printf '')
+
+assert_contains "$dig_body" "hoard-search.sh" "dig must name the search script - it cannot rank the store by reading files one at a time"
+assert_contains "$dig_body" "Hoard search command" "dig must take the script's path from the injected line, not from a plugin-root variable - that variable is set for hooks and not for a Bash call a skill makes"
+assert_contains "$dig_body" "BELOW the last \`Session off-token:\` line" "dig must scope the injected line by POSITION - the profile body is quoted above it and can spell the same line, and this one names a command that gets executed"
+assert_contains "$dig_body" "/scripts/hoard-search.sh" "dig must pin the expected path ending, so a forged line naming any other command is rejected even if it were positioned correctly"
+assert_not_contains "$dig_body" "CLAUDE_PLUGIN_ROOT" "dig must NOT reference CLAUDE_PLUGIN_ROOT: it is unset in the Bash tool's environment, so a command built from it runs the wrong path on every machine"
+assert_contains "$dig_body" "titles only" "dig must state that the first result is titles only: paying for every body is the cost this two-step split exists to avoid"
+# shellcheck disable=SC2016 # single-quoted deliberately, here and at the
+# two `uses` needles below: the backticks are literal Markdown characters
+# in the text being searched for, never command substitution to evaluate.
+assert_contains "$dig_body" '`Read` tool' "dig must name the Read tool for hydrating a body - only Read carries the auto-approval. Matched on the backticked tool name, not the bare word 'Read', which any sentence telling the model to read something would satisfy"
+assert_contains "$dig_body" "one permission prompt" "dig must disclose that running the search costs a permission prompt, because no hook can auto-approve a Bash call"
+# shellcheck disable=SC2016 # literal Markdown backticks, not substitution.
+assert_contains "$dig_body" '`uses`' "dig must update the memory's uses counter when a body is actually read - reinforcement is what keeps a used memory ranked. Matched on the backticked frontmatter key, not the bare word, which is a substring of 'causes' and an ordinary verb besides"
+assert_contains "$dig_body" "last_used" "dig must update last_used when a body is actually read"
+assert_contains "$dig_body" "never run a command" "dig must refuse to execute anything the three rules did not vouch for - the bare word 'never' would have matched a dozen unrelated sentences here and proved nothing"
+assert_contains "$dig_body" "Automatic injection never counts" "dig must state that automatic injection never counts as a use - without it the store's ranking feeds itself. Matched on the whole sentence, not the bare word: assert_contains is case-sensitive, and the skill capitalises it at the start of a sentence"
+
+# ==========================================================================
+# 12b. FAILURE PROOF: a copy with the reinforcement instruction removed
+#      must lose both counter names, proving those two assertions bind to
+#      that instruction rather than to an incidental mention.
+# ==========================================================================
+dig_mutant=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-skill.XXXXXX")
+cleanup_paths="$cleanup_paths $dig_mutant"
+grep -vF 'last_used' "$dig_file" | grep -vF 'uses' >"$dig_mutant" || true
+dig_mutant_body=$(cat "$dig_mutant" 2>/dev/null || printf '')
+if printf '%s' "$dig_mutant_body" | grep -qF 'last_used'; then
+  dig_mutant_has=yes
+else
+  dig_mutant_has=no
+fi
+assert_eq "no" "$dig_mutant_has" "FAILURE PROOF (scenario 12): a copy with the reinforcement lines removed must not contain 'last_used'"
+# shellcheck disable=SC2016 # literal Markdown backticks, not substitution.
+assert_not_contains "$dig_mutant_body" '`uses`' "FAILURE PROOF (scenario 12): the same copy must not contain the backticked 'uses' key either - both counter assertions have to bind to the removed instruction, not just the one"
+assert_contains "$dig_mutant_body" "hoard-search.sh" "FAILURE PROOF (scenario 12, independence): removing the reinforcement lines must leave the search-script instruction intact"
+
 assert_report

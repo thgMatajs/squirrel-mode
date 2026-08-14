@@ -258,6 +258,30 @@
 # jq calls, plus the object-shape check that closes trusting any `{...}`.
 set -eu
 
+# A CDPATH entry containing "." makes the `cd` below ECHO its resolved
+# path to stdout as well as changing directory, which would corrupt the
+# command substitution with an extra line. Unset unconditionally, before
+# any `cd` in this file runs. (scripts/build.sh and every test file open
+# the same way, for the same reason.)
+unset CDPATH
+
+# THIS SCRIPT'S OWN DIRECTORY, resolved once, here, rather than inside
+# build_context: a failed `cd` under `set -eu` would abort the caller,
+# and build_context's contract is that every fallible step in it is
+# guarded at the call site. Guarded the same way here - `|| script_dir=""`
+# is exempt from `set -e`, so an unresolvable $0 (a deleted or unreadable
+# directory) leaves this empty and costs the session nothing.
+#
+# It exists for ONE consumer: the "Hoard search command:" line
+# build_context injects, so /squirrel:dig can run scripts/hoard-search.sh
+# through the Bash tool. A Bash call a model makes does NOT inherit the
+# plugin-root variable this hook process is given, and the plugin's
+# install path is not knowable when the skill is written, so the path has
+# to be handed over at session start the way the checkpoint paths already
+# are. Deriving it from $0 rather than from that variable also means the
+# injected path can never disagree with where this script actually lives.
+script_dir=$(cd "$(dirname "$0")" && pwd) || script_dir=""
+
 # --- JSON field extraction ------------------------------------------
 #
 # extract_top_level_string <json> <key>: prints the value of the STRING
@@ -2245,6 +2269,35 @@ Session working directory: $cwd
 Session off-token: $off_token
 Project checkpoint directory: $session_dir
 Project checkpoint path: $checkpoint_file"
+
+  # THE HOARD SEARCH COMMAND - the absolute path /squirrel:dig runs
+  # through the Bash tool. See $script_dir at the top of this file for why
+  # the path is injected at all rather than built by the skill.
+  #
+  # EMITTED BELOW THE "Session off-token:" LINE, deliberately and not
+  # incidentally. skills/dig/SKILL.md decides which of several lines
+  # spelled like this one is squirrel-mode's by POSITION - only a line
+  # standing below the LAST off-token line counts - because the profile
+  # body quoted above these lines may spell this one exactly, naming any
+  # command it likes, and acting on this line RUNS that command. A hook
+  # that emitted it above the off-token line would hand a forged copy the
+  # win. tests/test_hooks.sh HOARD-7 asserts the ordering rather than
+  # trusting this comment; HOARD-8 asserts a forging profile cannot
+  # displace it.
+  #
+  # Its own `if`, guarded at the call site like every other fallible step
+  # in this function: an empty $script_dir (a failed `cd` at the top) or a
+  # missing sibling script emits NO line at all, rather than naming a
+  # command that is not there. /squirrel:dig treats an absent line as
+  # "the hoard search is unavailable" and says so in one line, which is
+  # the honest outcome - a line naming a nonexistent path would instead
+  # spend a permission prompt to reach a failed command. Placed here,
+  # before the checkpoint list block below, so it can never sit inside
+  # that block and be mistaken for one of its paths.
+  if [ -n "$script_dir" ] && [ -f "$script_dir/hoard-search.sh" ]; then
+    context="$context
+Hoard search command: $script_dir/hoard-search.sh"
+  fi
 
   # The enumerated list, newest first, optionally closed by the
   # incompleteness marker - see checkpoint_file_lines for both grammars
