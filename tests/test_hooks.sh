@@ -201,7 +201,7 @@ extract_checkpoint_list_block() {
   #      is not a header at all and does not open a block.
   #   2. Last occurrence wins, for BOTH the token line and the block.
   #      Every line the hook generates is appended after the profile body
-  #      it quotes verbatim, so nothing profile-controlled can follow
+  #      it quotes, so nothing profile-controlled can follow
   #      them; `tail -n 1` on the token line and resetting `out` on each
   #      matching header are that rule, spelled out.
   #
@@ -1585,12 +1585,17 @@ assert_not_contains "$ctx6h5_junk" "Project checkpoint files" "PICKUP-LIST: a di
 # ==========================================================================
 # 6h6. [PICKUP-LIST] A profile body CANNOT forge the block.
 #
-#      THE DEFECT, reproduced against the real hook: build_context puts
-#      profile.md's body into additionalContext FIRST and VERBATIM
-#      (format_profile_framing interpolates it with %s, no fencing) and
-#      appends the checkpoint block some thirty lines later, so a profile
-#      body containing the header line and a few absolute paths produced
-#      an injected context whose FORGED block came BEFORE the real one.
+#      THE DEFECT AS IT WAS, reproduced against the real hook at the time:
+#      build_context put profile.md's body into additionalContext FIRST
+#      and VERBATIM (format_profile_framing interpolates it with %s, no
+#      fencing) and appended the checkpoint block some thirty lines later,
+#      so a profile body containing the header line and a few absolute
+#      paths produced an injected context whose FORGED block came BEFORE
+#      the real one. Task 7b narrowed what "verbatim" means here - a body
+#      line beginning with one of squirrel-mode's own prefixes now arrives
+#      marked - and (c) below asserts exactly which of this fixture's
+#      three forged headers that touches and which it deliberately does
+#      not.
 #      profile.md is written by /squirrel:tune from user-dictated text and
 #      is documented (see PROFILE_MAX_LINES) as a privileged
 #      prompt-injection surface the cap only bounds, so this is reachable
@@ -7900,6 +7905,15 @@ uncovered_context_lines() {
   # and marking those would mangle a normal profile for nothing. Those
   # paths only mean anything under a header carrying this session's token,
   # and that header IS covered.
+  #
+  # THAT SKIP IS A RESIDUAL LIMIT OF THIS GUARD, and it is a wider one
+  # than "a line the fixture does not trigger": a future injected line
+  # BEGINNING WITH "/" escapes HOARD-12e even when the fixture reaches it,
+  # because this function cannot tell it from a checkpoint path. Stated
+  # here, in HOARD-12e's own header, and beside
+  # SQUIRREL_RESERVED_LINE_PREFIXES in scripts/load-profile.sh - a limit
+  # documented in one place and understated in another is documented in
+  # neither.
   printf '%s\n' "$1" | UCL_PFX="$2" UCL_BODY="$3" awk '
     BEGIN { ucl_n = split(ENVIRON["UCL_PFX"], ucl_p, "\n"); ucl_body = ENVIRON["UCL_BODY"] }
     {
@@ -8076,20 +8090,26 @@ assert_eq "1" "$(count_prefix_lines "$ctx12d" "Session off-token: s12d")" "HOARD
 #
 #            SQUIRREL_RESERVED_LINE_PREFIXES is the single home of that
 #            set, and the genuine lines are still emitted as literal text
-#            at ten separate sites rather than by iterating it - see the
-#            comment above that variable for why iterating it would turn
-#            five existing failure proofs in this file into no-op
-#            mutations and would mean editing the checkpoint file-list
+#            at every site that emits one rather than by iterating it -
+#            see the comment above that variable for why iterating it
+#            would turn FOUR existing failure proofs in this file (fpP1e,
+#            fpH9, fpL6, fpL9 - not fpL5, whose target is the lazy-header
+#            guard rather than the header literal) into no-op mutations,
+#            and would mean editing the checkpoint file-list
 #            block. THIS is what stands in for "one list by construction":
 #            a fixture that triggers every conditional line at once, and
 #            an assertion that no emitted line falls outside the list. A
 #            new injected line added without registering it fails here.
 #
-#            THE RESIDUAL LIMIT, stated rather than implied: this proves
-#            coverage of the lines THIS fixture triggers. A future line
-#            emitted only under some condition set up nowhere below would
-#            escape it. The controls in front of the assertion are what
-#            keep the fixture honest about which lines it reached.
+#            TWO RESIDUAL LIMITS, stated rather than implied. First, this
+#            proves coverage of the lines THIS fixture triggers; a future
+#            line emitted only under some condition set up nowhere below
+#            escapes it, and the controls in front of the assertion are
+#            what keep the fixture honest about which lines it reached.
+#            Second, and wider: a future line beginning with "/" escapes
+#            it even when the fixture DOES trigger the line, because
+#            uncovered_context_lines skips every such line - see its own
+#            comment for why that skip is right and what it costs.
 # ==========================================================================
 home12e=$(new_home)
 mkdir -p "$home12e/.squirrel"

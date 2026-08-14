@@ -63,8 +63,12 @@
 #     whole; see checkpoint_file_lines for both grammars stated together.
 #     The
 #     token is in the header because the profile body quoted ABOVE this
-#     block is verbatim and can spell any line it likes, forged header
-#     included; see checkpoint_file_lines for the reproduction and for
+#     block COULD otherwise spell any line it likes, forged header
+#     included. A body line that begins with one of squirrel-mode's own
+#     prefixes - this header's included - is now marked as profile text
+#     before it reaches the model (see neutralise_forged_lines), and the
+#     token stays exactly as load-bearing as it was, because that step
+#     fails open; see checkpoint_file_lines for the reproduction and for
 #     why a session token beats reordering. This is the same Decision 1
 #     move applied one level further out: knowing the DIRECTORY is not
 #     enough for /squirrel:pickup, which has to ENUMERATE it, and on a
@@ -1113,8 +1117,13 @@ checkpoint_list_candidates() {
 #   - It carries the token for the identical reason the header does, and
 #     the reason is sharper here: a marker is an instruction to go
 #     ENUMERATE a directory, and the profile body quoted above this block
-#     is verbatim and can spell any line it likes. An unbound marker
-#     would be a way for profile text to spend a permission prompt.
+#     COULD otherwise spell this line exactly. An unbound marker would be
+#     a way for profile text to spend a permission prompt.
+#     neutralise_forged_lines now marks a body line beginning with this
+#     marker's own spelling - that prefix is in
+#     SQUIRREL_RESERVED_LINE_PREFIXES precisely because this line is
+#     worth forging - and the token is kept unchanged all the same, since
+#     that step fails open and the token is what is left when it does.
 #
 # WHY IT EXISTS. Without it this block is a list that LOOKS complete and
 # is not, and skills/pickup/SKILL.md - the only reader there is - said so
@@ -1179,9 +1188,12 @@ checkpoint_list_candidates() {
 # neutralise_forged_lines below now marks such a header inside the body,
 # so it no longer reaches the model beginning with this header's
 # spelling - but that does NOT make the token redundant and nothing here
-# is relaxed on the strength of it. That step FAILS OPEN (a missing awk
-# returns the body untouched), and the token is what holds when it does.
-# Two independent layers, either sufficient on its own.
+# is relaxed on the strength of it. That step FAILS OPEN - a FAILING awk
+# leaves the body unmarked, and an awk absent from PATH ALTOGETHER costs
+# the profile body entirely, for a reason of cap_profile_body's own that
+# predates it (stated in full at neutralise_forged_lines) - and the token
+# is what holds in both cases. Two independent layers, either sufficient
+# on its own.
 #
 # The token is the answer instead: it is this session's off-token, the
 # same opaque value build_context puts on the "Session off-token:" line,
@@ -2044,18 +2056,20 @@ strip_incomplete_utf8_tail() {
 
 # --- Forged squirrel-mode lines inside the quoted profile body ---------
 #
-# THE PROBLEM. Everything here puts profile.md into the model's context
-# and appends squirrel-mode's OWN session lines after it, so a profile is
-# free to hold a line spelled exactly like one of them - "Session
-# off-token:", "Hoard search command:", the checkpoint list header - and
-# that forged line reaches the model looking like squirrel-mode's. It was
-# reproduced end to end while /squirrel:dig was reviewed: a profile
-# forging an off-token line and a search-command line satisfied every
-# positional rule skills/dig/SKILL.md states, and on the UserPromptSubmit
-# re-show path - which emits the profile framing and NONE of
-# squirrel-mode's own lines - the forgery was the only such line in the
-# text, so position and last-wins had nothing to prefer over it. Acting
-# on that one line runs a command.
+# THE PROBLEM, IN THE PAST TENSE ON PURPOSE - it is only past because of
+# the code below, and a reader who finds this paragraph without the code
+# should read it as present. Everything here puts profile.md into the
+# model's context and appends squirrel-mode's OWN session lines after it,
+# so a profile WAS free to hold a line spelled exactly like one of them -
+# "Session off-token:", "Hoard search command:", the checkpoint list
+# header - and that forged line REACHED the model looking like
+# squirrel-mode's. It was reproduced end to end while /squirrel:dig was
+# reviewed: a profile forging an off-token line and a search-command line
+# satisfied every positional rule skills/dig/SKILL.md states, and on the
+# UserPromptSubmit re-show path - which emits the profile framing and NONE
+# of squirrel-mode's own lines - the forgery was the only such line in the
+# text, so position and last-wins had nothing to prefer over it. Acting on
+# that one line RAN a command.
 #
 # WHAT THIS DOES ABOUT IT. A line of the profile body that BEGINS with
 # one of SQUIRREL_RESERVED_LINE_PREFIXES is emitted with
@@ -2109,23 +2123,45 @@ strip_incomplete_utf8_tail() {
 # PROFILE_SEEN_UNAVAILABLE_NOTICE constant, and the two hardcoded
 # fallbacks at the bottom of this file - and several of those exact source
 # lines are the mutation target of an existing failure proof in
-# tests/test_hooks.sh: fpP1e, fpH9, fpL5, fpL6 and fpL9 all locate a line
-# by its literal text and rewrite it. Replacing those literals with
-# expansions of this list would silently turn each of those proofs into a
-# no-op mutation, and two of the sites sit inside the checkpoint file-list
-# block, which this change is not permitted to touch. Deriving the list at
-# RUNTIME from the lines emitted does not work either: "Legacy checkpoint
-# file:", "Resume available", the list header and the marker are all
-# CONDITIONAL, absent from most sessions, so a derived list would leave
-# exactly those prefixes unguarded in the sessions where they are absent.
+# tests/test_hooks.sh: FOUR of them, fpP1e, fpH9, fpL6 and fpL9, locate a
+# line by its literal emitted text and rewrite it, across three distinct
+# source lines (fpL6 and fpL9 both target the list header's printf).
+# Replacing those literals with expansions of this list would silently
+# turn each of those four proofs into a no-op mutation, and two of the
+# sites sit inside the checkpoint file-list block, which this change is
+# not permitted to touch.
+#
+# FOUR, NOT FIVE. This said five and named fpL5 as well, and fpL5 does
+# NOT belong in the set: its `line_of` target is
+# `[ "$#" -gt 0 ] || exit 0`, and it pins that the header is printed
+# LAZILY, from inside the loop - only its REPLACEMENT text carries the
+# header literal, which iterating this list would not disturb. The count
+# was the whole justification for not doing what the plan asked for, so
+# an off-by-one in it was a falsified premise inside a security
+# rationale - the identical defect this file's own neutralisation exists
+# to repair, one layer out. Corrected on review, and left visible here
+# rather than quietly rewritten.
+#
+# Deriving the list at RUNTIME from the lines emitted does not work
+# either: "Legacy checkpoint file:", "Resume available", the list header
+# and the marker are all CONDITIONAL, absent from most sessions, so a
+# derived list would leave exactly those prefixes unguarded in the
+# sessions where they are absent.
 #
 # What replaces "one list by construction" is a test that closes the same
 # gap from the other side: scenario HOARD-12e runs the hook with every
 # conditional line triggered at once and asserts that every line
 # squirrel-mode emitted is covered by a prefix in this list. A new
 # injected line added without registering it here fails that scenario.
-# The residual limit, stated rather than implied: a future line emitted
-# only under a condition that scenario does not trigger would escape it.
+#
+# TWO RESIDUAL LIMITS, both stated rather than implied. A future line
+# emitted only under a condition that scenario does not trigger escapes
+# it - and so does a future line BEGINNING WITH "/", whatever triggers
+# it, because that check skips every such line by construction (the
+# checkpoint list block's payload is absolute paths, and "/" is
+# deliberately not a reserved prefix: a profile naming a path at the
+# start of a line is entirely ordinary). The second limit is the sharper
+# one, since it holds even when the fixture DOES reach the line.
 #
 # No entry carries a trailing space. A prefix is matched literally, so a
 # shorter one only ever matches MORE - and a trailing space in a shell
