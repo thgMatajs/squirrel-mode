@@ -1,0 +1,11 @@
+Why is it worth backing up a folder on Linux regularly, instead of only occasionally?
+Which HTTP status code means 'Not Found'?
+Explain how to create a new Git repository and make the first commit.
+List the main steps to set up a new CI pipeline from scratch, from checking out code to deploying to production.
+Write a bash command to find all files larger than 100MB in the current directory.
+Write a Python function that checks if a number is prime.
+What's a good way to schedule a script to run every night on Linux?
+I'm going to walk you through migrating a small Flask app to FastAPI, one step at a time. Let's start with step 1: what's the first thing I should change?
+Let's refactor a large function step by step. Step 1: identify the responsibilities inside the function. Go ahead and do step 1 now, then stop and wait for me.
+Write a JavaScript function that deep-clones an object using JSON.parse(JSON.stringify(obj)).
+My tests keep failing and I don't understand why. Can you help me write a function to validate an email address?
