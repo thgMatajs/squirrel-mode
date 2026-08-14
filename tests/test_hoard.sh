@@ -139,4 +139,55 @@ make_memory "$home5" "inbox" "20260101T000000Z-cand" "feedback" "3" "x" \
 out5=$(run_search "$home5")
 assert_not_contains "$out5" "an untriaged candidate" "inbox/ must never appear in search results"
 
+# ==========================================================================
+# 5b. The --slug guard rejects every traversal shape and accepts a
+#     legitimate name that merely contains two dots.
+#
+#     Both halves are load-bearing. The broad `*..*` form this guard
+#     replaced rejected `my..repo-abc123` too, silently returning only
+#     global memories for that project - a guard that barred correct
+#     work. A test for the rejecting half alone would pass against that
+#     broad form and let it come back.
+# ==========================================================================
+home5b=$(new_home)
+make_memory "$home5b" "global" "20260101T000000Z-g5b" "reference" "3" "x" \
+  "20260101T000000Z" "0" "active" "a global fact"
+make_memory "$home5b" "projects/my..repo-abc123" "20260101T000000Z-d5b" "decision" "3" "x" \
+  "20260101T000000Z" "0" "active" "a dotted-name project decision"
+
+# Half one: a legitimate slug containing two dots still reaches its layer.
+out5b_ok=$(run_search "$home5b" --slug "my..repo-abc123")
+assert_contains "$out5b_ok" "a dotted-name project decision" "a slug containing '..' as part of a NAME must still reach its project layer - the narrowed guard rejects the component, never the two characters"
+
+# Half two: every traversal shape is refused, and refusing means falling
+# back to global only - never reading somewhere else, never erroring.
+for slug5b in ".." "../x" "x/.." "a/../b" "../../etc"; do
+  out5b_bad=$(run_search "$home5b" --slug "$slug5b")
+  assert_contains "$out5b_bad" "a global fact" "a rejected slug must still return the global layer, not fail the whole search"
+  assert_not_contains "$out5b_bad" "a dotted-name project decision" "the slug '$slug5b' must not reach any project layer"
+done
+
+# ==========================================================================
+# 5c. FAILURE PROOF: a copy carrying the BROAD `*..*` guard the narrowed
+#     one replaced must fail half one - proving 5b's accepting half is
+#     what distinguishes the two forms, and that a revert is caught.
+# ==========================================================================
+mutant5c=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant5c"
+python3 -c "
+with open('$hoard_search_script', 'r') as f:
+  content = f.read()
+modified = content.replace('*/../*)', '*..*)')
+with open('$mutant5c', 'w') as f:
+  f.write(modified)
+"
+chmod +x "$mutant5c"
+mutant5c_out=$(HOME="$home5b" "$mutant5c" --slug "my..repo-abc123" 2>/dev/null) || true
+if printf '%s' "$mutant5c_out" | grep -qF "a dotted-name project decision"; then
+  mutant5c_reaches=yes
+else
+  mutant5c_reaches=no
+fi
+assert_eq "no" "$mutant5c_reaches" "FAILURE PROOF (scenario 5b): a copy carrying the BROAD '*..*' guard must NOT reach the dotted-name project layer - if it still does, 5b's accepting half is not actually testing which form of the guard is present"
+
 assert_report
