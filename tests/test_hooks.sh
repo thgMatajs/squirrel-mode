@@ -7674,11 +7674,19 @@ assert_eq "0" "$(capture_exit "$fpH9_script" "$fpH9_home" "$stdinH7")" "FAILURE 
 #           "Session off-token:" line is below the last off-token line,
 #           absolute, correctly suffixed, and the last such line - every
 #           positional rule satisfied, with nothing of squirrel-mode's
-#           own anywhere in the text to outrank it. The only thing that
-#           excludes it is knowing these lines are injected once, at
-#           session start, and never again, which is why
-#           skills/dig/SKILL.md now says so and tests/test_hoard.sh
-#           scenario 12a asserts it.
+#           own anywhere in the text to outrank it. What excludes it is
+#           that this text is not a squirrel-mode CONTEXT BLOCK: a block
+#           appends the hook's own session lines after the quoted
+#           profile, and this path appends none - which is exactly what
+#           the two counts below assert. skills/dig/SKILL.md states that
+#           boundary and tests/test_hoard.sh scenario 12a asserts it.
+#
+#           NOT "once per session". SessionStart is registered for
+#           startup|resume|clear|compact (hooks/hooks.json) and this
+#           script reads no source field, so all four emit a block and a
+#           conversation can hold several genuine ones. Fix round 2
+#           corrected that claim in dig and in skills/pickup/SKILL.md,
+#           which carried the identical false sentence.
 #
 #           WHAT THIS PINS is the hook side of that: the reinjection must
 #           never emit a search-command line of its own. If it ever did,
@@ -7745,5 +7753,32 @@ fpH10_ups=$(capture_stdout "$fpH10_script" "$fpH10_home" "$stdinH10")
 assert_contains "$fpH10_ups" "PROFILE_BODY_MARKER_H10" "FAILURE PROOF (HOARD-10), isolation: the mutant must still reinject the profile body - a mutant that merely broke the path would satisfy nothing"
 assert_eq "1" "$(count_prefix_lines "$fpH10_ups" "Hoard search command: ")" "FAILURE PROOF (HOARD-10): a copy whose reinjection also emits the search-command line must produce exactly one - if this stays 0, the mutation matched nothing and HOARD-10's count assertion is vacuous"
 assert_eq "0" "$(capture_exit "$fpH10_script" "$fpH10_home" "$stdinH10")" "FAILURE PROOF (HOARD-10), isolation: the mutant must still exit 0"
+
+# ==========================================================================
+# HOARD-11. ALL FOUR SessionStart SOURCES emit the block.
+#
+#           hooks/hooks.json matches "startup|resume|clear|compact" and
+#           this script reads no `source` field at all, so every one of
+#           the four produces the same context block. skills/dig/SKILL.md
+#           rule 2 and skills/pickup/SKILL.md both REST ON THAT FACT: they
+#           name those events as the ones that produce a genuine block,
+#           having previously claimed - falsely - that the lines arrive
+#           once per session and never again.
+#
+#           This scenario exists so that premise cannot go stale
+#           silently. If a `source` filter were ever added, or the
+#           matcher narrowed, both skills would start telling the model
+#           to reject a GENUINE line after a compaction, and nothing else
+#           in this suite would notice.
+# ==========================================================================
+for srcH11 in startup resume clear compact; do
+  homeH11=$(new_home)
+  mkdir -p "$homeH11/.squirrel"
+  printf 'language: en\n' >"$homeH11/.squirrel/profile.md"
+  stdinH11=$(printf '{"session_id":"src-%s","cwd":"/tmp/proj","hook_event_name":"SessionStart","source":"%s"}' "$srcH11" "$srcH11")
+  ctxH11=$(extract_ctx "$(capture_stdout "$load_profile_script" "$homeH11" "$stdinH11")")
+  assert_eq "1" "$(count_prefix_lines "$ctxH11" "Hoard search command: ")" "SessionStart source=$srcH11 must emit exactly one 'Hoard search command:' line - dig rule 2 names this source as producing a genuine block, so a source that emitted none would make dig refuse a real line"
+  assert_eq "1" "$(count_prefix_lines "$ctxH11" "Session off-token: ")" "SessionStart source=$srcH11 must emit exactly one 'Session off-token:' line - it is the boundary both dig and pickup measure position against, and a block without it has no boundary at all"
+done
 
 assert_report
