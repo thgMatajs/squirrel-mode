@@ -190,6 +190,13 @@ at any age. Losing a memory loses something that cannot be reconstructed, and a 
 its relevance already stops appearing in results by its own score — which is reversible, and deletion
 is not.
 
+**Search reads every memory file on each run, with no index.** Measured on the author's machine, a
+query costs about 0.78 s at 500 memories, 3.09 s at 1000, and 12.47 s at 2000. Almost all of that,
+at this scale, is macOS's `/bin/sh` (bash 3.2) building the file-list argument to `awk`, not the
+frontmatter scan itself — which alone costs about 0.2 s at 2000 memories. Either way there is a
+practical ceiling on how large a hoard a single search comfortably scans, and the numbers above are
+where to look if search ever starts to feel slow.
+
 Nothing else in `~/.squirrel/` is ever deleted by squirrel-mode, and `profile.md` never is.
 
 The Codex and Cursor installers are a separate, one-time step: they write to the per-target

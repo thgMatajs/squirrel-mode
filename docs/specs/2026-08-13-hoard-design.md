@@ -162,12 +162,13 @@ is the whole reason the implementation is small: no rebuild, no staleness detect
 migration, no divergence between a file and its index. Every one of those is a failure mode that
 exists only because the index exists.
 
-The cost is a ceiling. Before release, the implementation measures the wall time at 500, 1000 and
-2000 memories on a cold cache, and the README states the measured number rather than a guess. **That
-measurement has not been taken yet, and no figure appears here or in the README until it has.** The
-phase-1 subject is `scripts/hoard-search.sh`, not the brief, because the brief does not exist until
-phase 2. If the ceiling is ever reached, an index is a backward-compatible addition, because the
-files remain the source of truth either way.
+The cost is a ceiling. Measured on the author's machine, a query costs about 0.78 s at 500 memories,
+3.09 s at 1000, and 12.47 s at 2000. Almost all of that, at this scale, is macOS's `/bin/sh` (bash
+3.2) building the file-list argument to `awk`, not the frontmatter scan itself — which alone costs
+about 0.2 s at 2000 memories. Measured during phase 1; see README.md. The phase-1 subject is
+`scripts/hoard-search.sh`, not the brief, because the brief does not exist until phase 2. If the
+ceiling is ever reached, an index is a backward-compatible addition, because the files remain the
+source of truth either way.
 
 ## 6. Lifecycle
 
