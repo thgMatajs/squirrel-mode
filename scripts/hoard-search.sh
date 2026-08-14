@@ -82,13 +82,44 @@ home_dir="${HOME:-}"
 hoard_dir="$home_dir/.squirrel/hoard"
 [ -d "$hoard_dir" ] || exit 0
 
-# Build the file list. An unmatched glob stays literal in POSIX sh, so
-# every candidate is tested with `[ -f ]` before it is kept. inbox/ is
-# never enumerated: a candidate is not a memory.
-set --
-for f in "$hoard_dir"/global/*.md; do
-  [ -f "$f" ] && set -- "$@" "$f"
-done
+# Build the file list: ONE `set --` per LAYER, never one per file.
+#
+# THE PER-FILE FORM IS QUADRATIC. Appending one file at a time - the
+# loop this replaced - rebuilds the entire positional list on every
+# call, and macOS's /bin/sh (bash 3.2) rebuilds it by copying, so
+# appending n files costs O(n^2). (The forbidden form is deliberately
+# not spelled here: tests/test_hoard.sh scenario 14 greps this file for
+# it, and a guard that its own subject's comment satisfies is a guard
+# that cannot fail.)
+# Measured on the author's machine at 2000 memories: 12.4 s in that loop
+# against 0.2 s for the whole awk pass it was feeding. Assigning each
+# layer's expansion in a single `set --` makes that one copy per layer
+# instead of one per file. tests/test_hoard.sh scenario 14 pins the
+# shape so the per-file form cannot come back unnoticed.
+#
+# An unmatched glob stays literal in POSIX sh, and the literal names no
+# file, so it is dropped by testing "$1" and shifting it off. The test
+# is exact rather than a sample: an unmatched glob expands to exactly
+# one word - the pattern itself - and that word is the FIRST of the
+# layer just assigned. Keeping each test immediately after its own
+# `set --` is what makes "$1" both the right word to test and a defined
+# one under `set -u`.
+#
+# THE LIMIT, STATED. The per-file form also filtered a non-regular entry
+# ANYWHERE in a layer - a directory literally named `something.md`. This
+# form filters one only where it sorts first. Nothing squirrel-mode does
+# creates such a directory (memories are written by the stash skill, one
+# file at a time), and the outcome was measured rather than assumed: on
+# all three awks this project meets, every real memory is still read and
+# ranked, and the residue is stderr noise - silent on macOS's awk, an
+# "ignored" warning on gawk, an "Is a directory" line and awk exit 2 on
+# mawk, which reaches nobody because awk heads a pipeline and this script
+# ends in `exit 0`. Filtering it back per-file would restore the O(n^2)
+# cost above for a state no user can reach by using the tool.
+#
+# inbox/ is never enumerated: a candidate is not a memory.
+set -- "$hoard_dir"/global/*.md
+[ -f "$1" ] || shift
 if [ -n "$slug" ]; then
   # A slug carrying a "/" or a ".." COMPONENT would reach outside the
   # project layer. Nothing legitimate produces one: project_slug() in
@@ -112,9 +143,15 @@ if [ -n "$slug" ]; then
   esac
 fi
 if [ -n "$slug" ]; then
-  for f in "$hoard_dir/projects/$slug"/*.md; do
-    [ -f "$f" ] && set -- "$@" "$f"
-  done
+  # PREPENDED, not appended, so the layer under test is once again the
+  # front of the list and the same one-word check applies unchanged.
+  # Appending would put the candidate literal LAST, where reaching it
+  # costs either an `eval` on ${$#} or a walk of the whole list - the
+  # per-file cost this rewrite exists to remove. Which layer comes first
+  # never reaches the caller: the pipeline below sorts by score and then
+  # by id, so awk's argument order decides nothing.
+  set -- "$hoard_dir/projects/$slug"/*.md "$@"
+  [ -f "$1" ] || shift
 fi
 
 [ $# -gt 0 ] || exit 0

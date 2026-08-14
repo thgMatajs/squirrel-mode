@@ -191,11 +191,14 @@ its relevance already stops appearing in results by its own score — which is r
 is not.
 
 **Search reads every memory file on each run, with no index.** Measured on the author's machine, a
-query costs about 0.78 s at 500 memories, 3.09 s at 1000, and 12.47 s at 2000. Almost all of that,
-at this scale, is macOS's `/bin/sh` (bash 3.2) building the file-list argument to `awk`, not the
-frontmatter scan itself — which alone costs about 0.2 s at 2000 memories. Either way there is a
-practical ceiling on how large a hoard a single search comfortably scans, and the numbers above are
-where to look if search ever starts to feel slow.
+query costs about 39 ms at 500 memories, 73 ms at 1000, and 139 ms at 2000 — and at 2000, 113 ms of
+that 139 ms is the `awk` pass over every file's frontmatter, which is the no-index design itself
+doing the work. It did not start out that way. The same query cost 12.08 s at 2000 until the list of
+files handed to `awk` stopped being assembled one file at a time: appending a file to that list
+rebuilds the whole list, so building it cost O(n²) rather than O(n). Assembling each layer's files in
+one step instead took that phase from 12.05 s to 35 ms and left the results byte-identical. Three
+sizes on one machine say where the cost sits at those sizes, not how far it goes; if search ever
+starts to feel slow, these are the numbers to compare against.
 
 Nothing else in `~/.squirrel/` is ever deleted by squirrel-mode, and `profile.md` never is.
 

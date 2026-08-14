@@ -162,13 +162,24 @@ is the whole reason the implementation is small: no rebuild, no staleness detect
 migration, no divergence between a file and its index. Every one of those is a failure mode that
 exists only because the index exists.
 
-The cost is a ceiling. Measured on the author's machine, a query costs about 0.78 s at 500 memories,
-3.09 s at 1000, and 12.47 s at 2000. Almost all of that, at this scale, is macOS's `/bin/sh` (bash
-3.2) building the file-list argument to `awk`, not the frontmatter scan itself — which alone costs
-about 0.2 s at 2000 memories. Measured during phase 1; see README.md. The phase-1 subject is
-`scripts/hoard-search.sh`, not the brief, because the brief does not exist until phase 2. If the
-ceiling is ever reached, an index is a backward-compatible addition, because the files remain the
-source of truth either way.
+The cost is a ceiling, and phase 1 measured where it sits. On the author's machine a query costs
+about 39 ms at 500 memories, 73 ms at 1000, and 139 ms at 2000; at 2000, 113 ms of that 139 ms is the
+awk frontmatter pass itself, so the scan this section defends is now most of what a search spends.
+
+That is a correction, not just a number. The first measurement of this reader reported 12.08 s at
+2000 memories and attributed it to the no-index scan described above. The attribution was wrong. The
+time was going into `scripts/hoard-search.sh` assembling awk's file-list argument one file at a time,
+where each append rebuilds the whole list and the assembly therefore costs O(n²); the awk scan it was
+feeding was never the expensive half. Assembling each layer's files in a single step took that phase
+from 12.05 s to 35 ms and changed no output at any size. `tests/test_hoard.sh` scenario 14 pins the
+construction rather than a stopwatch, because the regression is behaviour-preserving — a reverted
+copy returns byte-identical results — so no comparison of search output could catch it coming back.
+
+Measured during phase 1; see README.md. The phase-1 subject is `scripts/hoard-search.sh`, not the
+brief, because the brief does not exist until phase 2. Three sizes on one machine locate the cost at
+those sizes, not the ceiling. If the ceiling is ever reached, an index is a backward-compatible
+addition, because the files remain the source of truth either way — and it is now the awk scan that
+such an index would have to beat, which is the comparison this section always meant to be about.
 
 ## 6. Lifecycle
 

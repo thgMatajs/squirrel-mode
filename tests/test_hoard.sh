@@ -833,4 +833,214 @@ mut_readme_body=$(cat "$mut_readme" 2>/dev/null || printf '')
 assert_contains "$mut_readme_body" "exactly four kinds of file" "FAILURE PROOF (13): the reverted copy must carry the false count the assertion above forbids"
 assert_contains "$mut_readme_body" "never pruned" "FAILURE PROOF (13, independence): and must keep the pruning statement - the two claims are separate sentences and separate assertions"
 
+# ==========================================================================
+# 14. The file list is built with ONE `set --` per LAYER, never one per
+#     file.
+#
+#     THIS IS A SHAPE GUARD, AND DELIBERATELY SO. The regression it pins
+#     is invisible to every other kind of test in this file:
+#
+#       - It is invisible to OUTPUT. The per-file form and the one-shot
+#         form return byte-identical results on every fixture - 14b below
+#         runs the reverted mutant and proves exactly that. No stdout
+#         comparison can ever catch this.
+#       - It is invisible to a CLOCK, portably. `set -- "$@" "$f"` is
+#         quadratic because macOS's /bin/sh (bash 3.2) copies the whole
+#         positional list on each call; a `sh` that does not copy is fast
+#         at any input size this suite could honestly build. So the
+#         grow-the-input technique tests/test_hooks.sh scenario 33 uses
+#         does NOT transfer here: scenario 33's blowup is in the script's
+#         own algorithm and reproduces on any machine, while this one is
+#         a property of one shell. On an ubuntu runner where `sh` is
+#         `dash`, a doubling loop would exhaust and report "no blowup",
+#         going red while proving nothing about the code - the precise
+#         failure mode scenario 33's own comment warns about.
+#
+#     THE LIMIT, STATED, because a guard that oversells itself is worse
+#     than none: this pins the CONSTRUCTION, not a speed. It cannot fail
+#     because a search got slow, and it proves nothing about wall-clock
+#     time on any machine. The timings that justify the construction
+#     (12.02 s -> 0.14 s at 2000 memories, author's machine) live in
+#     README.md, the spec's section 5.1 and task-9b-report.md, where a
+#     number that only holds on one machine belongs.
+# ==========================================================================
+# shellcheck disable=SC2016 # every needle here is single-quoted deliberately:
+# it is the LITERAL source text of scripts/hoard-search.sh being searched for,
+# '$hoard_dir', '$@' and '$f' included, never a shell expansion.
+assert_contains "$hoard_search_body" 'set -- "$hoard_dir"/global/*.md' "the global layer must be assigned in a SINGLE \`set --\`, the whole glob at once"
+# shellcheck disable=SC2016 # literal source text, see above.
+assert_contains "$hoard_search_body" 'set -- "$hoard_dir/projects/$slug"/*.md "$@"' "and the project layer likewise, in one \`set --\` that prepends the whole glob to what the global layer already put there"
+# Matched as a COUNT over the whole file, not with assert_not_contains on
+# one spelling. Two reasons, both learned the hard way here:
+#   - `set -- "$@" <anything>` is the whole family of per-file appends,
+#     not just the one variable name the old loop happened to use, so the
+#     needle is the prefix they all share. The one-shot prepend the
+#     project layer uses is `set -- <glob> "$@"`, where "$@" is not the
+#     FIRST word, so it does not match and does not have to be excepted.
+#   - grep sees comments too. The first draft of this guard failed
+#     against the fixed script, because scripts/hoard-search.sh's own
+#     comment explaining the regression spelled it out verbatim. That
+#     comment now deliberately does not, and says why - a guard its own
+#     subject's prose satisfies is a guard that cannot fail.
+# `|| true` on the ASSIGNMENT, never `|| printf '0'` inside the
+# substitution: `grep -c` prints its count and THEN exits 1 when the
+# count is zero, so a fallback inside would append a second "0" and the
+# variable would read "0\n0" - which is the clean case, and would make
+# this guard fail exactly when the file is correct.
+# shellcheck disable=SC2016 # literal source text: '$@' is what is grepped for.
+hoard_append_count=$(grep -cF 'set -- "$@"' "$hoard_search_script" 2>/dev/null) || true
+assert_eq "0" "$hoard_append_count" "scripts/hoard-search.sh must never append to its own positional list: \`set -- \"\$@\" ...\` in a loop rebuilds the entire list on every call, which macOS's /bin/sh copies, so n files cost O(n^2) - measured at 10.07 s of pure list-building at 2000 memories against 31 ms for the one-shot form"
+# The literal-dropping half of the construction. Without these two the
+# assertions above would be satisfied by a version that hands awk an
+# unmatched glob's literal pattern.
+# shellcheck disable=SC2016 # literal source text, see above.
+assert_contains "$hoard_search_body" '[ -f "$1" ] || shift' "an unmatched glob stays literal in POSIX sh, so each layer's first word must be tested and shifted off when it names no file - that test is what replaces the per-file \`[ -f ]\` filter"
+# shellcheck disable=SC2016 # literal source text, see above.
+hoard_shift_count=$(grep -cF '[ -f "$1" ] || shift' "$hoard_search_script" 2>/dev/null) || true
+assert_eq "2" "$hoard_shift_count" "and there must be exactly TWO such tests, one per layer, each immediately after its own \`set --\` - that adjacency is what makes \"\$1\" the right word to test and a defined one under \`set -u\`"
+
+# ==========================================================================
+# 14b. FAILURE PROOF for scenario 14: a copy reverted to the per-file
+#      `set --` loop must fire the assertion above AND return identical
+#      results.
+#
+#      The second half is the point. It is what demonstrates that the
+#      shape guard is not redundant with the rest of this file: the
+#      regression is behaviour-preserving, so if scenario 14 were deleted
+#      the suite would stay green while the store's only reader went back
+#      to costing twelve seconds at 2000 memories.
+# ==========================================================================
+mutant14=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant14"
+mutant14_py=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-revert.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant14_py"
+# Quoted heredoc: the replacement text carries `$hoard_dir`, `$@` and
+# `$f`, none of which this shell may expand on the way to python3.
+cat >"$mutant14_py" <<'PY'
+import sys
+src = open(sys.argv[1]).read()
+pairs = [
+    ('set -- "$hoard_dir"/global/*.md\n[ -f "$1" ] || shift\n',
+     'set --\nfor f in "$hoard_dir"/global/*.md; do\n'
+     '  [ -f "$f" ] && set -- "$@" "$f"\ndone\n'),
+    ('  set -- "$hoard_dir/projects/$slug"/*.md "$@"\n  [ -f "$1" ] || shift\n',
+     '  for f in "$hoard_dir/projects/$slug"/*.md; do\n'
+     '    [ -f "$f" ] && set -- "$@" "$f"\n  done\n'),
+]
+applied = 0
+for old, new in pairs:
+    if old in src:
+        src = src.replace(old, new, 1)
+        applied += 1
+open(sys.argv[2], "w").write(src)
+sys.stdout.write(str(applied))
+PY
+mutant14_applied=$(python3 "$mutant14_py" "$hoard_search_script" "$mutant14")
+chmod +x "$mutant14"
+
+# Controls. A revert that matched nothing leaves a byte-identical copy,
+# which scenario 14's needles correctly pass - and this proof would then
+# report clean while proving the opposite of what it claims.
+assert_eq "2" "$mutant14_applied" "FAILURE PROOF (14), control: the revert must replace BOTH layers' constructions - if it replaced fewer, the mutant is not the regression this proof claims to reproduce"
+if cmp -s "$hoard_search_script" "$mutant14"; then mutant14_differs=no; else mutant14_differs=yes; fi
+assert_eq "yes" "$mutant14_differs" "FAILURE PROOF (14), control: the revert must genuinely change scripts/hoard-search.sh"
+
+mutant14_body=$(cat "$mutant14" 2>/dev/null || printf '')
+# Counted the same way scenario 14 counts, against the same file, so the
+# proof exercises that assertion's own mechanism and not a lookalike.
+# shellcheck disable=SC2016 # literal source text, see scenario 14.
+mutant14_append_count=$(grep -cF 'set -- "$@"' "$mutant14" 2>/dev/null) || true
+assert_eq "2" "$mutant14_append_count" "FAILURE PROOF (14): the reverted copy must carry the per-file append that scenario 14 forbids, once per layer - proving that assertion fires on the regression rather than merely being satisfied by its absence"
+# shellcheck disable=SC2016 # literal source text, see scenario 14.
+assert_not_contains "$mutant14_body" 'set -- "$hoard_dir"/global/*.md' "FAILURE PROOF (14): and must lose the one-shot assignment scenario 14 requires"
+# shellcheck disable=SC2016 # literal source text, see scenario 14.
+assert_contains "$mutant14_body" '*/../*) slug="" ;;' "FAILURE PROOF (14, isolation): the revert must leave the slug traversal guard untouched - it rewrites two file-list constructions and nothing else, which is also what scenario 5c's own mutation depends on"
+
+# The half that makes scenario 14 worth having: same fixtures, same
+# answers. Both layers, a query, and the --all path, so the comparison is
+# not one lucky code path.
+home14=$(new_home)
+make_memory "$home14" "global" "20260101T000000Z-g14" "reference" "3" "builds,tests" \
+  "20991231T000000Z" "0" "active" "a global fact about builds"
+make_memory "$home14" "global" "20260101T000001Z-s14" "reference" "3" "builds" \
+  "20991231T000000Z" "0" "superseded" "a superseded global fact about builds"
+make_memory "$home14" "projects/proj14-abc123" "20260101T000000Z-p14" "decision" "4" "builds" \
+  "20991231T000000Z" "2" "active" "a project decision about builds"
+make_memory "$home14" "inbox" "20260101T000000Z-c14" "feedback" "3" "builds" \
+  "20991231T000000Z" "0" "active" "an untriaged candidate about builds"
+
+mutant14_same=yes
+for args14 in "--slug proj14-abc123" "--slug proj14-abc123 --all" "" "--slug proj14-abc123 -- builds"; do
+  # shellcheck disable=SC2086 # deliberate word splitting: $args14 is a
+  # fixed, space-separated argument list written above, not user input.
+  real14_out=$(HOME="$home14" "$hoard_search_script" $args14 2>/dev/null) || true
+  # shellcheck disable=SC2086 # see above.
+  mut14_out=$(HOME="$home14" "$mutant14" $args14 2>/dev/null) || true
+  [ "$real14_out" = "$mut14_out" ] || mutant14_same=no
+  assert_not_contains "$real14_out" "an untriaged candidate" "inbox/ must stay out of results under the one-shot construction too, for args [$args14]"
+done
+assert_eq "yes" "$mutant14_same" "FAILURE PROOF (14), the half that makes the shape guard necessary: the reverted mutant must return IDENTICAL output to the real script across both layers, --all and a query - the regression is behaviour-preserving, so no output comparison in this file could ever catch it and scenario 14 is the only thing standing between the store's only reader and its quadratic form"
+assert_contains "$(HOME="$home14" "$hoard_search_script" --slug proj14-abc123 2>/dev/null || true)" "a project decision about builds" "FAILURE PROOF (14), non-vacuity: the fixture the comparison runs on must actually produce results - two identical EMPTY outputs would satisfy the assertion above while proving nothing"
+
+# ==========================================================================
+# 15. Empty and missing layer directories, on both layers.
+#
+#     The one-shot construction drops an unmatched glob by testing a
+#     single word instead of filtering every file, so the cases where a
+#     layer contributes NOTHING are the ones that had to be re-proved.
+#     stderr is asserted empty as well as stdout: a literal `*.md`
+#     pattern reaching awk is not visible in a ranked result, only in a
+#     complaint about a file that does not exist.
+# ==========================================================================
+# 15a. The global directory is missing entirely (only inbox/ exists).
+home15a=$(new_home)
+make_memory "$home15a" "inbox" "20260101T000000Z-c15a" "feedback" "3" "x" \
+  "20991231T000000Z" "0" "active" "an untriaged candidate"
+out15a=$(run_search "$home15a")
+err15a=$(HOME="$home15a" "$hoard_search_script" 2>&1 >/dev/null) || true
+assert_eq "" "$out15a" "a hoard with no global/ directory at all must print nothing"
+assert_eq "" "$err15a" "and must say nothing on stderr: the unmatched glob's literal must never reach awk as a filename"
+assert_exit_code 0 env HOME="$home15a" "$hoard_search_script"
+
+# 15b. The global directory exists but is empty.
+home15b=$(new_home)
+mkdir -p "$home15b/.squirrel/hoard/global"
+out15b=$(run_search "$home15b")
+err15b=$(HOME="$home15b" "$hoard_search_script" 2>&1 >/dev/null) || true
+assert_eq "" "$out15b" "an EMPTY global/ directory must print nothing - a directory that exists and matches nothing is the same unmatched glob as one that does not exist"
+assert_eq "" "$err15b" "and must say nothing on stderr"
+assert_exit_code 0 env HOME="$home15b" "$hoard_search_script"
+
+# 15c. The global layer is empty and the project layer is not. This is
+#      the case the prepend has to survive: the project glob is joined to
+#      a positional list the global layer left EMPTY.
+home15c=$(new_home)
+mkdir -p "$home15c/.squirrel/hoard/global"
+make_memory "$home15c" "projects/proj15-abc123" "20260101T000000Z-p15c" "decision" "3" "x" \
+  "20991231T000000Z" "0" "active" "a project decision with no global layer beside it"
+out15c=$(run_search "$home15c" --slug "proj15-abc123")
+err15c=$(HOME="$home15c" "$hoard_search_script" --slug "proj15-abc123" 2>&1 >/dev/null) || true
+assert_contains "$out15c" "a project decision with no global layer beside it" "an empty global layer must not swallow the project layer - the project glob is prepended to an empty list, and an empty list is a normal state, not a failure"
+assert_eq "" "$err15c" "and nothing may reach stderr while that happens"
+
+# 15d. The named project's directory does not exist. The global layer is
+#      still returned, and no literal reaches awk.
+home15d=$(new_home)
+make_memory "$home15d" "global" "20260101T000000Z-g15d" "reference" "3" "x" \
+  "20991231T000000Z" "0" "active" "a global fact"
+out15d=$(run_search "$home15d" --slug "nosuch15-abc123")
+err15d=$(HOME="$home15d" "$hoard_search_script" --slug "nosuch15-abc123" 2>&1 >/dev/null) || true
+assert_contains "$out15d" "a global fact" "a slug naming a project with no layer on disk must still return the global layer"
+assert_eq "" "$err15d" "and must not complain about the project glob's literal - a first run in a new project is the commonest state there is"
+
+# 15e. The named project's directory exists but is empty.
+home15e=$(new_home)
+make_memory "$home15e" "global" "20260101T000000Z-g15e" "reference" "3" "x" \
+  "20991231T000000Z" "0" "active" "a global fact"
+mkdir -p "$home15e/.squirrel/hoard/projects/proj15-abc123"
+out15e=$(run_search "$home15e" --slug "proj15-abc123")
+err15e=$(HOME="$home15e" "$hoard_search_script" --slug "proj15-abc123" 2>&1 >/dev/null) || true
+assert_contains "$out15e" "a global fact" "an EMPTY project layer must leave the global layer's results alone"
+assert_eq "" "$err15e" "and must say nothing on stderr"
+
 assert_report
