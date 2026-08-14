@@ -283,4 +283,70 @@ else
 fi
 assert_eq "no" "$mutant8_still_ordered" "FAILURE PROOF (scenarios 6-8): a reader whose score is a constant must fall back to id order and put 'the unimportant one' first - if it still leads with the important one, the ordering assertions above are passing on tie-break luck rather than on the score"
 
+# ==========================================================================
+# 9. A query filters to matching memories and ranks by how much matched.
+#
+#    DEVIATION FROM THE BRIEF: last_used (and created) is
+#    `20991231T000000Z` rather than the brief's `20260101T000000Z`, the
+#    same clamp scenarios 6-8 use. With a 2026 date the decay term drives
+#    every score to 0.0000 as of today, and the assertions below would
+#    then be decided by the id tie-break instead of by relevance.
+# ==========================================================================
+home9=$(new_home)
+make_memory "$home9" "global" "20260101T000000Z-git" "feedback" "3" "git,commits" \
+  "20991231T000000Z" "0" "active" "run the suite before committing"
+make_memory "$home9" "global" "20260101T000001Z-css" "reference" "3" "css,layout" \
+  "20991231T000000Z" "0" "active" "flexbox gap is unsupported on old safari"
+out9=$(run_search "$home9" "commits")
+assert_contains "$out9" "run the suite before committing" "a memory whose tags carry the query token must be returned"
+assert_not_contains "$out9" "flexbox gap" "a memory matching no query token must not be a result at all"
+
+out9_title=$(run_search "$home9" "safari")
+assert_contains "$out9_title" "flexbox gap" "a query token found in the title must match, not only one found in the tags"
+
+out9_none=$(run_search "$home9" "kubernetes")
+assert_eq "" "$out9_none" "a query matching nothing must print nothing, not an unfiltered list"
+
+# ==========================================================================
+# 10. Matching more of the query outranks matching less of it.
+#
+#     DEVIATION FROM THE BRIEF: last_used (and created) is
+#     `20991231T000000Z` rather than the brief's `20260101T000000Z`, for
+#     the same decay-to-zero reason as scenario 9.
+#
+#     DEVIATION FROM THE BRIEF: the ids are `20991231T000000Z-z-both` and
+#     `20991231T000000Z-a-one` rather than the brief's `-both` / `-one`
+#     suffixes on their original timestamps. The brief's ids made the id
+#     tie-break point at the SAME memory this scenario asserts should
+#     win, so a reader that ignored relevance completely would still
+#     pass it. `a-one` sorts before `z-both`, so id order now puts the
+#     WRONG answer first and only real relevance can pass - the same
+#     "tie-break opposes the answer" discipline scenario 6 documents for
+#     itself.
+# ==========================================================================
+home10=$(new_home)
+make_memory "$home10" "global" "20991231T000000Z-z-both" "feedback" "3" "compose,theme" \
+  "20991231T000000Z" "0" "active" "alpha"
+make_memory "$home10" "global" "20991231T000000Z-a-one" "feedback" "3" "compose,layout" \
+  "20991231T000000Z" "0" "active" "beta"
+out10=$(printf '%s\n' "$(run_search "$home10" "compose theme")" | head -n 1)
+assert_contains "$out10" "20991231T000000Z-z-both" "matching both query tokens must outrank matching one, with every other field equal"
+
+# ==========================================================================
+# 10b. FAILURE PROOF for 9-10: a mutant that treats every memory as fully
+#      relevant must return the non-matching memory, proving the filter is
+#      what excludes it rather than the score happening to be small.
+# ==========================================================================
+mutant10=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant10"
+sed 's/^  if (rel == 0) return$/  rel = 1/' "$hoard_search_script" >"$mutant10"
+chmod +x "$mutant10"
+mutant10_out=$(HOME="$home9" "$mutant10" "kubernetes" 2>/dev/null) || true
+if [ -n "$mutant10_out" ]; then
+  mutant10_leaks=yes
+else
+  mutant10_leaks=no
+fi
+assert_eq "yes" "$mutant10_leaks" "FAILURE PROOF (scenarios 9-10): removing the zero-relevance filter must make a non-matching query return results - if it does not, scenario 9's empty result is being produced by something other than the filter"
+
 assert_report

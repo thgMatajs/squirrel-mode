@@ -129,7 +129,7 @@ tab=$(printf '\t')
 # score. Same discipline as the `LC_ALL=C sort` a few lines down, and as
 # load-profile.sh's json_escape - see its "WHY THE BODY RUNS UNDER
 # LC_ALL=C" comment.
-LC_ALL=C awk -v want_all="$want_all" -v now_ymd="$now_ymd" '
+LC_ALL=C awk -v want_all="$want_all" -v now_ymd="$now_ymd" -v query="$query" '
 # days_from_civil: Howard Hinnant days-from-civil, the standard
 # proleptic-Gregorian day count. Chosen over `date` arithmetic because
 # no portable `date` computes a difference: GNU `date -d` and BSD
@@ -155,9 +155,23 @@ function stamp_days(s,   y, m, d) {
   if (y == 0 || m == 0 || d == 0) return 0
   return days_from_civil(y, m, d)
 }
-function emit(   imp, lambda, days, score) {
+function relevance(   hay, i, hits) {
+  if (q_n == 0) return 1
+  hay = tolower(m_title " " m_tags)
+  gsub(/[^a-z0-9]+/, " ", hay)
+  hay = " " hay " "
+  hits = 0
+  for (i = 1; i <= q_n; i++) {
+    if (index(hay, " " q_tok[i] " ") > 0) hits++
+  }
+  return hits / q_n
+}
+function emit(   imp, lambda, days, score, rel) {
   if (m_title == "") return
   if (want_all != 1 && m_status != "active") return
+
+  rel = relevance()
+  if (rel == 0) return
 
   imp = m_importance + 0
   if (imp < 1) imp = 1
@@ -172,16 +186,35 @@ function emit(   imp, lambda, days, score) {
   days = now_days - stamp_days(m_last_used)
   if (days < 0) days = 0
 
-  score = (imp / 5) * exp(-lambda * days) * (1 + 0.2 * log(1 + (m_uses + 0)))
+  score = rel * (imp / 5) * exp(-lambda * days) * (1 + 0.2 * log(1 + (m_uses + 0)))
   printf "%.4f\t%s\t%s\t%s\n", score, m_id, m_type, m_title
 }
 function reset() {
   in_fm = 0; fm_done = 0
   m_type = ""; m_title = ""; m_status = "active"; m_id = ""
-  m_importance = 3; m_uses = 0; m_last_used = ""
+  m_importance = 3; m_uses = 0; m_last_used = ""; m_tags = ""
 }
 BEGIN {
   now_days = days_from_civil(substr(now_ymd, 1, 4) + 0, substr(now_ymd, 5, 2) + 0, substr(now_ymd, 7, 2) + 0)
+
+  # Query tokens: lowercased, split on anything that is not a letter or
+  # digit, with one-character tokens and a small stopword set dropped.
+  # The stopword list is deliberately tiny - it exists to stop "the" and
+  # "a" from making every memory look half-relevant, not to be a
+  # linguistics project.
+  q_n = 0
+  if (query != "") {
+    tmp = tolower(query)
+    gsub(/[^a-z0-9]+/, " ", tmp)
+    c = split(tmp, qparts, " ")
+    for (i = 1; i <= c; i++) {
+      t = qparts[i]
+      if (length(t) < 2) continue
+      if (t == "the" || t == "and" || t == "for" || t == "que" || t == "com" || t == "para") continue
+      q_n++
+      q_tok[q_n] = t
+    }
+  }
 }
 FNR == 1 {
   emit()
@@ -207,6 +240,7 @@ in_fm == 1 {
   if (key == "importance") m_importance = val
   if (key == "uses")       m_uses = val
   if (key == "last_used")  m_last_used = val
+  if (key == "tags")       m_tags = val
   if (key == "status" && val != "") m_status = val
   next
 }
