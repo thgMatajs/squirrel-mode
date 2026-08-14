@@ -844,23 +844,30 @@ assert_contains "$mut_readme_body" "never pruned" "FAILURE PROOF (13, independen
 #         form return byte-identical results on every fixture - 14b below
 #         runs the reverted mutant and proves exactly that. No stdout
 #         comparison can ever catch this.
-#       - It is invisible to a CLOCK, portably. `set -- "$@" "$f"` is
-#         quadratic because macOS's /bin/sh (bash 3.2) copies the whole
-#         positional list on each call; a `sh` that does not copy is fast
-#         at any input size this suite could honestly build. So the
+#       - It is invisible to a CLOCK at any fixture size this suite can
+#         afford. NOT because any shell is exempt - an earlier draft of
+#         this comment claimed dash "is fast at any input size", and that
+#         was measured and found FALSE. Appending one word at a time is
+#         quadratic in every shell measured, dash included:
+#
+#             per-file `set --`, n = 2000 / 4000 / 8000
+#             bash 3.2   1448 / 5922 / 24255 ms   4.09x, 4.10x per doubling
+#             dash        150 /  606 /  2385 ms   4.05x, 3.93x per doubling
+#
+#         Same exponent; dash's constant is about 9.7x smaller. So the
 #         grow-the-input technique tests/test_hooks.sh scenario 33 uses
-#         does NOT transfer here: scenario 33's blowup is in the script's
-#         own algorithm and reproduces on any machine, while this one is
-#         a property of one shell. On an ubuntu runner where `sh` is
-#         `dash`, a doubling loop would exhaust and report "no blowup",
-#         going red while proving nothing about the code - the precise
-#         failure mode scenario 33's own comment warns about.
+#         would work in principle, and is rejected on COST, not on
+#         correctness: scenario 33 grows a string in memory, while this
+#         defect is driven by the number of FILES ON DISK, and a fixture
+#         big enough to make dash unambiguously slow is one this suite
+#         would have to create and delete on every run. Pinning the shape
+#         costs nothing and catches the same regression.
 #
 #     THE LIMIT, STATED, because a guard that oversells itself is worse
 #     than none: this pins the CONSTRUCTION, not a speed. It cannot fail
 #     because a search got slow, and it proves nothing about wall-clock
 #     time on any machine. The timings that justify the construction
-#     (12.02 s -> 0.14 s at 2000 memories, author's machine) live in
+#     (12.08 s -> 155 ms at 2000 memories, author's machine) live in
 #     README.md, the spec's section 5.1 and task-9b-report.md, where a
 #     number that only holds on one machine belongs.
 # ==========================================================================
@@ -882,6 +889,16 @@ assert_contains "$hoard_search_body" 'set -- "$hoard_dir/projects/$slug"/*.md "$
 #     comment explaining the regression spelled it out verbatim. That
 #     comment now deliberately does not, and says why - a guard its own
 #     subject's prose satisfies is a guard that cannot fail.
+#
+# THE COUNT IS 1, NOT 0, AND THE ONE IS THE REBUILD. Fix round 1 added a
+# prescan: an entry that is not a regular file must never reach awk (a
+# FIFO blocks it forever, a broken symlink makes it drop a memory in
+# silence - scenario 16), so when the prescan finds one, the list is
+# rebuilt with exactly the per-file filter this guard otherwise forbids.
+# That rebuild is the ONLY licensed occurrence, it is inside the
+# `irregular` branch, and it runs only for a hoard that already contains
+# something that is not a memory. Pinning the count at 1 rather than
+# asserting absence is what keeps the guard honest about that.
 # `|| true` on the ASSIGNMENT, never `|| printf '0'` inside the
 # substitution: `grep -c` prints its count and THEN exits 1 when the
 # count is zero, so a fallback inside would append a second "0" and the
@@ -889,7 +906,15 @@ assert_contains "$hoard_search_body" 'set -- "$hoard_dir/projects/$slug"/*.md "$
 # this guard fail exactly when the file is correct.
 # shellcheck disable=SC2016 # literal source text: '$@' is what is grepped for.
 hoard_append_count=$(grep -cF 'set -- "$@"' "$hoard_search_script" 2>/dev/null) || true
-assert_eq "0" "$hoard_append_count" "scripts/hoard-search.sh must never append to its own positional list: \`set -- \"\$@\" ...\` in a loop rebuilds the entire list on every call, which macOS's /bin/sh copies, so n files cost O(n^2) - measured at 10.07 s of pure list-building at 2000 memories against 31 ms for the one-shot form"
+assert_eq "1" "$hoard_append_count" "scripts/hoard-search.sh must append to its own positional list in exactly ONE place, the prescan's rebuild: \`set -- \"\$@\" ...\` in a loop rebuilds the entire list on every call, so n files cost O(n^2) - measured at 12.05 s of pure list-building at 2000 memories against 35 ms for the one-shot form"
+# ...and that one occurrence must be the guarded rebuild, not a relapse
+# on the common path. Without these two needles the count above would be
+# satisfied by a script that went back to appending per file and simply
+# deleted the prescan.
+# shellcheck disable=SC2016 # literal source text, see above.
+assert_contains "$hoard_search_body" 'irregular=1; break' "the prescan must exist: a single walk that stops at the first entry which is not a regular file, with NO \`set --\` in it, so the common case pays one stat per file and nothing else"
+# shellcheck disable=SC2016 # literal source text, see above.
+assert_contains "$hoard_search_body" 'if [ "$irregular" = 1 ]; then' "and the per-file rebuild must sit behind that prescan's flag, so it runs only for a hoard that actually contains something which is not a memory"
 # The literal-dropping half of the construction. Without these two the
 # assertions above would be satisfied by a version that hands awk an
 # unmatched glob's literal pattern.
@@ -897,7 +922,7 @@ assert_eq "0" "$hoard_append_count" "scripts/hoard-search.sh must never append t
 assert_contains "$hoard_search_body" '[ -f "$1" ] || shift' "an unmatched glob stays literal in POSIX sh, so each layer's first word must be tested and shifted off when it names no file - that test is what replaces the per-file \`[ -f ]\` filter"
 # shellcheck disable=SC2016 # literal source text, see above.
 hoard_shift_count=$(grep -cF '[ -f "$1" ] || shift' "$hoard_search_script" 2>/dev/null) || true
-assert_eq "2" "$hoard_shift_count" "and there must be exactly TWO such tests, one per layer, each immediately after its own \`set --\` - that adjacency is what makes \"\$1\" the right word to test and a defined one under \`set -u\`"
+assert_eq "2" "$hoard_shift_count" "and there must be exactly TWO such tests, one per layer, each immediately after its own \`set --\`. Since fix round 1 these also guard a PERFORMANCE CLIFF: an unmatched glob's literal is not a regular file, so leaving it in the list would trip the prescan and rebuild on every search in a fresh project - measured at 170 ms with the shifts against roughly 8 s without them, on a 2000-memory global layer"
 
 # ==========================================================================
 # 14b. FAILURE PROOF for scenario 14: a copy reverted to the per-file
@@ -950,7 +975,7 @@ mutant14_body=$(cat "$mutant14" 2>/dev/null || printf '')
 # proof exercises that assertion's own mechanism and not a lookalike.
 # shellcheck disable=SC2016 # literal source text, see scenario 14.
 mutant14_append_count=$(grep -cF 'set -- "$@"' "$mutant14" 2>/dev/null) || true
-assert_eq "2" "$mutant14_append_count" "FAILURE PROOF (14): the reverted copy must carry the per-file append that scenario 14 forbids, once per layer - proving that assertion fires on the regression rather than merely being satisfied by its absence"
+assert_eq "3" "$mutant14_append_count" "FAILURE PROOF (14): the reverted copy must carry the per-file append once per layer ON TOP of the prescan's licensed rebuild - 3 where the real file has 1 - proving scenario 14's count fires on the regression rather than merely being satisfied by a number that happens to match. The 3 was read off the generated mutant, not reasoned to"
 # shellcheck disable=SC2016 # literal source text, see scenario 14.
 assert_not_contains "$mutant14_body" 'set -- "$hoard_dir"/global/*.md' "FAILURE PROOF (14): and must lose the one-shot assignment scenario 14 requires"
 # shellcheck disable=SC2016 # literal source text, see scenario 14.
@@ -1042,5 +1067,156 @@ out15e=$(run_search "$home15e" --slug "proj15-abc123")
 err15e=$(HOME="$home15e" "$hoard_search_script" --slug "proj15-abc123" 2>&1 >/dev/null) || true
 assert_contains "$out15e" "a global fact" "an EMPTY project layer must leave the global layer's results alone"
 assert_eq "" "$err15e" "and must say nothing on stderr"
+
+# ==========================================================================
+# 16. A `*.md` entry that is not a regular file must not reach awk.
+#
+#     ALL THREE OF THESE WERE REAL, and all three were introduced by the
+#     one-shot construction in the commit before this one, which filtered
+#     a non-regular entry only where it sorted FIRST. Measured, not
+#     imagined - each row is what the store's only reader actually did:
+#
+#       - a FIFO: awk BLOCKS FOREVER on open, waiting for a writer that
+#         never comes. The search never returns. Reproduced on all three
+#         awks this project meets.
+#       - a broken symlink: awk exits fatally mid-list, and because
+#         emit() defers each record until the NEXT file's FNR == 1, the
+#         memory parsed just before the fatal is DROPPED. 3 memories in,
+#         2 out, exit status 0, on all three awks. Silent loss.
+#       - a directory: the same silent loss under mawk.
+#
+#     The victim SORTS LAST in every fixture below, deliberately. Sorting
+#     it first is the case the two `[ -f "$1" ] || shift` tests already
+#     handle, so a first-sorting fixture would pass against the very
+#     defect this scenario exists to catch.
+#
+#     WHY THE WATCHDOG. A regression here must FAIL this suite, not hang
+#     it. Each run is backgrounded and polled, and a run still alive at
+#     the limit is killed and recorded as a hang - so the FIFO case
+#     reports a red assertion in a bounded time instead of stalling CI
+#     forever, which is the same failure it is testing for.
+# ==========================================================================
+# run_search_watched <home> -> sets rs16_verdict to "hung" or "done",
+# rs16_out to stdout and rs16_err to stderr.
+run_search_watched() {
+  rsw_home=$1
+  rsw_tmp=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hoard-watch.XXXXXX")
+  cleanup_paths="$cleanup_paths $rsw_tmp"
+  HOME="$rsw_home" "$hoard_search_script" >"$rsw_tmp/out" 2>"$rsw_tmp/err" &
+  rsw_pid=$!
+  rsw_n=0
+  while [ "$rsw_n" -lt 150 ]; do
+    kill -0 "$rsw_pid" 2>/dev/null || break
+    sleep 0.1
+    rsw_n=$((rsw_n + 1))
+  done
+  if kill -0 "$rsw_pid" 2>/dev/null; then
+    kill -9 "$rsw_pid" 2>/dev/null || true
+    wait "$rsw_pid" 2>/dev/null || true
+    rs16_verdict="hung"
+  else
+    wait "$rsw_pid" 2>/dev/null || true
+    # Quoted deliberately: bare `done` here parses as the loop keyword
+    # (SC1010), which the dialect gate treats as a failure. A comment
+    # explaining that must not START with the word shellcheck either -
+    # such a line is read as a DIRECTIVE, and an unparseable one is
+    # itself an error (SC1073). Both were hit writing this line.
+    rs16_verdict="done"
+  fi
+  rs16_out=$(cat "$rsw_tmp/out" 2>/dev/null || printf '')
+  rs16_err=$(cat "$rsw_tmp/err" 2>/dev/null || printf '')
+}
+
+for victim16 in fifo broken adir; do
+  home16=$(new_home)
+  make_memory "$home16" "global" "20260101T000000Z-aa-one" "feedback" "3" "builds" \
+    "20991231T000000Z" "0" "active" "real memory one about builds"
+  make_memory "$home16" "global" "20260101T000000Z-aa-two" "feedback" "3" "builds" \
+    "20991231T000000Z" "0" "active" "real memory two about builds"
+  make_memory "$home16" "global" "20260101T000000Z-aa-three" "feedback" "3" "builds" \
+    "20991231T000000Z" "0" "active" "real memory three about builds"
+  victim16_path="$home16/.squirrel/hoard/global/zz-victim.md"
+  case "$victim16" in
+    fifo)   mkfifo "$victim16_path" ;;
+    broken) ln -s "$home16/.squirrel/hoard/global/no-such-target" "$victim16_path" ;;
+    adir)   mkdir -p "$victim16_path" ;;
+  esac
+  # Control: the victim must exist and must NOT be a regular file, or the
+  # whole scenario is asserting against a clean fixture. This exact bug -
+  # a fixture builder that silently created nothing - made the first run
+  # of these three cases report "no defect" against a script that hung.
+  if [ -e "$victim16_path" ] || [ -L "$victim16_path" ]; then
+    victim16_exists=yes
+  else
+    victim16_exists=no
+  fi
+  assert_eq "yes" "$victim16_exists" "scenario 16 control ($victim16): the irregular entry must actually exist, or this scenario passes against a fixture that never had one"
+  if [ -f "$victim16_path" ]; then victim16_regular=yes; else victim16_regular=no; fi
+  assert_eq "no" "$victim16_regular" "scenario 16 control ($victim16): the irregular entry must not be a regular file, or it is simply a fourth memory"
+
+  run_search_watched "$home16"
+  assert_eq "done" "$rs16_verdict" "a $victim16 named *.md must not make the search hang - awk blocks forever opening a FIFO, and a reader that never returns is the one failure a user cannot diagnose"
+  memories16=$(printf '%s' "$rs16_out" | grep -c "real memory" 2>/dev/null) || true
+  assert_eq "3" "$memories16" "all three real memories must still be returned beside a $victim16 named *.md - awk defers each record to the next file's FNR==1, so a fatal open DROPS the record before it and the answer looks complete while missing one"
+  assert_eq "" "$rs16_err" "and nothing may reach stderr: the entry must be filtered before awk ever sees it, not complained about afterwards"
+done
+
+# 16b. A layer whose ONLY entry is irregular is the same as an empty one:
+#      silence, no hang, no error. This is the path where the rebuild
+#      empties the list completely, so it also proves the rebuild can
+#      leave zero files behind without the script mistaking that for
+#      something to report.
+home16b=$(new_home)
+mkdir -p "$home16b/.squirrel/hoard/global"
+mkfifo "$home16b/.squirrel/hoard/global/zz-only.md"
+run_search_watched "$home16b"
+assert_eq "done" "$rs16_verdict" "a layer whose only entry is a FIFO must not hang either - the rebuild empties the list, which is the same state as an empty directory"
+assert_eq "" "$rs16_out" "and must print nothing, exactly as an empty layer does"
+assert_eq "" "$rs16_err" "and must say nothing on stderr"
+assert_exit_code 0 env HOME="$home16b" "$hoard_search_script"
+
+# 16c. FAILURE PROOF for scenario 16: the pre-prescan construction must
+#      reproduce the silent loss. Without this, scenario 16 could be
+#      passing because the fixture is harmless rather than because the
+#      prescan removes the entry.
+#
+#      The BROKEN SYMLINK is used rather than the FIFO: it is the case
+#      that returns a wrong answer quietly, so the proof needs no
+#      watchdog and cannot itself hang the suite.
+mutant16=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant16"
+mutant16_py=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-noprescan.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant16_py"
+cat >"$mutant16_py" <<'PY'
+import re
+import sys
+src = open(sys.argv[1]).read()
+start = src.index("irregular=0\n")
+end = src.index("[ $# -gt 0 ] || exit 0")
+cut = src[start:end]
+src = src[:start] + src[end:]
+open(sys.argv[2], "w").write(src)
+sys.stdout.write("removed=%d\n" % len(re.findall(r'set -- "\$@"', cut)))
+PY
+mutant16_removed=$(python3 "$mutant16_py" "$hoard_search_script" "$mutant16")
+chmod +x "$mutant16"
+assert_eq "removed=1" "$mutant16_removed" "FAILURE PROOF (16), control: excising the prescan must remove exactly the one licensed per-file rebuild - if it removed none, it cut the wrong block and the proof below is vacuous"
+if cmp -s "$hoard_search_script" "$mutant16"; then mut16_differs=no; else mut16_differs=yes; fi
+assert_eq "yes" "$mut16_differs" "FAILURE PROOF (16), control: the excision must genuinely change scripts/hoard-search.sh"
+
+home16c=$(new_home)
+make_memory "$home16c" "global" "20260101T000000Z-aa-one" "feedback" "3" "builds" \
+  "20991231T000000Z" "0" "active" "real memory one about builds"
+make_memory "$home16c" "global" "20260101T000000Z-aa-two" "feedback" "3" "builds" \
+  "20991231T000000Z" "0" "active" "real memory two about builds"
+make_memory "$home16c" "global" "20260101T000000Z-aa-three" "feedback" "3" "builds" \
+  "20991231T000000Z" "0" "active" "real memory three about builds"
+ln -s "$home16c/.squirrel/hoard/global/no-such-target" "$home16c/.squirrel/hoard/global/zz-victim.md"
+mut16_out=$(HOME="$home16c" "$mutant16" 2>/dev/null) || true
+mut16_count=$(printf '%s' "$mut16_out" | grep -c "real memory" 2>/dev/null) || true
+assert_eq "2" "$mut16_count" "FAILURE PROOF (16): the prescan-less copy must return only TWO of the three memories beside a broken symlink - the exact silent loss the prescan was added to stop, reproduced here so scenario 16's assertion is known to fire on it rather than on a harmless fixture"
+real16_out=$(HOME="$home16c" "$hoard_search_script" 2>/dev/null) || true
+real16_count=$(printf '%s' "$real16_out" | grep -c "real memory" 2>/dev/null) || true
+assert_eq "3" "$real16_count" "FAILURE PROOF (16), the other half: the real script must return all THREE on the SAME fixture - one machine, one fixture, one block of difference, so the correctness can only be attributed to the prescan"
 
 assert_report

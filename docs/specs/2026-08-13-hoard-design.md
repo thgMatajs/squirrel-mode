@@ -163,7 +163,7 @@ migration, no divergence between a file and its index. Every one of those is a f
 exists only because the index exists.
 
 The cost is a ceiling, and phase 1 measured where it sits. On the author's machine a query costs
-about 39 ms at 500 memories, 73 ms at 1000, and 139 ms at 2000; at 2000, 113 ms of that 139 ms is the
+about 44 ms at 500 memories, 79 ms at 1000, and 155 ms at 2000; at 2000, 110 ms of that 155 ms is the
 awk frontmatter pass itself, so the scan this section defends is now most of what a search spends.
 
 That is a correction, not just a number, and the sequence matters. This section originally attributed
@@ -173,9 +173,18 @@ pre-fix reader cost 12.08 s at the same size. The time was going into `scripts/h
 assembling awk's file-list argument one file at a time,
 where each append rebuilds the whole list and the assembly therefore costs O(n²); the awk scan it was
 feeding was never the expensive half. Assembling each layer's files in a single step took that phase
-from 12.05 s to 35 ms and changed no output at any size. `tests/test_hoard.sh` scenario 14 pins the
+from 12.05 s to 42 ms and changed no output at any size. `tests/test_hoard.sh` scenario 14 pins the
 construction rather than a stopwatch, because the regression is behaviour-preserving — a reverted
 copy returns byte-identical results — so no comparison of search output could catch it coming back.
+
+One thing the reader still pays for per file, deliberately. A `*.md` entry that is not a regular file
+is not a memory, and awk does not merely skip one: a FIFO blocks it forever, and a broken symlink
+makes it exit mid-list, dropping the memory it had parsed but not yet emitted — a complete-looking
+answer, quietly missing an entry. So the list is checked once before awk sees it, and rebuilt the
+slow way only when that check finds something. The check costs about 19 ms at 2000 memories; the
+rebuild costs what the whole reader used to, and runs only for a hoard that already contains
+something which is not a memory. Scenario 16 holds all three cases, including the one that used to
+hang.
 
 Measured during phase 1; see README.md. The phase-1 subject is `scripts/hoard-search.sh`, not the
 brief, because the brief does not exist until phase 2. Three sizes on one machine locate the cost at

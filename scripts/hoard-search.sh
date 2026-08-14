@@ -91,8 +91,8 @@ hoard_dir="$home_dir/.squirrel/hoard"
 # not spelled here: tests/test_hoard.sh scenario 14 greps this file for
 # it, and a guard that its own subject's comment satisfies is a guard
 # that cannot fail.)
-# Measured on the author's machine at 2000 memories: 12.4 s in that loop
-# against 0.2 s for the whole awk pass it was feeding. Assigning each
+# Measured on the author's machine at 2000 memories: 12.05 s in that loop
+# against 110 ms for the whole awk pass it was feeding. Assigning each
 # layer's expansion in a single `set --` makes that one copy per layer
 # instead of one per file. tests/test_hoard.sh scenario 14 pins the
 # shape so the per-file form cannot come back unnoticed.
@@ -105,17 +105,13 @@ hoard_dir="$home_dir/.squirrel/hoard"
 # `set --` is what makes "$1" both the right word to test and a defined
 # one under `set -u`.
 #
-# THE LIMIT, STATED. The per-file form also filtered a non-regular entry
-# ANYWHERE in a layer - a directory literally named `something.md`. This
-# form filters one only where it sorts first. Nothing squirrel-mode does
-# creates such a directory (memories are written by the stash skill, one
-# file at a time), and the outcome was measured rather than assumed: on
-# all three awks this project meets, every real memory is still read and
-# ranked, and the residue is stderr noise - silent on macOS's awk, an
-# "ignored" warning on gawk, an "Is a directory" line and awk exit 2 on
-# mawk, which reaches nobody because awk heads a pipeline and this script
-# ends in `exit 0`. Filtering it back per-file would restore the O(n^2)
-# cost above for a state no user can reach by using the tool.
+# THOSE TWO SHIFTS ALSO GUARD A PERFORMANCE CLIFF, not just correctness.
+# The prescan below treats any non-regular entry as a reason to rebuild,
+# and an unmatched glob's literal is non-regular. A fresh project with a
+# populated global layer - the commonest state there is - would therefore
+# rebuild on every single search if the literal were still in the list.
+# Dropping it here, in O(1), is what keeps the rebuild for genuinely
+# irregular entries.
 #
 # inbox/ is never enumerated: a candidate is not a memory.
 set -- "$hoard_dir"/global/*.md
@@ -152,6 +148,44 @@ if [ -n "$slug" ]; then
   # by id, so awk's argument order decides nothing.
   set -- "$hoard_dir/projects/$slug"/*.md "$@"
   [ -f "$1" ] || shift
+fi
+
+# HAND awk NOTHING IT CANNOT SAFELY OPEN. A `*.md` entry that is not a
+# regular file is not a memory, and awk does not merely ignore one:
+#
+#   - a FIFO makes awk BLOCK FOREVER on open, waiting for a writer that
+#     never comes. The search never returns and prints nothing, which is
+#     the one failure a user cannot diagnose - there is nothing to read.
+#   - a broken symlink, or a directory under mawk, makes awk exit fatally
+#     mid-list. Because emit() defers each record until the NEXT file's
+#     FNR == 1, the memory parsed just before the fatal is DROPPED - a
+#     complete-looking answer, silently missing an entry, exit status 0.
+#     Measured: 3 memories in, 2 out, on all three awks this project
+#     meets. Silent loss from the store's only reader is the worst
+#     outcome in this file, worse than being slow and worse than failing.
+#
+# So the list is prescanned, and rebuilt only if the prescan finds
+# something. The prescan is O(n) with NO `set --` at all, so the common
+# case - every entry a regular file - pays one stat per file and nothing
+# else: 19 ms at 2000 memories, against 8.1 s for filtering per file.
+# The rebuild pays that 8.1 s, but only when a hoard actually contains an
+# irregular entry, and it is the price of a correct answer over a fast
+# wrong one. It is also exactly what this script cost before the one-shot
+# construction landed, so no state is slower than it used to be.
+#
+# The rebuild reassigns "$@" while iterating it, which is safe because a
+# `for` loop expands its word list ONCE, before the body runs - verified
+# on bash 3.2, bash 5, dash and zsh, not assumed from the wording.
+irregular=0
+for f in "$@"; do
+  [ -f "$f" ] || { irregular=1; break; }
+done
+if [ "$irregular" = 1 ]; then
+  kept=0
+  for f in "$@"; do
+    if [ "$kept" = 0 ]; then set --; kept=1; fi
+    [ -f "$f" ] && set -- "$@" "$f"
+  done
 fi
 
 [ $# -gt 0 ] || exit 0
