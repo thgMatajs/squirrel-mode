@@ -9,6 +9,7 @@ unset CDPATH
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
+# shellcheck source=lib/assert.sh
 . "$script_dir/lib/assert.sh"
 
 hoard_search_script="$repo_root/scripts/hoard-search.sh"
@@ -201,12 +202,17 @@ assert_eq "no" "$mutant5c_reaches" "FAILURE PROOF (scenario 5b): a copy carrying
 #    puts the WRONG answer first and only a real score can pass. This is
 #    also what makes scenario 8b's mutation proof meaningful rather than
 #    accidentally satisfied.
+#
+#    last_used is deliberately far-future (20991231), the same clamp
+#    scenarios 7 and 8 use, so decay is zero for both fixtures and this
+#    scenario measures only what it is named for - importance - rather
+#    than drifting shut as the calendar advances toward it.
 # ==========================================================================
 home6=$(new_home)
 make_memory "$home6" "global" "20260101T000000Z-a-unimportant" "feedback" "1" "x" \
-  "20260101T000000Z" "0" "active" "the unimportant one"
+  "20991231T000000Z" "0" "active" "the unimportant one"
 make_memory "$home6" "global" "20260101T000000Z-z-important" "feedback" "5" "x" \
-  "20260101T000000Z" "0" "active" "the important one"
+  "20991231T000000Z" "0" "active" "the important one"
 out6=$(run_search "$home6")
 first6=$(printf '%s\n' "$out6" | head -n 1)
 assert_contains "$first6" "the important one" "importance 5 must outrank importance 1 when every other field is equal"

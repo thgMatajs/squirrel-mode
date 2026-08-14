@@ -163,9 +163,11 @@ function emit(   imp, lambda, days, score) {
   if (imp < 1) imp = 1
   if (imp > 5) imp = 5
 
-  # Important memories decay more slowly. Spec §5; these weights are a
-  # design decision, not a finding, and are recorded as such in
-  # docs/RESEARCH.md.
+  # Important memories decay more slowly. These weights are a design
+  # decision, not a finding: they are specified in
+  # docs/specs/2026-08-13-hoard-design.md §5, and are registered in
+  # docs/RESEARCH.md as a design decision with no finding behind it by
+  # Task 8 of this phase.
   lambda = 0.16 * (1 - imp * 0.8 / 5)
   days = now_days - stamp_days(m_last_used)
   if (days < 0) days = 0
