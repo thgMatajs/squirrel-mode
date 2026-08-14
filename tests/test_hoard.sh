@@ -190,4 +190,91 @@ else
 fi
 assert_eq "no" "$mutant5c_reaches" "FAILURE PROOF (scenario 5b): a copy carrying the BROAD '*..*' guard must NOT reach the dotted-name project layer - if it still does, 5b's accepting half is not actually testing which form of the guard is present"
 
+# ==========================================================================
+# 6. Importance orders two otherwise identical memories.
+#
+#    THE IDS ARE CHOSEN SO THE TIEBREAK OPPOSES THE ANSWER. Ordering is
+#    score desc, then id ASC, so a reader with no working score at all
+#    falls back to id order - and if the important memory's id happened
+#    to sort first, this scenario would pass against a reader that scores
+#    nothing. `a-unimportant` sorts before `z-important`, so id order
+#    puts the WRONG answer first and only a real score can pass. This is
+#    also what makes scenario 8b's mutation proof meaningful rather than
+#    accidentally satisfied.
+# ==========================================================================
+home6=$(new_home)
+make_memory "$home6" "global" "20260101T000000Z-a-unimportant" "feedback" "1" "x" \
+  "20260101T000000Z" "0" "active" "the unimportant one"
+make_memory "$home6" "global" "20260101T000000Z-z-important" "feedback" "5" "x" \
+  "20260101T000000Z" "0" "active" "the important one"
+out6=$(run_search "$home6")
+first6=$(printf '%s\n' "$out6" | head -n 1)
+assert_contains "$first6" "the important one" "importance 5 must outrank importance 1 when every other field is equal"
+
+# ==========================================================================
+# 7. Recency decays, and a more important memory decays more slowly.
+#
+#    Both fixtures are equally important; only last_used differs, so the
+#    only thing that can separate them is the decay term.
+# ==========================================================================
+home7=$(new_home)
+make_memory "$home7" "global" "20260101T000000Z-old" "feedback" "3" "x" \
+  "20200101T000000Z" "0" "active" "the stale one"
+make_memory "$home7" "global" "20260101T000001Z-new" "feedback" "3" "x" \
+  "20991231T000000Z" "0" "active" "the fresh one"
+out7=$(run_search "$home7")
+first7=$(printf '%s\n' "$out7" | head -n 1)
+assert_contains "$first7" "the fresh one" "a recently used memory must outrank an identical one last used years earlier"
+
+score_old7=$(printf '%s\n' "$out7" | grep "the stale one" | awk -F ' · ' '{ print $2 }')
+score_new7=$(printf '%s\n' "$out7" | grep "the fresh one" | awk -F ' · ' '{ print $2 }')
+assert_eq "4" "$(printf '%s' "$score_new7" | awk -F. '{ print length($2) }')" "the score must be printed with exactly four decimal places, so ordering is inspectable"
+if awk -v a="$score_new7" -v b="$score_old7" 'BEGIN { exit !(a > b) }'; then
+  decay7=yes
+else
+  decay7=no
+fi
+assert_eq "yes" "$decay7" "the fresh memory's printed score must be numerically greater than the stale one's"
+
+# ==========================================================================
+# 8. Reinforcement raises a memory that has actually been used.
+#
+#    DEVIATION FROM THE BRIEF: last_used is `20991231T000000Z` (clamped
+#    to "now" by the reader, exactly as scenario 7's "fresh" fixture
+#    already relies on) rather than the brief's `20260101T000000Z`. With
+#    the brief's date, and run any time after ~April 2026, the decay
+#    term for importance=3 pushes both scores to 0.0000 before rounding
+#    - both fixtures print an identical score, the id tie-break decides,
+#    and "never consulted" (which sorts first by id) wins even though
+#    reinforcement is implemented correctly. See task-2-report.md.
+# ==========================================================================
+home8=$(new_home)
+make_memory "$home8" "global" "20260101T000000Z-unused" "feedback" "3" "x" \
+  "20991231T000000Z" "0" "active" "never consulted"
+make_memory "$home8" "global" "20260101T000001Z-used" "feedback" "3" "x" \
+  "20991231T000000Z" "12" "active" "consulted often"
+out8=$(printf '%s\n' "$(run_search "$home8")" | head -n 1)
+assert_contains "$out8" "consulted often" "uses=12 must outrank uses=0 when importance and last_used are equal"
+
+# ==========================================================================
+# 8b. FAILURE PROOF for scenarios 6-8: a mutant reader that ignores the
+#     frontmatter and scores every memory identically must break the
+#     ordering assertions above. Without this, a reader that emitted a
+#     constant score would satisfy "the important one is in the output"
+#     and pass three scenarios it does not implement.
+# ==========================================================================
+mutant8=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant8"
+sed 's/^  score = .*$/  score = 1/' "$hoard_search_script" >"$mutant8"
+chmod +x "$mutant8"
+
+mutant8_out=$(HOME="$home6" "$mutant8" 2>/dev/null) || true
+mutant8_first=$(printf '%s\n' "$mutant8_out" | head -n 1)
+if printf '%s' "$mutant8_first" | grep -qF "the important one"; then
+  mutant8_still_ordered=yes
+else
+  mutant8_still_ordered=no
+fi
+assert_eq "no" "$mutant8_still_ordered" "FAILURE PROOF (scenarios 6-8): a reader whose score is a constant must fall back to id order and put 'the unimportant one' first - if it still leads with the important one, the ordering assertions above are passing on tie-break luck rather than on the score"
+
 assert_report
