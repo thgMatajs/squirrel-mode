@@ -370,10 +370,18 @@ for f in $(git -C "$repo_root" ls-files); do
   # docs/ACCEPTANCE.md is deliberately NOT on this denylist (see exclusion 4 above): its old
   # exemption here had zero real hits to protect against and was never disclosed in this document's
   # own "Note on its own exclusion" section, so it is deleted outright rather than narrowed.
+  # docs/SKILLS-ADAPTATION.md joins the denylist for the same reason CONTEXT.md is on it: it is an
+  # internal design record whose subject matter IS the reserved vocabulary. It names an external
+  # source skill literally called `wizard` three times (rows for /squirrel:walk), and discusses a
+  # SKILL.md's own `description` field as "the skill's own description" once. Both are the literal
+  # sense, not the banned synonym -- `wizard` for the calibration interview, "the skill" for the
+  # base rules. WHAT THIS GIVES UP: that file is no longer scanned for any reserved term at all, so
+  # a genuine misuse inside it will not be caught here. Accepted because it plans commands rather
+  # than shipping them; if it ever becomes user-facing guidance, take it back off this list.
   case "$f" in
     *.md | *.mdc)
       case "$f" in
-        PLAN.md | docs/adr/* | CONTEXT.md | .build-checkpoint.md)
+        PLAN.md | docs/adr/* | CONTEXT.md | .build-checkpoint.md | docs/SKILLS-ADAPTATION.md)
           ;;
         *)
           if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$repo_root/$f" 2>/dev/null; then
