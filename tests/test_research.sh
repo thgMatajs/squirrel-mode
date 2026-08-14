@@ -1512,7 +1512,7 @@ fi
 # layout / this build's own acceptance sweep. The point of this assertion is that nothing
 # UNEXPECTED lands in docs/, not that the set never grows -- so the expected set is stated here
 # and a genuinely stray file still fails.
-assert_eq "ACCEPTANCE.md OTHER-TOOLS.md RESEARCH.md adr" "$docs_listing" "docs/ must contain exactly ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md and adr/, nothing else"
+assert_eq "ACCEPTANCE.md OTHER-TOOLS.md RESEARCH.md SKILLS-ADAPTATION.md adr" "$docs_listing" "docs/ must contain exactly ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md, SKILLS-ADAPTATION.md and adr/, nothing else"
 
 # ================================================================================================
 # 11. The citation policy section names all four checks (identity, support, whose finding it is,
