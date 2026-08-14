@@ -7430,4 +7430,102 @@ else
 fi
 assert_eq "yes" "$mutantH4_allows" "FAILURE PROOF (HOARD-2): removing the hoard-specific direct-child guard must make the loose file allow - if it still defers, HOARD-2 is passing for some other reason and the guard is untested"
 
+# ==========================================================================
+# HOARD-5. A memory body carrying a credential is NOT auto-approved.
+#
+#     This is refusal of AUTO-APPROVAL, never a denial: the write falls
+#     back to the ordinary permission prompt and the user decides. The
+#     agent writes memories with the Write tool, so an instruction inside
+#     a skill is advice; this is the only place it is enforced.
+# ==========================================================================
+homeH5=$(new_home)
+mkdir -p "$homeH5/.squirrel/hoard/global"
+hoardH5_path="$homeH5/.squirrel/hoard/global/20260101T000000Z-x.md"
+
+secretsH5='-----BEGIN RSA PRIVATE KEY-----
+-----BEGIN OPENSSH PRIVATE KEY-----
+ghp_EXAMPLE-NOT-A-REAL-TOKEN
+AKIA-EXAMPLE-NOT-A-REAL-KEY
+xoxb-EXAMPLE-NOT-A-REAL-TOKEN
+api_key = 0123456789abcdefghijklmnop'
+
+oldifsH5=$IFS
+IFS='
+'
+for secretH5 in $secretsH5; do
+  IFS=$oldifsH5
+  stdinH5=$(jq -n --arg p "$hoardH5_path" --arg c "a memory body
+$secretH5
+more text" '{tool_name:"Write", tool_input:{file_path:$p, content:$c}}')
+  assert_eq "defer" "$(hoard_decision "$homeH5" "$stdinH5")" "a hoard Write whose content carries '$secretH5' must NOT be auto-approved"
+  IFS='
+'
+done
+IFS=$oldifsH5
+
+# The Edit tool carries its text in new_string, not content.
+stdinH5_edit=$(jq -n --arg p "$hoardH5_path" \
+  '{tool_name:"Edit", tool_input:{file_path:$p, old_string:"x", new_string:"token: ghp_EXAMPLE-NOT-A-REAL-TOKEN"}}')
+assert_eq "defer" "$(hoard_decision "$homeH5" "$stdinH5_edit")" "an Edit whose new_string carries a credential must NOT be auto-approved"
+
+# FIELD SHADOWING. Reading `content` and only FALLING BACK to
+# `new_string` when it is empty is bypassable: `content` is not a
+# parameter the Edit tool reads, so a payload carrying a benign one
+# alongside a credential-bearing `new_string` would get the decoy
+# scanned and the real write approved. That is the same shadowing class
+# allow-checkpoint.sh's own header records for file_path (S10 review,
+# AB1). Both fields are read and both are scanned; neither can stand in
+# for the other.
+stdinH5_decoy=$(jq -n --arg p "$hoardH5_path" \
+  '{tool_name:"Edit", tool_input:{file_path:$p, content:"an ordinary memory body with nothing sensitive in it", old_string:"x", new_string:"AKIA-EXAMPLE-NOT-A-REAL-KEY"}}')
+assert_eq "defer" "$(hoard_decision "$homeH5" "$stdinH5_decoy")" "an Edit carrying a benign content decoy alongside a credential in new_string must NOT be auto-approved - a field the tool does not read must not satisfy the scan for the field it does"
+
+# An ordinary memory is unaffected - the guard must not bar correct work.
+stdinH5_ok=$(jq -n --arg p "$hoardH5_path" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"---\ntype: feedback\ntitle: run the suite before committing\n---\n\nTwo releases went out with a broken suite."}}')
+assert_eq "allow" "$(hoard_decision "$homeH5" "$stdinH5_ok")" "an ordinary memory with no credential in it must still be auto-approved"
+
+# A Read is never scanned: there is nothing being written to leak.
+stdinH5_read=$(jq -n --arg p "$hoardH5_path" '{tool_name:"Read", tool_input:{file_path:$p}}')
+assert_eq "allow" "$(hoard_decision "$homeH5" "$stdinH5_read")" "a Read must not be subject to the secret scan - it writes nothing"
+
+# An oversized body defers rather than being scanned: a memory is never
+# 64KB, and an unbounded scan of attacker-controlled text is the exact
+# shape of the DoS this file already caps file_path against.
+#
+# Built in linear time (`awk` printf-padding, then `tr`), not by
+# appending one byte at a time to an awk string in a 70000-iteration
+# loop: that construction is quadratic in the awk implementations that
+# do not over-allocate, and the fixture's only job is to be 70000 bytes
+# long.
+bigH5=$(awk 'BEGIN { printf "%70000s", "" }' | tr ' ' 'a')
+assert_eq "70000" "${#bigH5}" "the oversized-body fixture must really be 70000 bytes - a short one would make the cap assertion below vacuous"
+stdinH5_big=$(jq -n --arg p "$hoardH5_path" --arg c "$bigH5" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:$c}}')
+assert_eq "defer" "$(hoard_decision "$homeH5" "$stdinH5_big")" "a hoard Write with an oversized body must defer rather than be scanned"
+
+# The cap applies to new_string on the same terms, and a benign
+# `content` must not buy an unscanned oversized `new_string` either.
+stdinH5_big_edit=$(jq -n --arg p "$hoardH5_path" --arg c "$bigH5" \
+  '{tool_name:"Edit", tool_input:{file_path:$p, content:"short and harmless", old_string:"x", new_string:$c}}')
+assert_eq "defer" "$(hoard_decision "$homeH5" "$stdinH5_big_edit")" "an oversized new_string must defer even when a short benign content sits beside it"
+
+# ==========================================================================
+# HOARD-6. FAILURE PROOF: with the scan disabled, the credential write is
+#          allowed - proving the scan is what stops it.
+# ==========================================================================
+mutantH6=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutantH6"
+sed 's/^payload_has_secret() {$/payload_has_secret() { return 1; #/' "$allow_checkpoint_script" >"$mutantH6"
+chmod +x "$mutantH6"
+stdinH6=$(jq -n --arg p "$hoardH5_path" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"token: ghp_EXAMPLE-NOT-A-REAL-TOKEN"}}')
+outH6=$(printf '%s' "$stdinH6" | HOME="$homeH5" "$mutantH6" 2>/dev/null) || true
+if printf '%s' "$outH6" | grep -qF '"allow"'; then
+  mutantH6_allows=yes
+else
+  mutantH6_allows=no
+fi
+assert_eq "yes" "$mutantH6_allows" "FAILURE PROOF (HOARD-5): a copy whose secret scan always returns false must allow the credential write - if it still defers, HOARD-5 is passing for some other reason"
+
 assert_report

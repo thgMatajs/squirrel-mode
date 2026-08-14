@@ -445,12 +445,33 @@
 # against the hoard shape rather than assumed to transfer - see
 # tests/test_hooks.sh's HOARD-* scenarios.
 #
-# ONE RULE DIFFERS, deliberately: a DIRECT CHILD FILE of hoard/ defers
-# for EVERY tool, including Read, while the same shape under
-# checkpoints/ still allows a Read (the pre-P1 legacy fold, decision D1
-# above). The hoard has no legacy flat layout - every memory lives one
-# level down in global/ or projects/<slug>/ - so the Read exception has
-# nothing to serve there and is not granted.
+# TWO RULES DIFFER, deliberately, and both ADD refusals to the hoard
+# root rather than removing any from it. (This paragraph said "ONE RULE
+# DIFFERS" until the secret refusal below was added; it is corrected
+# here rather than left to read as a complete list it no longer is.)
+#
+#   1. A DIRECT CHILD FILE of hoard/ defers for EVERY tool, including
+#      Read, while the same shape under checkpoints/ still allows a Read
+#      (the pre-P1 legacy fold, decision D1 above). The hoard has no
+#      legacy flat layout - every memory lives one level down in global/
+#      or projects/<slug>/ - so the Read exception has nothing to serve
+#      there and is not granted.
+#
+#   2. THE SECRET REFUSAL: a Write or Edit whose written text looks like
+#      it carries a credential does not get auto-approved. It is REFUSAL
+#      OF AUTO-APPROVAL, never a denial - the operation falls back to the
+#      ordinary permission prompt and the user decides, which is exactly
+#      what would happen if this hook did not exist. It is the last line
+#      of a defence whose earlier lines are advisory: the agent writes
+#      memories with the Write tool, so a "do not record secrets" rule
+#      stated in a skill is a request, and this is the only place it is
+#      enforced. Scoped to the hoard root only - a scan over
+#      checkpoints/ would put a permission prompt in the middle of the
+#      one write ADR-0002 exists to keep silent - and to Write/Edit only,
+#      since a Read writes nothing there is to leak. Oversized written
+#      text defers rather than being scanned, on the same reasoning as
+#      MAX_FILE_PATH_LEN. See payload_has_secret() for what it does and
+#      does not claim to detect.
 set -eu
 
 # MAX_FILE_PATH_LEN: the DoS cap (see "FIXED MAJOR" above). 4096 bytes
@@ -460,6 +481,14 @@ set -eu
 # below to a fixed, small number of segments - not to "fast", but to
 # "bounded, and never growing with attacker input".
 MAX_FILE_PATH_LEN=4096
+
+# MAX_SCAN_LEN: the bound on how much written text is scanned for
+# credentials. A memory body is a title and a short paragraph; 65536
+# bytes is far past anything legitimate. Beyond it, the write DEFERS
+# rather than being scanned - an unbounded scan of attacker-controlled
+# text is the same shape of exposure MAX_FILE_PATH_LEN exists to close,
+# and deferring is this script's cost for every answer it will not give.
+MAX_SCAN_LEN=65536
 
 extract_field() {
   # extract_field <json> <key>: reads a TOP-LEVEL string field ONLY,
@@ -734,6 +763,49 @@ component_walk_has_symlink() {
   return 1
 }
 
+payload_has_secret() {
+  # payload_has_secret <text>: 0 (true) when <text> looks like it carries
+  # a credential. Used ONLY to withhold auto-approval for a hoard write -
+  # never to deny one. A hit costs the user one ordinary permission
+  # prompt, which is exactly what would happen if this hook did not exist.
+  #
+  # PRECISION IS NOT THE POINT HERE, AND THAT IS DELIBERATE. A false
+  # positive costs one prompt on one write; a false negative writes a
+  # credential into a store that is re-read in every future session, in
+  # every project. The two costs are not comparable, so the patterns
+  # below are the unambiguous shapes only - PEM headers and provider
+  # token prefixes - plus one assignment-shaped rule for the
+  # `api_key = <long opaque string>` case that carries no prefix of its
+  # own. It is not, and does not claim to be, a complete secret scanner.
+  #
+  # The caller is responsible for bounding <text> to MAX_SCAN_LEN BEFORE
+  # calling this: neither the `case` below nor `grep` is given an
+  # unbounded attacker-controlled string to walk.
+  phs_text=$1
+  case "$phs_text" in
+    *"BEGIN RSA PRIVATE KEY"* | *"BEGIN OPENSSH PRIVATE KEY"* | \
+    *"BEGIN PRIVATE KEY"* | *"BEGIN EC PRIVATE KEY"* | \
+    *"BEGIN PGP PRIVATE KEY"*)
+      return 0
+      ;;
+    *sk-ant-* | *ghp_* | *gho_* | *github_pat_* | *AKIA* | *xoxb-* | *xoxp-* | *AIza*)
+      return 0
+      ;;
+  esac
+  # The bracket expressions carry a literal double quote and a literal
+  # single quote (the two ways a value is commonly wrapped). Spelled as a
+  # DOUBLE-quoted assignment with the double quotes backslash-escaped and
+  # the single quotes written plainly - the equivalent single-quoted
+  # spelling needs the '"'"' splice four times over and is a transcription
+  # hazard for no gain. There is no `$` or backtick in the pattern, so
+  # double quoting expands nothing.
+  phs_re="(api[_-]?key|secret|token|password|passwd)[\" ']*[[:space:]]*[:=][[:space:]]*[\" ']*[A-Za-z0-9/+_-]{16,}"
+  if printf '%s' "$phs_text" | grep -qiE "$phs_re"; then
+    return 0
+  fi
+  return 1
+}
+
 decide() {
   input=$(cat)
   tool_name=$(extract_field "$input" "tool_name")
@@ -882,6 +954,42 @@ decide() {
   if component_walk_has_symlink "$root" "$after"; then
     printf 'defer'
     return 0
+  fi
+
+  # THE SECRET REFUSAL applies to the hoard root only, and only to a
+  # tool that writes. checkpoints/ is excluded on purpose: its content
+  # is the model's own Doing/Next state, it is rewritten every turn under
+  # rule 14, and adding a scan there would put a permission prompt in the
+  # middle of a task for the one write ADR-0002 exists to keep silent.
+  #
+  # BOTH written fields are read and BOTH are scanned - `content` (what
+  # Write carries) and `new_string` (what Edit carries) - rather than
+  # reading `content` and only falling back to `new_string` when it is
+  # empty. That fallback shape is bypassable in exactly the way this
+  # file's header records for file_path (S10 review, AB1): `content` is
+  # not a parameter the Edit tool reads, so a payload carrying a benign
+  # one alongside a credential-bearing `new_string` would have had its
+  # DECOY scanned and its real write auto-approved. A field the tool does
+  # not read must never be able to satisfy a check on the field it does.
+  # See tests/test_hooks.sh HOARD-5's field-shadowing assertions.
+  #
+  # Both length caps are applied BEFORE either scan, so no oversized
+  # string is walked by `case` or handed to `grep` on any path.
+  if [ "$root" = "$hoard_dir" ]; then
+    case "$tool_name" in
+      Write | Edit)
+        written=$(extract_tool_input_field "$input" "content")
+        written_new=$(extract_tool_input_field "$input" "new_string")
+        if [ "${#written}" -gt "$MAX_SCAN_LEN" ] || [ "${#written_new}" -gt "$MAX_SCAN_LEN" ]; then
+          printf 'defer'
+          return 0
+        fi
+        if payload_has_secret "$written" || payload_has_secret "$written_new"; then
+          printf 'defer'
+          return 0
+        fi
+        ;;
+    esac
   fi
 
   printf 'allow'
