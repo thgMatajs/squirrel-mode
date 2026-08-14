@@ -166,9 +166,11 @@ The cost is a ceiling, and phase 1 measured where it sits. On the author's machi
 about 39 ms at 500 memories, 73 ms at 1000, and 139 ms at 2000; at 2000, 113 ms of that 139 ms is the
 awk frontmatter pass itself, so the scan this section defends is now most of what a search spends.
 
-That is a correction, not just a number. The first measurement of this reader reported 12.08 s at
-2000 memories and attributed it to the no-index scan described above. The attribution was wrong. The
-time was going into `scripts/hoard-search.sh` assembling awk's file-list argument one file at a time,
+That is a correction, not just a number, and the sequence matters. This section originally attributed
+the cost of a search to the no-index scan described above, without having measured either. The first
+measurement, 12.47 s at 2000 memories, showed the attribution was wrong; re-measured here, the
+pre-fix reader cost 12.08 s at the same size. The time was going into `scripts/hoard-search.sh`
+assembling awk's file-list argument one file at a time,
 where each append rebuilds the whole list and the assembly therefore costs O(n²); the awk scan it was
 feeding was never the expensive half. Assembling each layer's files in a single step took that phase
 from 12.05 s to 35 ms and changed no output at any size. `tests/test_hoard.sh` scenario 14 pins the
