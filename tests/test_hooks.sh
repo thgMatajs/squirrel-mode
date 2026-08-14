@@ -511,7 +511,14 @@ make_tool_path() {
   # the source changed, which is this list working as intended - the same
   # class of gap the `mv` and `ls` notes above record. No scenario
   # excludes `dd` deliberately.
-  for tool in sh awk sed cat find dirname basename tr cksum od head tail wc cut dd printf grep jq realpath readlink mktemp rm mkdir mv ln touch ls; do
+  # `rmdir` ADDED (sweep): prune_other_project_checkpoints collects the
+  # empty slug directories a project leaves behind, and `rmdir` is the
+  # only new external command the sweep needs. Off this list, every
+  # restricted-PATH scenario would silently run without it and any of
+  # them holding an empty slug directory would be proving "not collected"
+  # for the wrong reason - the same gap the `mv`, `ls` and `dd` notes
+  # above record. No scenario excludes `rmdir` deliberately.
+  for tool in sh awk sed cat find dirname basename tr cksum od head tail wc cut dd printf grep jq realpath readlink mktemp rm rmdir mkdir mv ln touch ls; do
     case " $exclude " in
       *" $tool "*) continue ;;
     esac
@@ -1310,6 +1317,453 @@ ctx6g7c=$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g7c" "$std
 survivors6g7c=$(find "$dir6g7c" -type f | wc -l | awk '{print $1}')
 assert_eq "10" "$survivors6g7c" "B1 REGRESSION GUARD (dotfile managers, read-side mirror of scenario 31): a symlinked ~/.squirrel ITSELF must NOT stop pruning - the trust boundary is checkpoints/ and below, never the whole ancestry, or every chezmoi/stow/yadm user silently loses pruning"
 assert_contains "$ctx6g7c" "Resume available" "B1 REGRESSION GUARD (dotfile managers): a symlinked ~/.squirrel ITSELF must still report 'Resume available' for genuine checkpoints beneath it"
+
+# --- The sweep: pruning EVERY project, not only the one being opened ---
+#
+# peer_slug_dir <home> <cwd> - prints the slug directory
+# ~/.squirrel/checkpoints/<slug> the hook will use for <cwd>, WITHOUT
+# creating it and without leaving anything behind.
+#
+# The path is READ BACK FROM THE HOOK'S OWN OUTPUT rather than recomputed
+# from project_slug's recipe, for the reason scenario 6g7's comment gives
+# for doing the opposite there: recomputing checks the algorithm against
+# itself, and a fixture built on a slug the hook does not actually use
+# would leave every sweep assertion below passing for the wrong reason -
+# the sweep would find an unrelated directory, prune nothing, and "the
+# peer was left alone" and "the peer was never found" are the same
+# observation. 6g7 has no choice (its symlink has to exist before the
+# hook first runs); these scenarios do.
+#
+# EVERY PROBE MUST HAPPEN BEFORE ANY FIXTURE FILE EXISTS, and this
+# function deliberately does not mkdir so that ordering mistake is easy
+# to keep. A probe is a real SessionStart: it prunes, it sweeps, and it
+# collects empty slug directories. Written the other way round - probe,
+# populate, probe again - it silently ate the fixture it had just
+# created, and the run under test then measured a directory that had
+# already been pruned by the setup. That is not hypothetical; it is what
+# these scenarios did on their first execution, and the fixture-sanity
+# assertions below are what caught it.
+peer_slug_dir_of() {
+  # peer_slug_dir_of <script> <home> <cwd> - the same probe against a
+  # named script, so the failure proofs at the bottom of this file can
+  # build their fixtures from the MUTANT's own idea of where a slug
+  # directory goes rather than from the real script's.
+  psd_script=$1
+  psd_home=$2
+  psd_cwd=$3
+  psd_stdin=$(printf '{"session_id":"sess-peer-probe","cwd":"%s","hook_event_name":"SessionStart"}' "$psd_cwd")
+  extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$psd_script" "$psd_home" "$psd_stdin")")"
+}
+
+peer_slug_dir() {
+  peer_slug_dir_of "$load_profile_script" "$1" "$2"
+}
+
+# make_aged_ladder <dir> <count> - <count> files named old-NN.md on a
+# staggered ladder well past the 30-day floor: old-01 is the OLDEST,
+# old-<count> the newest.
+#
+# STAGGERED, AND ASSERTED TO BE. `find -newer` is strictly-greater, so
+# files that share an mtime never count each other and the pruner
+# correctly does nothing at all with them. A ladder built with one `touch
+# -t` per file is therefore the difference between measuring the rank
+# rule and measuring nothing, and every caller below asserts the ladder
+# is strict before concluding anything from it: this exact fixture
+# mistake produced two confident, wrong conclusions about this pruner
+# before it was written down.
+#
+# The rungs are ONE MINUTE apart within 2024-01-01 rather than one day
+# apart, so a ladder can be longer than a month has days - scenario 6g8e
+# needs thirty rungs, and `touch -t 24013212 00` is not a date.
+make_aged_ladder() {
+  mal_dir=$1
+  mal_count=$2
+  mkdir -p "$mal_dir"
+  mal_i=1
+  while [ "$mal_i" -le "$mal_count" ]; do
+    printf 'x\n' >"$mal_dir/old-$(printf '%02d' "$mal_i").md"
+    touch -t "2401011$(((mal_i - 1) / 60))$(printf '%02d' $(((mal_i - 1) % 60)))" "$mal_dir/old-$(printf '%02d' "$mal_i").md"
+    mal_i=$((mal_i + 1))
+  done
+}
+
+count_files() {
+  find "$1" -type f 2>/dev/null | wc -l | awk '{print $1}'
+}
+
+count_mtime_maxima() {
+  # How many of <dir>'s regular files have NO strictly-newer peer. It is
+  # exactly 1 when every mtime is distinct, and equal to the file count
+  # when they have all collapsed onto one timestamp.
+  #
+  # ASKED WITH `find -newer`, NOT BY READING `ls -l`. The first version
+  # of this helper counted distinct "$6 $7 $8" columns of `ls -l` output
+  # and was wrong in the one case it existed for: `ls -l` prints a YEAR
+  # instead of a time for files more than six months old, so an entire
+  # ladder of thirty rungs one minute apart came back as ONE mtime group
+  # and the fixture assertion failed on a fixture that was perfectly
+  # correct. `find -newer` is the comparison the pruner itself makes, so
+  # this measures the property that actually matters rather than a
+  # rendering of it.
+  cmm_dir=$1
+  cmm_maxima=0
+  for cmm_a in "$cmm_dir"/*; do
+    if [ ! -f "$cmm_a" ] || [ -L "$cmm_a" ]; then
+      continue
+    fi
+    cmm_has_newer=0
+    for cmm_b in "$cmm_dir"/*; do
+      if [ ! -f "$cmm_b" ] || [ -L "$cmm_b" ]; then
+        continue
+      fi
+      if [ -n "$(find "$cmm_b" -newer "$cmm_a" 2>/dev/null)" ]; then
+        cmm_has_newer=1
+        break
+      fi
+    done
+    if [ "$cmm_has_newer" -eq 0 ]; then
+      cmm_maxima=$((cmm_maxima + 1))
+    fi
+  done
+  printf '%s' "$cmm_maxima"
+}
+
+count_slug_dirs() {
+  find "$1" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | awk '{print $1}'
+}
+
+# ==========================================================================
+# 6g8. [SWEEP] A project you did NOT open is pruned anyway.
+#
+#      THE GAP. prune_stale_session_checkpoints was only ever handed the
+#      slug directory of the project being opened, so a project you stop
+#      working on keeps every checkpoint it ever had, forever. Two
+#      projects of twenty files each, opening only one, left the other at
+#      twenty - the reproduction this scenario is built from.
+#
+#      Twelve files on a staggered ladder is chosen so ONE session start
+#      finishes the job inside the sweep's probe budget: eleven of them
+#      are strictly newer than old-01 and ten are strictly newer than
+#      old-02, so exactly those two are outside the ten most recent and
+#      exactly those two go. Scenario 6g8e below is where the budget is
+#      deliberately overrun instead.
+# ==========================================================================
+home6g8=$(new_home)
+cwd6g8a="$home6g8/opened-project"
+cwd6g8b="$home6g8/abandoned-project"
+stdin6g8=$(printf '{"session_id":"sess-6g8","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8a")
+# Both probes first, then both fixtures - see peer_slug_dir's header.
+dir6g8b=$(peer_slug_dir "$home6g8" "$cwd6g8b")
+dir6g8a=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g8" "$stdin6g8")")")
+make_aged_ladder "$dir6g8b" 12
+make_aged_ladder "$dir6g8a" 12
+
+# FIXTURE SANITY, asserted before anything is concluded from it: both
+# directories hold twelve files, all of them past the 30-day floor, and
+# every one on its own distinct mtime. A ladder that silently collapsed
+# to one timestamp would make every count below come out "12" for a
+# reason that has nothing to do with the sweep.
+assert_eq "12" "$(count_files "$dir6g8b")" "6g8 fixture sanity: the abandoned project must hold 12 checkpoint files before the run under test"
+assert_eq "1" "$(count_mtime_maxima "$dir6g8b")" "6g8 fixture sanity: the abandoned project's ladder must be STRICT - exactly one file with no strictly-newer peer. \`find -newer\` is strictly-greater, so a collapsed ladder makes the rank rule inert and this scenario would pass without pruning anything"
+assert_eq "12" "$(find "$dir6g8b" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8 fixture sanity: all 12 of the abandoned project's files must be older than the 30-day floor, or the age conjunct - not the sweep - is what left them alone"
+
+capture_stdout "$load_profile_script" "$home6g8" "$stdin6g8" >/dev/null
+
+assert_eq "10" "$(count_files "$dir6g8b")" "SWEEP: a project that was never opened must still be pruned to its own 10 newest checkpoints - this is the unbounded-growth gap, and before the sweep this count was 12"
+assert_file_exists "$dir6g8b/old-03.md" "SWEEP: the abandoned project's third-oldest file is its tenth-newest, so it and everything above it must survive - the sweep applies the SAME keep-the-newest-10 rule, not a blunter one"
+assert_file_absent "$dir6g8b/old-01.md" "SWEEP: the abandoned project's oldest file is outside its own 10 most recent and past the 30-day floor, so it must actually be deleted"
+assert_file_absent "$dir6g8b/old-02.md" "SWEEP: the abandoned project's second-oldest file is the other one outside its own 10 most recent, and must also be deleted"
+assert_eq "10" "$(count_files "$dir6g8a")" "SWEEP isolation: the project actually being opened must still be pruned exactly as before - the sweep is an addition to that call, never a replacement for it"
+
+# ==========================================================================
+# 6g8b. [SWEEP] A peer project whose files are all FRESH is untouched.
+#
+#       The age conjunct has to survive the move to other projects: a
+#       colleague's fourteen checkpoints from this afternoon are outside
+#       the ten most recent by rank, and rank alone would delete four of
+#       them in a project the user has not even opened. Fourteen is the
+#       same shape scenario 6g3 uses for the current project, for the
+#       same reason - it is the only shape where the two conjuncts
+#       disagree.
+# ==========================================================================
+home6g8b=$(new_home)
+cwd6g8b_open="$home6g8b/opened-project"
+dir6g8b_peer=$(peer_slug_dir "$home6g8b" "$home6g8b/busy-peer-project")
+mkdir -p "$dir6g8b_peer"
+today6g8b=$(date +%Y%m%d)
+i6g8b=0
+while [ "$i6g8b" -le 13 ]; do
+  printf 'x\n' >"$dir6g8b_peer/today-$i6g8b.md"
+  touch -t "${today6g8b}00$(printf '%02d' "$i6g8b")" "$dir6g8b_peer/today-$i6g8b.md"
+  i6g8b=$((i6g8b + 1))
+done
+assert_eq "14" "$(count_files "$dir6g8b_peer")" "6g8b fixture sanity: the busy peer must hold 14 files before the run under test"
+assert_eq "1" "$(count_mtime_maxima "$dir6g8b_peer")" "6g8b fixture sanity: the busy peer's 14 files must have distinct mtimes (exactly one with no strictly-newer peer), or a rank-only mutant would find nothing to rank and this scenario would pass vacuously"
+assert_eq "0" "$(find "$dir6g8b_peer" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8b fixture sanity: none of the busy peer's files may be older than the 30-day floor"
+
+stdin6g8b=$(printf '{"session_id":"sess-6g8b","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8b_open")
+capture_stdout "$load_profile_script" "$home6g8b" "$stdin6g8b" >/dev/null
+assert_eq "14" "$(count_files "$dir6g8b_peer")" "SWEEP: a peer project whose 14 checkpoints were all written today must lose NONE of them - the 30-day floor is a conjunct in every project the sweep visits, not only in the one being opened"
+
+# ==========================================================================
+# 6g8c. [SWEEP] "The 10 most recent" is PER PROJECT, never global.
+#
+#       This is the assertion that stops the sweep from being a disaster
+#       rather than a fix. Ranked across checkpoints/ as a whole, a
+#       dormant project's entire memory is outside the newest ten the
+#       moment ANY other project writes eleven newer files - which is
+#       what a developer does in an afternoon. Both halves are checked:
+#       a dormant peer with fewer than ten files of its own must lose
+#       none at all, and a dormant peer with more must keep exactly its
+#       OWN ten newest.
+# ==========================================================================
+home6g8c=$(new_home)
+cwd6g8c_open="$home6g8c/very-busy-project"
+stdin6g8c=$(printf '{"session_id":"sess-6g8c","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8c_open")
+# All three probes first, then all three fixtures - see peer_slug_dir.
+dir6g8c_small=$(peer_slug_dir "$home6g8c" "$home6g8c/dormant-small")
+dir6g8c_big=$(peer_slug_dir "$home6g8c" "$home6g8c/dormant-big")
+dir6g8c_open=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g8c" "$stdin6g8c")")")
+mkdir -p "$dir6g8c_small" "$dir6g8c_open"
+i6g8c=1
+while [ "$i6g8c" -le 5 ]; do
+  printf 'x\n' >"$dir6g8c_small/ancient-$i6g8c.md"
+  touch -t "20010$i6g8c"021200 "$dir6g8c_small/ancient-$i6g8c.md"
+  i6g8c=$((i6g8c + 1))
+done
+make_aged_ladder "$dir6g8c_big" 12
+today6g8c=$(date +%Y%m%d)
+i6g8c=0
+while [ "$i6g8c" -le 19 ]; do
+  printf 'x\n' >"$dir6g8c_open/today-$(printf '%02d' "$i6g8c").md"
+  touch -t "${today6g8c}12$(printf '%02d' "$i6g8c")" "$dir6g8c_open/today-$(printf '%02d' "$i6g8c").md"
+  i6g8c=$((i6g8c + 1))
+done
+
+# FIXTURE SANITY. The whole point is that the OPEN project's twenty files
+# are newer than every file in either dormant project, so a global rank
+# would put all seventeen dormant files outside the newest ten.
+assert_eq "5" "$(count_files "$dir6g8c_small")" "6g8c fixture sanity: the small dormant peer must hold 5 files"
+assert_eq "12" "$(count_files "$dir6g8c_big")" "6g8c fixture sanity: the big dormant peer must hold 12 files"
+assert_eq "20" "$(count_files "$dir6g8c_open")" "6g8c fixture sanity: the open project must hold 20 files, all newer than both dormant projects, or a global rank would have nothing to outrank them with"
+assert_eq "0" "$(find "$dir6g8c_open" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8c fixture sanity: the open project's 20 files must all be fresh, so nothing there is a deletion candidate and every deletion below is the sweep's doing"
+
+capture_stdout "$load_profile_script" "$home6g8c" "$stdin6g8c" >/dev/null
+
+assert_eq "5" "$(count_files "$dir6g8c_small")" "SWEEP (per-project rank): a dormant project with only 5 checkpoints must lose NONE of them even though 20 newer files exist in another project - a global newest-N would wipe it, and 'never delete recent work' is relative to the project's own directory"
+assert_eq "10" "$(count_files "$dir6g8c_big")" "SWEEP (per-project rank): a dormant project with 12 checkpoints must keep its OWN 10 newest - not zero, which is what ranking it against a busy project's 20 fresher files would leave"
+assert_file_exists "$dir6g8c_big/old-12.md" "SWEEP (per-project rank): the dormant project's newest checkpoint must survive - if a global rank were in force this is the first file a busy neighbour would take"
+assert_eq "20" "$(count_files "$dir6g8c_open")" "SWEEP isolation (6g8c): the open project's own 20 fresh files must all survive - nothing here may delete inside the project being opened beyond what the existing rule already did"
+
+# ==========================================================================
+# 6g8d. [SWEEP] The trust boundary holds for every directory the sweep
+#       visits, not only for the one being opened.
+#
+#       This is scenario 6g7's MAJOR, re-asked of the new code path: a
+#       symlinked slug directory belonging to some OTHER project used to
+#       be unreachable simply because nothing ever looked at it. Now
+#       something does, on every session start, without the user going
+#       anywhere near that project - so the same twelve-file
+#       unrelated-directory reproduction is run against a PEER slug this
+#       time. checkpoint_slug_dir_untrusted is checked before the sweep
+#       globs the directory, not after, or the enumeration would already
+#       have happened through the link.
+# ==========================================================================
+home6g8d=$(new_home)
+cwd6g8d="$home6g8d/opened-project"
+mkdir -p "$home6g8d/.squirrel/checkpoints" "$home6g8d/victim-6g8d"
+make_aged_ladder "$home6g8d/victim-6g8d" 12
+ln -s "$home6g8d/victim-6g8d" "$home6g8d/.squirrel/checkpoints/peer-slug-6g8d"
+assert_eq "12" "$(count_files "$home6g8d/victim-6g8d")" "6g8d fixture sanity: the unrelated directory must hold 12 files, on a ladder the age-and-rank rule WOULD select from, before the run under test"
+assert_eq "1" "$(count_mtime_maxima "$home6g8d/victim-6g8d")" "6g8d fixture sanity: the unrelated directory's ladder must be strict, or the rank rule could not select any of its files and this scenario would prove nothing about the symlink guard"
+
+stdin6g8d=$(printf '{"session_id":"sess-6g8d","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8d")
+exit6g8d=$(capture_exit "$load_profile_script" "$home6g8d" "$stdin6g8d")
+assert_eq "0" "$exit6g8d" "SWEEP (trust boundary): load-profile.sh must still exit 0 when a PEER slug directory is a symlink"
+assert_eq "12" "$(count_files "$home6g8d/victim-6g8d")" "SWEEP (trust boundary, B1-class): with checkpoints/<some-other-slug> pointing at an unrelated directory, all twelve of that directory's files must survive - the sweep must refuse to act through a symlinked slug directory exactly as the single-directory pruner does, and it now reaches that directory without the user opening the project"
+assert_file_exists "$home6g8d/victim-6g8d/old-01.md" "SWEEP (trust boundary): the file the age-and-rank rule would have selected first is asserted by name as well as by count"
+
+# The OTHER half of the same boundary: checkpoints/ ITSELF symlinked. The
+# sweep globs that directory directly, so it carries its own [ -L ] test
+# rather than relying on the per-slug one it would only reach afterwards.
+home6g8d2=$(new_home)
+mkdir -p "$home6g8d2/real-checkpoints-elsewhere/stranger-slug"
+make_aged_ladder "$home6g8d2/real-checkpoints-elsewhere/stranger-slug" 12
+mkdir -p "$home6g8d2/.squirrel"
+ln -s "$home6g8d2/real-checkpoints-elsewhere" "$home6g8d2/.squirrel/checkpoints"
+stdin6g8d2=$(printf '{"session_id":"sess-6g8d2","cwd":"%s/opened-project","hook_event_name":"SessionStart"}' "$home6g8d2")
+assert_eq "12" "$(count_files "$home6g8d2/real-checkpoints-elsewhere/stranger-slug")" "6g8d2 fixture sanity: the stranger's directory must hold 12 files before the run under test"
+capture_stdout "$load_profile_script" "$home6g8d2" "$stdin6g8d2" >/dev/null
+assert_eq "12" "$(count_files "$home6g8d2/real-checkpoints-elsewhere/stranger-slug")" "SWEEP (trust boundary): a symlinked checkpoints/ must stop the sweep before it enumerates anything - all twelve of the stranger's files must survive"
+
+# And the regression guard in the other direction, mirroring 6g7c: a
+# dotfile-managed ~/.squirrel is ordinary user configuration and the
+# sweep must work completely normally beneath it.
+home6g8d3=$(new_home)
+real6g8d3="$home6g8d3/real-dotfiles-squirrel"
+mkdir -p "$real6g8d3/checkpoints"
+ln -s "$real6g8d3" "$home6g8d3/.squirrel"
+dir6g8d3_peer=$(peer_slug_dir "$home6g8d3" "$home6g8d3/dotfile-managed-peer")
+make_aged_ladder "$dir6g8d3_peer" 12
+assert_eq "12" "$(count_files "$dir6g8d3_peer")" "6g8d3 fixture sanity: the peer under a symlinked ~/.squirrel must hold 12 files before the run under test"
+stdin6g8d3=$(printf '{"session_id":"sess-6g8d3","cwd":"%s/dotfile-managed-open","hook_event_name":"SessionStart"}' "$home6g8d3")
+capture_stdout "$load_profile_script" "$home6g8d3" "$stdin6g8d3" >/dev/null
+assert_eq "10" "$(count_files "$dir6g8d3_peer")" "SWEEP REGRESSION GUARD (dotfile managers): a symlinked ~/.squirrel ITSELF must NOT stop the sweep - the trust boundary is checkpoints/ and below, never the whole ancestry, or every chezmoi/stow/yadm user silently keeps every abandoned project forever"
+
+# ==========================================================================
+# 6g8e. [SWEEP] The probe budget genuinely bounds one session start.
+#
+#       The unit of cost here is a `find` fork - one per age gate, one
+#       per `-newer` comparison - measured at 2.5 ms on the reference
+#       macOS machine, and a directory of 1 000 same-mtime old files
+#       costs 100 000 of them (254 s, measured, on the code that shipped
+#       before the sweep). Multiplying that across projects is what the
+#       budget exists to prevent, so the budget has to be OBSERVABLE, not
+#       merely present: this fixture is deliberately bigger than one run
+#       can finish, and the assertion is that one run does NOT finish it.
+#
+#       Thirty-five files - thirty on the ladder plus five fresh - is
+#       sized from a measurement, not a guess: twenty-five of them are
+#       outside the ten most recent, and CHECKPOINT_PRUNE_SWEEP_MAX_PROBES
+#       runs out after sixteen, so one session start lands on nineteen
+#       files and a second finishes. A twenty-file version of this
+#       fixture was tried first and completed in ONE run, which would
+#       have made this scenario green while measuring nothing.
+#
+#       The second assertion is the other half and matters just as much:
+#       a bound that never finished the job would be a leak with extra
+#       steps, so repeated session starts must converge on exactly the
+#       ten newest.
+# ==========================================================================
+home6g8e=$(new_home)
+cwd6g8e="$home6g8e/opened-project"
+dir6g8e=$(peer_slug_dir "$home6g8e" "$home6g8e/huge-abandoned-project")
+make_aged_ladder "$dir6g8e" 30
+i6g8e=1
+while [ "$i6g8e" -le 5 ]; do
+  printf 'x\n' >"$dir6g8e/fresh-$i6g8e.md"
+  i6g8e=$((i6g8e + 1))
+done
+assert_eq "35" "$(count_files "$dir6g8e")" "6g8e fixture sanity: the abandoned project must hold 35 files before the run under test"
+assert_eq "30" "$(find "$dir6g8e" -type f -mtime +30 | wc -l | awk '{print $1}')" "6g8e fixture sanity: exactly 30 of them must be past the 30-day floor, or the run has fewer candidates than this scenario's arithmetic assumes"
+assert_eq "1" "$(count_mtime_maxima "$dir6g8e")" "6g8e fixture sanity: the 30-rung ladder plus 5 fresh files must be strictly ordered - a collapsed ladder would stall the pruner outright and this scenario would then be measuring the stall, not the budget"
+
+stdin6g8e=$(printf '{"session_id":"sess-6g8e","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8e")
+capture_stdout "$load_profile_script" "$home6g8e" "$stdin6g8e" >/dev/null
+after6g8e=$(count_files "$dir6g8e")
+if [ "$after6g8e" -gt 10 ] && [ "$after6g8e" -lt 35 ]; then
+  bounded6g8e=yes
+else
+  bounded6g8e=no
+fi
+assert_eq "yes" "$bounded6g8e" "SWEEP (budget): ONE session start must make progress on a 35-file abandoned project but must NOT finish it - the probe budget has to stop the sweep partway, or nothing bounds what a session start spends on projects the user is not even looking at (observed: $after6g8e files left)"
+
+i6g8e=1
+while [ "$i6g8e" -le 6 ]; do
+  capture_stdout "$load_profile_script" "$home6g8e" "$stdin6g8e" >/dev/null
+  i6g8e=$((i6g8e + 1))
+done
+assert_eq "10" "$(count_files "$dir6g8e")" "SWEEP (budget converges): repeated session starts must finish what one could not and land on exactly the 10 newest - a bound that never completed the job would be a leak with extra steps"
+assert_file_exists "$dir6g8e/old-26.md" "SWEEP (budget converges): old-26 is the fifth-newest of the ladder and the ten survivors must be the five fresh files plus old-26..old-30 - convergence must reach the SAME answer the unbudgeted rule does, not merely a smaller directory"
+assert_file_absent "$dir6g8e/old-25.md" "SWEEP (budget converges): old-25 is the eleventh-newest and must be gone once the budget has had enough session starts to reach it"
+
+# ==========================================================================
+# 6g8f. [SWEEP] An EMPTY slug directory is collected; an occupied one,
+#       however small, never is.
+#
+#       The second half of the leak: ~/.squirrel/checkpoints/ held one
+#       directory per project ever opened, permanently, and pruning could
+#       never remove one because the rule keeps the ten newest files
+#       whatever happens. What is collected here is the leftovers - a
+#       project whose checkpoints the user deleted by hand, a slug
+#       directory left behind by a project that moved.
+# ==========================================================================
+home6g8f=$(new_home)
+cwd6g8f="$home6g8f/aaa-opened-project"
+mkdir -p "$home6g8f/.squirrel/checkpoints"
+# Probed BEFORE the empty directories exist, or this very probe would
+# collect them - see peer_slug_dir's header.
+stdin6g8f=$(printf '{"session_id":"sess-6g8f","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8f")
+dir6g8f_open=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g8f" "$stdin6g8f")")")
+mkdir -p "$dir6g8f_open"
+printf 'x\n' >"$dir6g8f_open/live-session.md"
+i6g8f=0
+while [ "$i6g8f" -le 9 ]; do
+  mkdir -p "$home6g8f/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i6g8f")"
+  i6g8f=$((i6g8f + 1))
+done
+assert_eq "11" "$(count_slug_dirs "$home6g8f/.squirrel/checkpoints")" "6g8f fixture sanity: 10 empty slug directories plus the open project's own must exist before the run under test"
+
+capture_stdout "$load_profile_script" "$home6g8f" "$stdin6g8f" >/dev/null
+assert_eq "1" "$(count_slug_dirs "$home6g8f/.squirrel/checkpoints")" "SWEEP (empty collection): every empty slug directory must be removed, leaving only the open project's - a directory per project ever opened, kept forever, is the other half of the unbounded growth this closes"
+assert_file_exists "$dir6g8f_open/live-session.md" "SWEEP (empty collection): the open project's directory is NOT empty and must survive untouched, along with the checkpoint in it"
+
+# ==========================================================================
+# 6g8g. [SWEEP] The directory cap and the round-robin cursor.
+#
+#       A budget alone STARVES. The glob order is stable, so without a
+#       cursor the same first entries would spend the cap every session
+#       and everything past them would never be reached at all - not
+#       "eventually", never.
+#
+#       THE FIXTURE HAS TO BE MADE OF DIRECTORIES THAT SURVIVE BEING
+#       VISITED, which is the whole reason it is not built from empty
+#       ones. An empty directory disappears the moment the sweep reaches
+#       it, so the glob shrinks, the next run gets further for free, and
+#       a cursor-less sweep converges anyway - a version of this scenario
+#       built that way went green against a mutant with the cursor
+#       removed. 104 peers holding one file each are below
+#       CHECKPOINT_PRUNE_KEEP_NEWEST, so they are skipped for free and
+#       still there next time: they consume the directory cap forever,
+#       exactly as a real machine's small projects would.
+#
+#       The names make the arithmetic exact: the open project sorts first
+#       ("aaa-"), the 104 filler peers next, and the one directory with
+#       actual work in it sorts last ("zzz-"). Run 1 must stop at
+#       CHECKPOINT_PRUNE_SWEEP_MAX_DIRS entries and never reach it; run 2
+#       must resume past the cursor and prune it.
+# ==========================================================================
+home6g8g=$(new_home)
+cwd6g8g="$home6g8g/aaa-opened-project"
+mkdir -p "$home6g8g/.squirrel/checkpoints"
+stdin6g8g=$(printf '{"session_id":"sess-6g8g","cwd":"%s","hook_event_name":"SessionStart"}' "$cwd6g8g")
+dir6g8g_open=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$load_profile_script" "$home6g8g" "$stdin6g8g")")")
+mkdir -p "$dir6g8g_open"
+printf 'x\n' >"$dir6g8g_open/live-session.md"
+i6g8g=0
+while [ "$i6g8g" -le 103 ]; do
+  mkdir -p "$home6g8g/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i6g8g")"
+  printf 'x\n' >"$home6g8g/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i6g8g")/keep.md"
+  i6g8g=$((i6g8g + 1))
+done
+dir6g8g_tail="$home6g8g/.squirrel/checkpoints/zzz-tail-project"
+make_aged_ladder "$dir6g8g_tail" 12
+
+assert_eq "106" "$(count_slug_dirs "$home6g8g/.squirrel/checkpoints")" "6g8g fixture sanity: the open project, 104 one-file filler peers and the tail project must all exist before the run under test"
+case "${dir6g8g_open##*/}" in
+  aaa-*) sorts6g8g=yes ;;
+  *) sorts6g8g=no ;;
+esac
+assert_eq "yes" "$sorts6g8g" "6g8g fixture sanity: the open project's slug must sort ahead of every sweepdir-NNN, or the exact directory-cap arithmetic below is measuring a different hundred entries than it claims"
+assert_eq "12" "$(count_files "$dir6g8g_tail")" "6g8g fixture sanity: the tail project must hold 12 prunable checkpoints before the run under test"
+
+capture_stdout "$load_profile_script" "$home6g8g" "$stdin6g8g" >/dev/null
+assert_eq "12" "$(count_files "$dir6g8g_tail")" "SWEEP (directory cap): one session start must look at no more than 100 entries - the open project plus sweepdir-000..098 - so the project sorting last must be untouched by the first run, or nothing bounds the walk across a machine with hundreds of projects"
+
+capture_stdout "$load_profile_script" "$home6g8g" "$stdin6g8g" >/dev/null
+assert_eq "10" "$(count_files "$dir6g8g_tail")" "SWEEP (round-robin): the SECOND session start must resume PAST the cursor and prune the project the first run never reached - without the cursor every run re-walks the same first hundred entries and this project is never swept, in any session, ever"
+
+# A non-empty peer must never be collected, however little is in it: the
+# empty-directory rule is about leftovers, not about small projects.
+home6g8f2=$(new_home)
+dir6g8f2_peer=$(peer_slug_dir "$home6g8f2" "$home6g8f2/tiny-peer")
+mkdir -p "$dir6g8f2_peer"
+printf 'x\n' >"$dir6g8f2_peer/one-ancient.md"
+touch -t "200101021200" "$dir6g8f2_peer/one-ancient.md"
+stdin6g8f2=$(printf '{"session_id":"sess-6g8f2","cwd":"%s/opened-project","hook_event_name":"SessionStart"}' "$home6g8f2")
+capture_stdout "$load_profile_script" "$home6g8f2" "$stdin6g8f2" >/dev/null
+assert_file_exists "$dir6g8f2_peer/one-ancient.md" "SWEEP: a peer holding a single 20-year-old checkpoint must keep both the file and its directory - fewer files than KEEP_NEWEST means nothing there is deletable, and an occupied directory is never collected"
+assert_eq "1" "$(count_slug_dirs "$home6g8f2/.squirrel/checkpoints")" "SWEEP: and its slug directory must still exist afterwards"
 
 # ==========================================================================
 # 6h. [PICKUP-LIST] The SessionStart hook HANDS the model this project's
@@ -6101,6 +6555,232 @@ else
   fpP1q_kept4=no
 fi
 assert_eq "yes" "$fpP1q_kept4" "FAILURE PROOF isolation (scenario 6g6 vs M1): the [ -f ]-only prune mutant must still KEEP the lone >30-day file when newer files live only under junk/deep/"
+
+# --- fpS1: delete the sweep's call site, restoring the behaviour that
+# shipped before it - prune only the project being opened. Proves
+# scenario 6g8: without this the abandoned project keeps all twelve of
+# its checkpoints, which is the unbounded-growth gap itself.
+fpS1_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpS1_line=$(line_of "$fpS1_script" '    prune_other_project_checkpoints "$checkpoints_dir" "$session_dir" "$squirrel_dir/$PRUNE_CURSOR_NAME"')
+assert_eq "yes" "$(if [ -n "$fpS1_line" ]; then printf 'yes'; else printf 'no'; fi)" "FAILURE PROOF (scenario 6g8) must find the prune_other_project_checkpoints call in load-profile.sh - \`line_of\` matches a whole line INCLUDING its indentation, so a call that moves inside a new block silently stops being mutated and this proof would pass for the wrong reason (fpP1f records the same trap springing on the pruner above it)"
+[ -n "$fpS1_line" ] || fpS1_line=0
+replace_line "$fpS1_script" "$fpS1_line" '    :'
+
+fpS1_home=$(new_home)
+fpS1_cwd="$fpS1_home/opened-project"
+fpS1_stdin=$(printf '{"session_id":"sess-fpS1","cwd":"%s","hook_event_name":"SessionStart"}' "$fpS1_cwd")
+fpS1_peer=$(peer_slug_dir_of "$fpS1_script" "$fpS1_home" "$fpS1_home/abandoned-project")
+fpS1_own=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpS1_script" "$fpS1_home" "$fpS1_stdin")")")
+make_aged_ladder "$fpS1_peer" 12
+make_aged_ladder "$fpS1_own" 12
+capture_stdout "$fpS1_script" "$fpS1_home" "$fpS1_stdin" >/dev/null
+assert_eq "12" "$(count_files "$fpS1_peer")" "FAILURE PROOF (scenario 6g8): with the sweep's call site removed, the abandoned project must keep all 12 of its checkpoints - proving 6g8's 'pruned to 10' assertion measures the sweep and not some other cleanup"
+assert_eq "10" "$(count_files "$fpS1_own")" "FAILURE PROOF isolation (scenario 6g8): the SAME mutant must still prune the project being opened down to 10 - proving the two halves of 6g8 are independent, and that the mutant removed the sweep rather than pruning altogether"
+
+# --- fpS2: make checkpoint_slug_dir_untrusted always report "trusted",
+# the same mutation fpB1 applies for the current project, re-aimed at a
+# PEER slug directory. Proves scenario 6g8d: the sweep now reaches other
+# projects' directories on every session start without the user going
+# near them, so a symlinked one is reachable in a way it never was
+# before, and the guard has to be what stops it.
+fpS2_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpS2_start=$(line_of "$fpS2_script" 'checkpoint_slug_dir_untrusted() {')
+[ -n "$fpS2_start" ] || fpS2_start=0
+fpS2_end=$(line_of_after "$fpS2_script" "$fpS2_start" '}')
+[ -n "$fpS2_end" ] || fpS2_end=0
+# shellcheck disable=SC2016
+replace_block "$fpS2_script" "$fpS2_start" "$fpS2_end" 'checkpoint_slug_dir_untrusted() {
+  candidate_slug_dir=$1
+  return 1
+}'
+
+fpS2_home=$(new_home)
+mkdir -p "$fpS2_home/.squirrel/checkpoints" "$fpS2_home/victim-fpS2"
+make_aged_ladder "$fpS2_home/victim-fpS2" 12
+ln -s "$fpS2_home/victim-fpS2" "$fpS2_home/.squirrel/checkpoints/peer-slug-fpS2"
+fpS2_stdin=$(printf '{"session_id":"sess-fpS2","cwd":"%s/opened-project","hook_event_name":"SessionStart"}' "$fpS2_home")
+capture_stdout "$fpS2_script" "$fpS2_home" "$fpS2_stdin" >/dev/null
+assert_eq "10" "$(count_files "$fpS2_home/victim-fpS2")" "FAILURE PROOF (scenario 6g8d): with the trust boundary neutralised, the sweep must delete straight through a symlinked PEER slug directory into an unrelated directory's files - proving 6g8d's 'all twelve survive' assertion measures checkpoint_slug_dir_untrusted and is not simply describing a code path nothing reaches"
+
+# --- fpS3: the OTHER half of the same boundary - checkpoints/ ITSELF
+# symlinked. Two independent guards refuse that shape (the sweep's own
+# [ -L ] on the directory it is about to glob, and
+# checkpoint_slug_dir_untrusted's lexical-parent test), which is
+# deliberate defence in depth and is exactly why this mutant has to
+# remove BOTH before scenario 6g8d's second fixture can go red. Removing
+# either one alone leaves the other holding, and a failure proof that
+# could not distinguish the two would be claiming a coverage it does not
+# have.
+fpS3_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpS3_start=$(line_of "$fpS3_script" 'checkpoint_slug_dir_untrusted() {')
+[ -n "$fpS3_start" ] || fpS3_start=0
+fpS3_end=$(line_of_after "$fpS3_script" "$fpS3_start" '}')
+[ -n "$fpS3_end" ] || fpS3_end=0
+# shellcheck disable=SC2016
+replace_block "$fpS3_script" "$fpS3_start" "$fpS3_end" 'checkpoint_slug_dir_untrusted() {
+  candidate_slug_dir=$1
+  return 1
+}'
+# shellcheck disable=SC2016
+fpS3_root_line=$(line_of "$fpS3_script" '  if [ -L "$sweep_root" ]; then')
+[ -n "$fpS3_root_line" ] || fpS3_root_line=0
+replace_line "$fpS3_script" "$fpS3_root_line" '  if false; then'
+
+fpS3_home=$(new_home)
+mkdir -p "$fpS3_home/real-checkpoints-elsewhere/stranger-slug" "$fpS3_home/.squirrel"
+make_aged_ladder "$fpS3_home/real-checkpoints-elsewhere/stranger-slug" 12
+ln -s "$fpS3_home/real-checkpoints-elsewhere" "$fpS3_home/.squirrel/checkpoints"
+fpS3_stdin=$(printf '{"session_id":"sess-fpS3","cwd":"%s/opened-project","hook_event_name":"SessionStart"}' "$fpS3_home")
+capture_stdout "$fpS3_script" "$fpS3_home" "$fpS3_stdin" >/dev/null
+assert_eq "10" "$(count_files "$fpS3_home/real-checkpoints-elsewhere/stranger-slug")" "FAILURE PROOF (scenario 6g8d, symlinked checkpoints/): with both guards removed, the sweep must enumerate a symlinked checkpoints/ and delete inside the stranger's slug directory - proving that fixture's 'all twelve survive' assertion is measuring the boundary"
+
+# --- fpS4: rank each candidate against every project's files instead of
+# its own project's, i.e. a GLOBAL newest-N. This is the mutant that
+# matters most about the sweep, because it is the plausible wrong way to
+# build it and it is silently catastrophic: a dormant project's entire
+# memory falls outside the newest ten the moment any other project writes
+# eleven newer files. Proves scenario 6g8c, both halves.
+fpS4_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpS4_line=$(line_of "$fpS4_script" '    for peer in "$slug_dir"/*; do')
+[ -n "$fpS4_line" ] || fpS4_line=0
+# shellcheck disable=SC2016
+replace_line "$fpS4_script" "$fpS4_line" '    for peer in "$slug_dir"/../*/*; do'
+# The entry-count skip has to go with it, and that is a finding rather
+# than a convenience: "no more than KEEP_NEWEST entries means nothing
+# here is deletable" is only true because the rank is PER PROJECT, so it
+# is a second, independent expression of the same guarantee. Left in
+# place, it alone spares the five-file dormant project and this proof
+# went green against a genuinely global rank - which is exactly the
+# wrong-for-the-right-reason pass a failure proof exists to catch.
+# shellcheck disable=SC2016
+fpS4_skip_line=$(line_of "$fpS4_script" '  if [ "$sweep_entries" -le "$CHECKPOINT_PRUNE_KEEP_NEWEST" ]; then')
+[ -n "$fpS4_skip_line" ] || fpS4_skip_line=0
+replace_line "$fpS4_script" "$fpS4_skip_line" '  if false; then'
+# And the probe budget is lifted, for the same reason: a global rank
+# makes every candidate scan every project's files, which is expensive
+# enough that the budget stopped this mutant inside the FIRST dormant
+# project and left the second one standing. The assertion below would
+# then have been reporting "the budget held", not "the rank is
+# per-project" - two different facts, and only one of them is 6g8c's.
+fpS4_probe_line=$(line_of "$fpS4_script" 'CHECKPOINT_PRUNE_SWEEP_MAX_PROBES=200')
+[ -n "$fpS4_probe_line" ] || fpS4_probe_line=0
+replace_line "$fpS4_script" "$fpS4_probe_line" 'CHECKPOINT_PRUNE_SWEEP_MAX_PROBES=1000000'
+
+fpS4_home=$(new_home)
+fpS4_cwd="$fpS4_home/very-busy-project"
+fpS4_stdin=$(printf '{"session_id":"sess-fpS4","cwd":"%s","hook_event_name":"SessionStart"}' "$fpS4_cwd")
+fpS4_small=$(peer_slug_dir_of "$fpS4_script" "$fpS4_home" "$fpS4_home/dormant-small")
+fpS4_big=$(peer_slug_dir_of "$fpS4_script" "$fpS4_home" "$fpS4_home/dormant-big")
+fpS4_open=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpS4_script" "$fpS4_home" "$fpS4_stdin")")")
+mkdir -p "$fpS4_small" "$fpS4_open"
+i_fpS4=1
+while [ "$i_fpS4" -le 5 ]; do
+  printf 'x\n' >"$fpS4_small/ancient-$i_fpS4.md"
+  touch -t "20010$i_fpS4"021200 "$fpS4_small/ancient-$i_fpS4.md"
+  i_fpS4=$((i_fpS4 + 1))
+done
+make_aged_ladder "$fpS4_big" 12
+fpS4_today=$(date +%Y%m%d)
+i_fpS4=0
+while [ "$i_fpS4" -le 19 ]; do
+  printf 'x\n' >"$fpS4_open/today-$(printf '%02d' "$i_fpS4").md"
+  touch -t "${fpS4_today}12$(printf '%02d' "$i_fpS4")" "$fpS4_open/today-$(printf '%02d' "$i_fpS4").md"
+  i_fpS4=$((i_fpS4 + 1))
+done
+capture_stdout "$fpS4_script" "$fpS4_home" "$fpS4_stdin" >/dev/null
+assert_eq "0" "$(count_files "$fpS4_small")" "FAILURE PROOF (scenario 6g8c): ranking across projects must wipe a 5-checkpoint dormant project entirely, because 20 newer files exist somewhere else - proving 6g8c's 'loses none' assertion measures the per-project rank and not merely that the sweep left it alone"
+assert_eq "0" "$(count_files "$fpS4_big")" "FAILURE PROOF (scenario 6g8c): the same global-rank mutant must wipe the 12-checkpoint dormant project too - proving its 'keeps its own 10 newest' assertion is not simply counting what the age floor spared"
+
+# --- fpS5: never collect an empty slug directory. Proves scenario 6g8f's
+# directory counts are measuring the collection and not the fixture.
+fpS5_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpS5_line=$(line_of "$fpS5_script" '    rmdir -- "$sweep_dir" >/dev/null 2>&1 || true')
+[ -n "$fpS5_line" ] || fpS5_line=0
+replace_line "$fpS5_script" "$fpS5_line" '    :'
+
+fpS5_home=$(new_home)
+fpS5_stdin=$(printf '{"session_id":"sess-fpS5","cwd":"%s/aaa-opened-project","hook_event_name":"SessionStart"}' "$fpS5_home")
+fpS5_open=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpS5_script" "$fpS5_home" "$fpS5_stdin")")")
+mkdir -p "$fpS5_open"
+printf 'x\n' >"$fpS5_open/live-session.md"
+i_fpS5=0
+while [ "$i_fpS5" -le 9 ]; do
+  mkdir -p "$fpS5_home/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i_fpS5")"
+  i_fpS5=$((i_fpS5 + 1))
+done
+capture_stdout "$fpS5_script" "$fpS5_home" "$fpS5_stdin" >/dev/null
+assert_eq "11" "$(count_slug_dirs "$fpS5_home/.squirrel/checkpoints")" "FAILURE PROOF (scenario 6g8f): with the rmdir removed, all ten empty slug directories must survive a session start - proving 6g8f's directory counts measure the empty-directory collection, which is the whole of the 'one directory per project ever opened, forever' half of the leak"
+
+# --- fpS6: remove the round-robin cursor, so every run restarts at the
+# beginning of the glob. Proves scenario 6g8f's second half: with a
+# directory cap and no rotation the tail of checkpoints/ is never reached
+# by any session start, ever - a budget without a cursor starves rather
+# than converges, which is the reason the cursor file exists at all.
+fpS6_script=$(make_script_scratch "$load_profile_script")
+# shellcheck disable=SC2016
+fpS6_line=$(line_of "$fpS6_script" '  sweep_cursor=$(cat "$sweep_cursor_file" 2>/dev/null) || sweep_cursor=""')
+[ -n "$fpS6_line" ] || fpS6_line=0
+replace_line "$fpS6_script" "$fpS6_line" '  sweep_cursor=""'
+
+fpS6_home=$(new_home)
+fpS6_stdin=$(printf '{"session_id":"sess-fpS6","cwd":"%s/aaa-opened-project","hook_event_name":"SessionStart"}' "$fpS6_home")
+fpS6_open=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpS6_script" "$fpS6_home" "$fpS6_stdin")")")
+mkdir -p "$fpS6_open"
+printf 'x\n' >"$fpS6_open/live-session.md"
+i_fpS6=0
+while [ "$i_fpS6" -le 103 ]; do
+  mkdir -p "$fpS6_home/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i_fpS6")"
+  printf 'x\n' >"$fpS6_home/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i_fpS6")/keep.md"
+  i_fpS6=$((i_fpS6 + 1))
+done
+make_aged_ladder "$fpS6_home/.squirrel/checkpoints/zzz-tail-project" 12
+capture_stdout "$fpS6_script" "$fpS6_home" "$fpS6_stdin" >/dev/null
+capture_stdout "$fpS6_script" "$fpS6_home" "$fpS6_stdin" >/dev/null
+capture_stdout "$fpS6_script" "$fpS6_home" "$fpS6_stdin" >/dev/null
+assert_eq "12" "$(count_files "$fpS6_home/.squirrel/checkpoints/zzz-tail-project")" "FAILURE PROOF (scenario 6g8g, round-robin): with the cursor removed, THREE session starts must all re-walk the same first hundred entries and leave the tail project untouched - proving 6g8g's 'the second run prunes it' assertion measures the rotation and not merely the passage of runs"
+
+# --- fpS7: remove the two sweep bounds. Proves scenario 6g8e (the probe
+# budget) and 6g8f's first count (the directory cap) are each measuring a
+# real ceiling rather than a fixture that happened to be small enough.
+fpS7_script=$(make_script_scratch "$load_profile_script")
+fpS7_probe_line=$(line_of "$fpS7_script" 'CHECKPOINT_PRUNE_SWEEP_MAX_PROBES=200')
+[ -n "$fpS7_probe_line" ] || fpS7_probe_line=0
+replace_line "$fpS7_script" "$fpS7_probe_line" 'CHECKPOINT_PRUNE_SWEEP_MAX_PROBES=1000000'
+fpS7_dirs_line=$(line_of "$fpS7_script" 'CHECKPOINT_PRUNE_SWEEP_MAX_DIRS=100')
+[ -n "$fpS7_dirs_line" ] || fpS7_dirs_line=0
+replace_line "$fpS7_script" "$fpS7_dirs_line" 'CHECKPOINT_PRUNE_SWEEP_MAX_DIRS=1000000'
+
+fpS7_home=$(new_home)
+fpS7_stdin=$(printf '{"session_id":"sess-fpS7","cwd":"%s/opened-project","hook_event_name":"SessionStart"}' "$fpS7_home")
+fpS7_peer=$(peer_slug_dir_of "$fpS7_script" "$fpS7_home" "$fpS7_home/huge-abandoned-project")
+make_aged_ladder "$fpS7_peer" 30
+i_fpS7=1
+while [ "$i_fpS7" -le 5 ]; do
+  printf 'x\n' >"$fpS7_peer/fresh-$i_fpS7.md"
+  i_fpS7=$((i_fpS7 + 1))
+done
+capture_stdout "$fpS7_script" "$fpS7_home" "$fpS7_stdin" >/dev/null
+assert_eq "10" "$(count_files "$fpS7_peer")" "FAILURE PROOF (scenario 6g8e): with the probe budget lifted, ONE session start must take the 35-file abandoned project all the way down to 10 - proving 6g8e's 'must not finish it' assertion measures a real ceiling and is not just a fixture that fitted"
+
+fpS7_home2=$(new_home)
+fpS7_stdin2=$(printf '{"session_id":"sess-fpS72","cwd":"%s/aaa-opened-project","hook_event_name":"SessionStart"}' "$fpS7_home2")
+fpS7_open2=$(extract_checkpoint_dir_line "$(extract_ctx "$(capture_stdout "$fpS7_script" "$fpS7_home2" "$fpS7_stdin2")")")
+mkdir -p "$fpS7_open2"
+printf 'x\n' >"$fpS7_open2/live-session.md"
+i_fpS7=0
+while [ "$i_fpS7" -le 103 ]; do
+  mkdir -p "$fpS7_home2/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i_fpS7")"
+  printf 'x\n' >"$fpS7_home2/.squirrel/checkpoints/sweepdir-$(printf '%03d' "$i_fpS7")/keep.md"
+  i_fpS7=$((i_fpS7 + 1))
+done
+make_aged_ladder "$fpS7_home2/.squirrel/checkpoints/zzz-tail-project" 12
+capture_stdout "$fpS7_script" "$fpS7_home2" "$fpS7_stdin2" >/dev/null
+assert_eq "10" "$(count_files "$fpS7_home2/.squirrel/checkpoints/zzz-tail-project")" "FAILURE PROOF (scenario 6g8g): with the directory cap lifted, ONE session start must walk all 106 entries and prune the project sorting last - proving 6g8g's 'the first run must not reach it' assertion measures the cap"
 
 # --- fpP1k: delete Layer 1b entirely (the pre-P1 behaviour: the flat
 # path allowed for every tool). Proves scenario 14d's Write/Edit defer

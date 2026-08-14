@@ -146,7 +146,7 @@ docs/RESEARCH.md's "Corrections" section for what got cut when a citation didn't
 No network calls. No telemetry. Every script squirrel-mode ships is plain POSIX `sh` or Markdown.
 
 The Claude Code plugin's runtime writes to exactly one place — `~/.squirrel/` — and, inside it, to
-exactly four kinds of file:
+exactly five kinds of file:
 
 - `profile.md` — your calibration, written by `/squirrel:init` and edited by `/squirrel:tune`.
 - `checkpoints/<slug>/<session-id>.md` — one checkpoint file per session
@@ -157,13 +157,16 @@ exactly four kinds of file:
 - `profile-seen/<session-id>` — an empty marker whose timestamp is all that matters: it is how a
   session knows whether it has already been shown the current `profile.md`, and it is what makes a
   `/squirrel:tune` in one session reach the others.
+- `prune-cursor` — one line naming the last project directory the checkpoint sweep below looked at,
+  so the next session start resumes where it stopped instead of always restarting at the same place.
+  Nothing reads it but the sweep, and losing it costs nothing.
 
 Installs from before this location moved have their data at an older path instead — see the note at
 the end of this section; squirrel-mode detects that and tells you, once per session, rather than
 moving it for you.
 
-**It also deletes, on its own, at session start.** Three prunes run in `scripts/load-profile.sh`, and
-only there — never on an ordinary message:
+**It also deletes, on its own, at session start.** The prunes all run in `scripts/load-profile.sh`,
+and only there — never on an ordinary message:
 
 - Off/on sentinels older than 7 days, and `profile-seen` markers older than 7 days. Both are
   per-session scraps that are worthless once their session ends; 7 days is a deliberately generous
@@ -173,6 +176,19 @@ only there — never on an ordinary message:
   modified checkpoints for that project. However long a project lies untouched, its ten newest
   checkpoints always survive. At most 100 candidates are examined per session start, so a huge
   directory cannot stall the hook.
+- The same checkpoint rule, applied to **every** project rather than only the one you are opening.
+  Otherwise a project you stop working on keeps every checkpoint it ever had, forever, and
+  `~/.squirrel/checkpoints/` grows without bound across abandoned projects. The count that matters
+  is always **within one project**: ten newest *per project*, never ten newest overall, so a rarely
+  touched project never loses its memory because a busy one has newer files. This sweep is
+  deliberately bounded — it looks at no more than 100 project directories and spends no more than
+  200 filesystem probes per session start (measured worst case on a Mac: under a second, against
+  tens of milliseconds for an ordinary machine), and it resumes where it left off next time rather
+  than starting over, so every project is reached within a few sessions without any one session
+  start doing all the work.
+- Project directories under `checkpoints/` that are **completely empty**, which is the other half of
+  the same growth: one directory per project you ever opened, kept forever. Only genuinely empty
+  directories are removed, and never one that still holds a checkpoint.
 
 Nothing else in `~/.squirrel/` is ever deleted by squirrel-mode, and `profile.md` never is.
 

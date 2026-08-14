@@ -88,6 +88,12 @@
 # prune_stale_session_checkpoints) and stale
 # ~/.squirrel/profile-seen/<session_id> stamps (see
 # prune_stale_profile_seen) so none of the three accumulates forever.
+# Checkpoint pruning is not limited to the project being opened: a
+# bounded, round-robin sweep applies the same rule to every OTHER
+# project's slug directory too, and removes slug directories left empty,
+# so a project you stop working on does not keep its checkpoints and its
+# directory forever - see prune_other_project_checkpoints. It records how
+# far it got in ~/.squirrel/prune-cursor.
 # Both the pruning and the "Resume available" check REFUSE to act at all
 # when ~/.squirrel/checkpoints or ~/.squirrel/checkpoints/<slug> is a
 # symlink - see checkpoint_slug_dir_untrusted, which mirrors the
@@ -796,6 +802,109 @@ CHECKPOINT_PRUNE_MIN_AGE_DAYS=30
 CHECKPOINT_PRUNE_KEEP_NEWEST=10
 CHECKPOINT_PRUNE_MAX_CANDIDATES=100
 
+# --- The sweep: every OTHER project's slug directory -------------------
+#
+# THE GAP THIS CLOSES. The rule above is correct and, until this was
+# added, it was only ever applied to the slug directory of the project
+# being opened. A project you stop working on is therefore a project
+# whose checkpoints are never examined again: over years,
+# ~/.squirrel/checkpoints/ grows without bound across abandoned projects.
+# Reproduced under a scratch $HOME with two projects of 20 files each (15
+# back-dated 60-200 days, 5 fresh): opening project A left A at 10 files
+# and B at 20.
+#
+# WHAT DOES NOT CHANGE. The retention rule is the same everywhere, and it
+# is the same CODE everywhere - prune_stale_session_checkpoints is called
+# once per directory rather than reimplemented for peers. In particular
+# "the 10 most recently modified" is always measured WITHIN ONE PROJECT.
+# A global newest-N across projects would delete a rarely-touched
+# project's entire memory the moment a busy project wrote eleven newer
+# files, which is the exact failure the rank clause exists to prevent.
+# The trust boundary is the same one too: checkpoint_slug_dir_untrusted
+# and the per-entry `[ ! -f ] || [ -L ]` tests are applied to every
+# directory the sweep visits, by the same function, and the sweep never
+# globs a directory before that check has passed.
+#
+# THE CURRENT PROJECT IS STILL PRUNED FIRST, AND WITHOUT A BUDGET. It
+# gets exactly the call it got before this existed, ahead of the sweep,
+# so nothing here can make the directory a user is actually looking at
+# get pruned less thoroughly than it was.
+#
+# WHY THIS IS BOUNDED, AND WHERE THE COST ACTUALLY IS. The unit of cost
+# is a `find` fork - one per age gate and one per `-newer` comparison -
+# and on the reference macOS machine it measures 2.5 ms. That number is
+# what makes an unbudgeted sweep impossible: a single directory of 1 000
+# same-mtime old files costs 100 candidates x 1 000 peers = 100 000 forks
+# = 254 s, measured, on the code that shipped before this comment. So the
+# sweep is bounded in three independent ways, cheapest first:
+#
+#   1. FREE SKIP, no fork and at most 11 stats: a slug directory with no
+#      more than CHECKPOINT_PRUNE_KEEP_NEWEST entries can have nothing
+#      deleted from it. Deleting needs KEEP_NEWEST peers strictly newer
+#      than the candidate, so it needs at least KEEP_NEWEST+1 depth-1
+#      files, and entries are an upper bound on files. The entry count
+#      stops at KEEP_NEWEST+1, so this costs the same on a directory of
+#      eleven files as on one of ten thousand. This is the case almost
+#      every real project is in, which is why ordinary session starts do
+#      not get slower.
+#   2. ONE FORK PER DIRECTORY: a directory with nothing older than
+#      CHECKPOINT_PRUNE_MIN_AGE_DAYS at depth 1 has no candidate, so a
+#      single depth-1 `find -mtime` answers "is there any work here?" and
+#      skips the per-entry age gates entirely. An active project of 500
+#      fresh checkpoints costs one fork instead of five hundred.
+#   3. A SHARED PROBE BUDGET: CHECKPOINT_PRUNE_SWEEP_MAX_PROBES bounds
+#      the TOTAL number of `find` forks the sweep may spend across all
+#      peers in one session start, and CHECKPOINT_PRUNE_SWEEP_MAX_DIRS
+#      bounds how many entries it will even look at. Running out is
+#      always conservative: a candidate whose peer scan was cut short has
+#      an UNDERCOUNT of newer peers, and an undercount can only fail the
+#      `-ge KEEP_NEWEST` test, i.e. can only KEEP a file.
+#
+# WHY ROUND-ROBIN, AND WHY IT IS NOT OPTIONAL. A budget alone starves:
+# the glob order is stable, so the same first directories would spend it
+# every session and the rest would never be reached. That is not
+# hypothetical - a directory can consume budget forever without ever
+# deleting anything (twenty files sharing one old mtime delete nothing,
+# because `-newer` is strictly-greater; ten subdirectories plus one
+# ancient file has more than KEEP_NEWEST entries but fewer than
+# KEEP_NEWEST+1 files). ~/.squirrel/prune-cursor records the last slug
+# directory this run looked at, and the next run resumes AFTER it and
+# wraps, so every project is reached within
+# ceil(projects / SWEEP_MAX_DIRS) session starts whatever any single
+# directory does. A missing, unreadable or corrupt cursor simply restarts
+# the cycle at the beginning - it is an optimisation hint, never a
+# correctness input, and it is validated against the same
+# [A-Za-z0-9._-] class project_slug produces before it is believed.
+#
+# 200 AND 100, AND WHY THOSE. 200 probes is 0.5 s of forks at the
+# measured 2.5 ms; 100 directories bounds the readdir-and-stat walk that
+# the free skip does. Both are per-session-start ceilings, not
+# per-directory ones. Measured end to end on the reference macOS machine,
+# three runs each, against the same fixtures without the sweep:
+#   20 projects x 8 fresh files      45-91 ms  ->  55-62 ms   (unchanged)
+#   100 projects x 30 fresh files    45-53 ms  ->  339-362 ms (the 100
+#                                                  one-fork skips)
+#   3 projects x 400 old files       54-83 ms  ->  515-799 ms
+#   1 project x 1 000 same-mtime old 44-53 ms  ->  584-810 ms (the
+#                                                  maximum-probe path)
+# So the worst case this adds to a session start is under a second, and
+# the case ordinary users are in is indistinguishable from noise. For
+# scale, the SAME 1 000 same-mtime files in the CURRENT project cost
+# 254 s before this change and are untouched by these bounds.
+# Pruning here is best-effort and converges over sessions, exactly as the
+# single-directory rule above already documented - being slow is a worse
+# failure at this call site than being late.
+CHECKPOINT_PRUNE_SWEEP_MAX_DIRS=100
+CHECKPOINT_PRUNE_SWEEP_MAX_PROBES=200
+
+# PRUNE_CURSOR_NAME: the round-robin cursor's file name, directly under
+# ~/.squirrel/ rather than inside checkpoints/. Deliberately outside:
+# checkpoints/ is enumerated by the sweep itself and by
+# checkpoint_slug_dir_untrusted's parent test, and a bookkeeping file
+# living among the slug directories would be one more thing every one of
+# those walks has to know not to treat as a project.
+PRUNE_CURSOR_NAME=prune-cursor
+
 # CHECKPOINT_LIST_MAX_FILES: how many checkpoint paths the injected
 # "Project checkpoint files, newest first (session <token>):" block
 # (checkpoint_file_lines, below) may name in one session's context.
@@ -894,8 +1003,28 @@ checkpoint_slug_dir_untrusted() {
   return 1
 }
 
+# prune_stale_session_checkpoints <slug_dir> [probe_budget]
+#
+# <probe_budget> is how many `find` forks this call may spend before it
+# stops. It is EMPTY at the current project's call site - the same
+# unbounded behaviour that shipped before the sweep existed - and is set
+# only by prune_other_project_checkpoints, which has a per-session budget
+# to share out. Running out is always safe: the peer scan it interrupts
+# can only have UNDERcounted the newer peers, and an undercount can only
+# fail the `-ge CHECKPOINT_PRUNE_KEEP_NEWEST` test below, so a cut-short
+# candidate is kept and reconsidered next session. Passed as an argument
+# rather than read from a global so the current project's call site stays
+# a bare one-argument call with no hidden state behind it.
+#
+# prune_probes_used is this function's OUT parameter, and POSIX sh has no
+# other way to return a number: the caller reads it after the call. It is
+# maintained whether or not a budget was given, because the sweep needs
+# the count even for the directories it did not have to cut short.
 prune_stale_session_checkpoints() {
   slug_dir=$1
+  prune_probe_budget=${2:-}
+  prune_probes_used=0
+  prune_budget_spent=0
   [ -d "$slug_dir" ] || return 0
   if checkpoint_slug_dir_untrusted "$slug_dir"; then
     return 0
@@ -916,6 +1045,7 @@ prune_stale_session_checkpoints() {
     # Age gate on this single file: find given a file path does not
     # recurse. Empty output means "not old enough" (or find failed).
     candidate_old=$(find "$candidate" -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || candidate_old=""
+    prune_probes_used=$((prune_probes_used + 1))
     [ -n "$candidate_old" ] || continue
 
     examined=$((examined + 1))
@@ -929,8 +1059,25 @@ prune_stale_session_checkpoints() {
         continue
       fi
       peer_newer=$(find "$peer" -newer "$candidate" 2>/dev/null) || peer_newer=""
+      prune_probes_used=$((prune_probes_used + 1))
       if [ -n "$peer_newer" ]; then
         newer_count=$((newer_count + 1))
+      fi
+      # Stop as soon as the answer is settled. newer_count is read in
+      # exactly one place, the `-ge CHECKPOINT_PRUNE_KEEP_NEWEST` test
+      # below, so counting past KEEP_NEWEST cannot change any outcome -
+      # this is the same decision reached with fewer forks, not a
+      # different rule. It matters because a fork is the unit of cost
+      # here (2.5 ms measured): without it a single candidate in a
+      # 1 000-file directory costs 1 000 forks whether or not its fate
+      # was decided by the eleventh, and the sweep's probe budget would
+      # be spent before any peer directory could make progress.
+      if [ "$newer_count" -ge "$CHECKPOINT_PRUNE_KEEP_NEWEST" ]; then
+        break
+      fi
+      if [ -n "$prune_probe_budget" ] && [ "$prune_probes_used" -ge "$prune_probe_budget" ]; then
+        prune_budget_spent=1
+        break
       fi
     done
     case "$newer_count" in
@@ -939,7 +1086,233 @@ prune_stale_session_checkpoints() {
     if [ "$newer_count" -ge "$CHECKPOINT_PRUNE_KEEP_NEWEST" ]; then
       rm -f -- "$candidate" >/dev/null 2>&1 || true
     fi
+    # The budget is checked AFTER the deletion decision, never before it:
+    # the peer scan that spent the last probe may still have reached
+    # KEEP_NEWEST, and throwing that answer away would waste the work
+    # rather than save it.
+    if [ "$prune_budget_spent" -eq 1 ]; then
+      break
+    fi
+    if [ -n "$prune_probe_budget" ] && [ "$prune_probes_used" -ge "$prune_probe_budget" ]; then
+      break
+    fi
   done
+  return 0
+}
+
+# sweep_one_slug_dir <dir>: prune ONE peer project's slug directory,
+# spending from the run's shared probe budget (see the sweep's header
+# above for why there is a budget at all). Reads and updates the globals
+# sweep_probes and prune_probes_used; always returns 0.
+#
+# THE ORDER OF THE FOUR GATES IS THE DESIGN, not housekeeping. Each one
+# is strictly cheaper than the next, and each is EXACT - none of them
+# skips a directory that had something to delete:
+#   1. the trust boundary, before anything reads or globs <dir>;
+#   2. the entry count, capped at KEEP_NEWEST+1 so it costs the same on a
+#      directory of ten thousand files as on one of eleven;
+#   3. the empty directory, which is removed rather than left behind;
+#   4. one depth-1 `find -mtime`, which is the whole "is there any work
+#      here?" question in a single fork.
+#
+# WHY THE ENTRY COUNT IS AN EXACT SKIP. prune_stale_session_checkpoints
+# deletes a candidate only when at least CHECKPOINT_PRUNE_KEEP_NEWEST
+# OTHER depth-1 files are strictly newer, so it needs KEEP_NEWEST+1 files
+# before it can delete anything at all; entries are an upper bound on
+# files (subdirectories, symlinks and FIFOs all count as entries and none
+# of them counts as a peer). No more than KEEP_NEWEST entries therefore
+# means "nothing here is deletable", with certainty, for no forks.
+#
+# WHY THE DEPTH-1 `find` IS SPELLED THIS WAY. `-maxdepth` is not POSIX
+# and `find "$dir" -type f` recurses, which would let a junk/deep/ tree
+# answer a question that is only ever about direct children (the same
+# reason prune_stale_session_checkpoints ranks on "$slug_dir"/* alone -
+# see "Depth-1 is load-bearing" above). `"$dir"/. ! -name . -prune` is
+# the portable spelling: the "." entry itself fails `! -name .` so find
+# descends into it once, and every child then matches, is pruned, and is
+# never descended into. Verified against BSD find on macOS. Its OUTPUT is
+# only ever tested for emptiness - never split into paths - so a
+# checkpoint file whose name contained a newline could not turn this into
+# a wrong path the way parsing it would.
+#
+# THE EMPTY-DIRECTORY REMOVAL IS `rmdir`, DELIBERATELY, and it is the
+# whole of the fix for "one directory per project ever opened, forever".
+# `rmdir` removes a directory only when it is genuinely empty - it cannot
+# take a non-empty one, it cannot follow a symlink (that fails ENOTDIR),
+# and it cannot delete a file. So the destructive surface of this line is
+# exactly "an empty directory this plugin created", with the kernel, not
+# this script, enforcing the "empty" half. Pruning itself never empties a
+# directory (the KEEP_NEWEST newest always survive), so what this
+# collects is the leftovers: a project whose checkpoints the user deleted
+# by hand, and a slug directory left behind by a project that moved.
+sweep_one_slug_dir() {
+  sweep_dir=$1
+
+  if checkpoint_slug_dir_untrusted "$sweep_dir"; then
+    return 0
+  fi
+  [ -d "$sweep_dir" ] || return 0
+
+  sweep_entries=0
+  sweep_entry_last=""
+  for sweep_entry_path in "$sweep_dir"/*; do
+    sweep_entry_last=$sweep_entry_path
+    sweep_entries=$((sweep_entries + 1))
+    if [ "$sweep_entries" -gt "$CHECKPOINT_PRUNE_KEEP_NEWEST" ]; then
+      break
+    fi
+  done
+  # An unmatched glob leaves the pattern itself as the single word, so
+  # "one entry that does not exist" is how an empty directory looks. The
+  # `[ ! -L ]` half is there because a DANGLING symlink is a real entry
+  # that `[ -e ]` reports as absent, and a directory holding one is not
+  # empty - `rmdir` would fail on it anyway, but reaching `rmdir` at all
+  # for a directory with something in it is the wrong shape.
+  if [ "$sweep_entries" -eq 1 ] && [ ! -e "$sweep_entry_last" ] && [ ! -L "$sweep_entry_last" ]; then
+    sweep_entries=0
+  fi
+
+  if [ "$sweep_entries" -eq 0 ]; then
+    rmdir -- "$sweep_dir" >/dev/null 2>&1 || true
+    return 0
+  fi
+  if [ "$sweep_entries" -le "$CHECKPOINT_PRUNE_KEEP_NEWEST" ]; then
+    return 0
+  fi
+
+  sweep_probes=$((sweep_probes + 1))
+  sweep_old=$(find "$sweep_dir"/. ! -name . -prune -type f -mtime "+$CHECKPOINT_PRUNE_MIN_AGE_DAYS" 2>/dev/null) || sweep_old=""
+  [ -n "$sweep_old" ] || return 0
+
+  sweep_left=$((CHECKPOINT_PRUNE_SWEEP_MAX_PROBES - sweep_probes))
+  if [ "$sweep_left" -lt 1 ]; then
+    sweep_left=1
+  fi
+  # Reset before the call, not after: prune_stale_session_checkpoints is
+  # the only thing that sets this, and if it ever returns early without
+  # having set it, adding a stale count from the PREVIOUS directory would
+  # silently corrupt the budget.
+  prune_probes_used=0
+  prune_stale_session_checkpoints "$sweep_dir" "$sweep_left"
+  sweep_probes=$((sweep_probes + prune_probes_used))
+  return 0
+}
+
+# prune_other_project_checkpoints <checkpoints_dir> <current_slug_dir>
+#                                 <cursor_file>
+#
+# The sweep proper: walk ~/.squirrel/checkpoints/, resuming after the
+# cursor and wrapping once, and hand every peer slug directory to
+# sweep_one_slug_dir until a bound is reached. See the block comment at
+# CHECKPOINT_PRUNE_SWEEP_MAX_DIRS for the design and the measurements.
+#
+# <current_slug_dir> is skipped by path comparison because
+# prune_stale_session_checkpoints has already been run on it, unbudgeted,
+# at the call site above this one. Both paths are built as
+# "$checkpoints_dir/$name" from the same variable, so this is string
+# equality on two spellings of the same construction, not a resolution.
+#
+# TWO PASSES ARE THE ROTATION. Pass 1 takes the entries AFTER the cursor
+# in glob order, pass 2 takes the entries up to and INCLUDING it; between
+# them every entry is visited exactly once, starting one past where the
+# last run stopped. Written as two passes over the glob rather than as a
+# sorted list with an index because POSIX sh has no arrays, and as name
+# EQUALITY rather than a `<`/`>` string comparison because POSIX `test`
+# does not define those operators.
+#
+# EVERY FALLIBLE STEP IS GUARDED AND NO PATH THROUGH THIS CAN FAIL THE
+# HOOK - the same posture as the three pruners. The cursor write in
+# particular is `|| true`: an unwritable ~/.squirrel costs the rotation,
+# which is an optimisation, and must never cost the session start.
+prune_other_project_checkpoints() {
+  sweep_root=$1
+  sweep_current_dir=$2
+  sweep_cursor_file=$3
+
+  [ -d "$sweep_root" ] || return 0
+  # checkpoints/ itself being a symlink is the other half of the boundary
+  # checkpoint_slug_dir_untrusted tests, and it is tested HERE as well as
+  # there because this function globs checkpoints/ directly - by the time
+  # sweep_one_slug_dir could refuse, the enumeration would already have
+  # happened through the link.
+  if [ -L "$sweep_root" ]; then
+    return 0
+  fi
+
+  sweep_cursor=$(cat "$sweep_cursor_file" 2>/dev/null) || sweep_cursor=""
+  # Validated against the class project_slug produces, for the same
+  # reason session ids are: this string is compared against directory
+  # names, and anything outside that class - including the embedded
+  # newline a multi-line file would produce - means the file is not a
+  # cursor this script wrote. Rejecting it restarts the cycle, which is
+  # always correct and never destructive.
+  case "$sweep_cursor" in
+    '' | *[!A-Za-z0-9._-]*) sweep_cursor="" ;;
+  esac
+
+  sweep_dirs=0
+  sweep_probes=0
+  sweep_last=""
+  sweep_halt=0
+  sweep_pass=1
+  while [ "$sweep_pass" -le 2 ]; do
+    if [ "$sweep_halt" -eq 1 ]; then
+      break
+    fi
+    # With no cursor, pass 1 already covered everything.
+    if [ "$sweep_pass" -eq 2 ] && [ -z "$sweep_cursor" ]; then
+      break
+    fi
+    if [ "$sweep_pass" -eq 1 ] && [ -n "$sweep_cursor" ]; then
+      sweep_past=0
+    else
+      sweep_past=1
+    fi
+
+    for sweep_entry in "$sweep_root"/*; do
+      sweep_name=${sweep_entry##*/}
+      if [ "$sweep_past" -eq 0 ]; then
+        if [ "$sweep_name" = "$sweep_cursor" ]; then
+          sweep_past=1
+        fi
+        continue
+      fi
+      # The unmatched-glob literal, and anything that vanished between
+      # the glob and here.
+      if [ ! -e "$sweep_entry" ] && [ ! -L "$sweep_entry" ]; then
+        continue
+      fi
+
+      if [ "$sweep_dirs" -ge "$CHECKPOINT_PRUNE_SWEEP_MAX_DIRS" ]; then
+        sweep_halt=1
+        break
+      fi
+      if [ "$sweep_probes" -ge "$CHECKPOINT_PRUNE_SWEEP_MAX_PROBES" ]; then
+        sweep_halt=1
+        break
+      fi
+
+      # Counted and recorded even when it is the current project or a
+      # directory the gates skip for free, so the cursor advances past
+      # everything this run looked at and the next run starts somewhere
+      # new whatever happened here.
+      sweep_dirs=$((sweep_dirs + 1))
+      sweep_last=$sweep_name
+      if [ "$sweep_entry" != "$sweep_current_dir" ]; then
+        sweep_one_slug_dir "$sweep_entry"
+      fi
+
+      if [ "$sweep_pass" -eq 2 ] && [ "$sweep_name" = "$sweep_cursor" ]; then
+        sweep_halt=1
+        break
+      fi
+    done
+    sweep_pass=$((sweep_pass + 1))
+  done
+
+  if [ -n "$sweep_last" ]; then
+    printf '%s\n' "$sweep_last" >"$sweep_cursor_file" 2>/dev/null || true
+  fi
   return 0
 }
 
@@ -2218,8 +2591,16 @@ build_context() {
   # The third pruner, guarded for the reason given at the other two
   # above. Separate `if` rather than folded in with them because it has
   # to run after $session_dir is computed, and that needs $slug.
+  #
+  # THE CURRENT PROJECT GOES FIRST, AND UNBUDGETED. The sweep below
+  # extends this same rule to every OTHER project's slug directory, which
+  # is what stops an abandoned project's checkpoints from living forever;
+  # it is deliberately a SECOND call, after this one and with a probe
+  # budget this one does not have, so that no bound introduced for the
+  # sweep's sake can reach the directory the user is actually opening.
   if [ -n "$home_dir" ]; then
     prune_stale_session_checkpoints "$session_dir"
+    prune_other_project_checkpoints "$checkpoints_dir" "$session_dir" "$squirrel_dir/$PRUNE_CURSOR_NAME"
   fi
 
   injected_real_profile=0
