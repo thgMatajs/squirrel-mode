@@ -181,6 +181,135 @@ assert_exit_code() {
   return 0
 }
 
+# --- Scratch-directory leak lock ---------------------------------------
+#
+# Every test file here creates scratch paths under $TMPDIR and removes
+# them with ONE `trap ... EXIT`. The mechanism has a silent hole, and it
+# was open in three files at once: a helper called as `h=$(new_home)`
+# runs in a SUBSHELL, so `cleanup_paths="$cleanup_paths $h"` inside it
+# dies with that subshell and the trap never learns the path. Measured
+# before the fix, under a private $TMPDIR: one run of tests/run.sh left
+# 443 scratch directories and files behind, ~14 MB, and the header of
+# tests/test_hoard.sh claimed "one EXIT trap for every scratch path"
+# while it was happening.
+#
+# The fix is structural (each file mktemps helper scratch inside ONE
+# registered parent directory, so no registration has to survive a
+# subshell at all); this pair is what stops it silently coming back.
+# scratch_snapshot records what $TMPDIR held before a run;
+# assert_no_scratch_leak fails on anything that appeared during the run
+# and is not scheduled for removal by the trap.
+#
+# PRESENCE, not a count: the assertion names the unscheduled paths
+# instead of comparing "how many are left" against a number, because a
+# number would rot the moment a file gained one scenario, and because
+# these files run on a developer's real $TMPDIR, which already holds
+# other programs' scratch. The snapshot is what makes that residue
+# invisible to the check - it subtracts whatever was already there.
+#
+# NARROWED TO THIS SUITE'S OWN PREFIX, deliberately, and this is what it
+# costs. The snapshot subtracts residue that existed BEFORE the run; it
+# cannot subtract a file some unrelated process drops into $TMPDIR
+# DURING it, and a suite run takes minutes on a real machine whose
+# $TMPDIR is shared with everything else the user is running. Without a
+# filter this lock would eventually go red naming a path the suite never
+# touched - a guard that blocks correct work, which this repo deletes
+# rather than ships. So it only judges entries named `squirrel-*`, which
+# every mktemp template in tests/ uses, scratch roots included. WHAT
+# THAT GIVES UP, since a narrowing that does not say so is the half-true
+# guarantee these files exist to stop: a future helper that mktemps
+# under some other prefix leaks silently, exactly as the four fixed here
+# did. The prefix is the contract; keep to it.
+#
+# NARROW IS ALSO WHAT KEEPS THIS PAIR CHEAP, and that is the second
+# reason it is not negotiable. Both loops below hand the shell a pattern
+# that already carries the prefix, so it expands this suite's own
+# scratch and nothing else. The form they replaced expanded EVERY entry
+# $TMPDIR holds and sorted the names out afterwards, which billed this
+# guard for the user's junk drawer rather than for anything the suite
+# created - and billed it QUADRATICALLY, because appending one path at a
+# time to a shell string makes macOS's /bin/sh (bash 3.2) copy the whole
+# string on every append. Measured in one shell, on entries this suite
+# never made: 1.81 s at 2000 of them, 27.58 s at 8000, 174.12 s at
+# 20000. The $TMPDIR of the machine this was written on holds 176299
+# entries, and one run of tests/test_skills.sh against a 20000-entry
+# $TMPDIR took 383.96 s with the wide walk against 1.08 s with these
+# two - same file, the same 307 assertions, the same verdict. 1.05 s of
+# that second figure is what the file costs on an EMPTY $TMPDIR, so what
+# the narrowing bought back is very nearly the whole of it.
+#
+# scripts/hoard-search.sh carries the identical mechanism under the
+# heading "THE PER-FILE FORM IS QUADRATIC"; read the two together,
+# because this one arrived INSIDE the guard written one round earlier to
+# stop scratch mess. The shape that costs is deliberately not spelled
+# out anywhere in this file: tests/test_shell_dialect.sh greps THIS file
+# for it, and a guard its own subject's comment satisfies is a guard
+# that cannot fail.
+#
+# Called BEFORE the trap fires (the last assertions in a file), so the
+# paths still exist: what is asserted is that each is on the list the
+# trap will remove, not that it is already gone.
+scratch_snapshot() {
+  # scratch_snapshot - the `squirrel-` entries $TMPDIR holds right now,
+  # as "|path|path|...|" for a substring test. Nothing else in this
+  # harness needs the format, so it is a private one rather than a
+  # newline list: `case` can test it with no subshell, no temp file, and
+  # no dependence on how a path sorts.
+  #
+  # STREAMED, NEVER ACCUMULATED. Each path goes straight to this
+  # function's standard output, which every caller is already capturing
+  # with `$( )`, so the cost is linear in what it prints and this
+  # function assigns nothing at all. Growing a variable instead would
+  # keep the copy-per-append above alive on the one list that can still
+  # grow here - the suite's own leftover scratch, which is reachable:
+  # interrupting a run leaves it behind, and one run left 443 paths
+  # before the structural fix described above. Both forms were timed on
+  # 20000 planted `squirrel-` entries, each printing the identical
+  # 3260001 characters: 0.80 s streamed, 392.47 s accumulated.
+  printf '|'
+  for ss_e in "${TMPDIR:-/tmp}"/squirrel-*; do
+    [ -e "$ss_e" ] || continue
+    printf '%s|' "$ss_e"
+  done
+}
+
+assert_no_scratch_leak() {
+  # assert_no_scratch_leak <snapshot> <scheduled paths> <message>
+  #
+  # <snapshot> comes from scratch_snapshot, taken before the file
+  # created anything. <scheduled paths> is the space-joined list the
+  # file's own EXIT trap removes - normally "$cleanup_paths".
+  ansl_before=$1
+  ansl_scheduled=$2
+  ansl_message=$3
+  ansl_leaked=""
+  # This suite's scratch, by the prefix every mktemp template here uses,
+  # selected by the pattern itself rather than by testing each name the
+  # directory happens to hold - see the header above both for what
+  # judging only these gives up and for what walking the whole directory
+  # cost. An unmatched glob stays literal in POSIX sh and the literal
+  # names no file, which is what the `[ -e ]` below drops; it is also
+  # why no separate test of the name survives here, since one that
+  # could never say no is a guard that cannot fail.
+  for ansl_e in "${TMPDIR:-/tmp}"/squirrel-*; do
+    [ -e "$ansl_e" ] || continue
+    case "$ansl_before" in
+      *"|$ansl_e|"*)
+        # Already there before this file ran - not ours.
+        continue
+        ;;
+    esac
+    case " $ansl_scheduled " in
+      *" $ansl_e "*)
+        continue
+        ;;
+    esac
+    ansl_leaked="$ansl_leaked $ansl_e"
+  done
+  assert_eq "" "$ansl_leaked" "$ansl_message"
+  return 0
+}
+
 assert_report() {
   # Prints a machine-parseable summary line that tests/run.sh parses to
   # aggregate results across files, then exits 1 if any assertion in

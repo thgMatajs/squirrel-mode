@@ -39,10 +39,15 @@
 # /squirrel:tune came back completely empty in live runs: the first
 # tool call each of them makes was being parked, not permitted.
 #
-# ONLY THE NO-OPINION PATH CHANGED. The `allow` branch's JSON is
-# byte-for-byte what it always was - it was verified working by live
-# probe both before and after this fix, and was deliberately left
-# untouched. decide() below likewise still speaks in the two internal
+# ONLY THE NO-OPINION PATH CHANGED (at v0.3.1). The `allow` branch's
+# JSON was byte-for-byte what it always was - verified working by live
+# probe both before and after that fix, and deliberately left untouched
+# by it. AMENDED, Task 8 of the hoard phase: its
+# permissionDecisionReason TEXT has since changed, because it named the
+# checkpoint directory for a hoard write too. The JSON's SHAPE - the
+# three keys, their order, one object on one line - is what the probe
+# froze and is still exactly that; see "THE `allow` ARM'S JSON SHAPE IS
+# UNCHANGED" at the emission layer below. decide() below likewise still speaks in the two internal
 # tokens `allow` and `defer`; "defer" remains the right word for the
 # CONCEPT (this hook declines to decide) and is used that way
 # throughout this file. What changed is one thing: what the process
@@ -84,8 +89,43 @@
 # inside it.
 #
 # THIS SCRIPT IS A SECURITY BOUNDARY. `allow` must only ever come back
-# for a path that genuinely, after normalisation, resolves inside
-# $HOME/.squirrel/checkpoints/. A gate and two layers enforce that:
+# for a path that genuinely, after normalisation, NAMES A LOCATION inside
+# one of the two roots this script governs -
+# $HOME/.squirrel/checkpoints/ or $HOME/.squirrel/hoard/. A gate and three
+# layers enforce that, identically for whichever root matched:
+#
+# (CORRECTED, Task 8 of the hoard phase. This sentence named only
+# checkpoints/ until then, so the file's own primary statement of what it
+# guarantees UNDERSTATED the boundary from the moment Task 4 added the
+# second root. The gate and both layers below were already shared by both
+# roots in code; only this description was behind. tests/test_hooks.sh
+# HOARD-13c pins that both roots are NAMED here - it is an
+# assert_contains over this file's own text, so what it proves is that
+# the sentence is PRESENT, never that it is TRUE - and HOARD-13d proves
+# the pin fires on the stale one. The behaviour behind the sentence is
+# proved separately, by running the hook: HOARD-1/2/3 for the two roots
+# and every layer, HOARD-3f..3n for the rest of the attack matrix against
+# the hoard shape, and HOARD-14 for the sub-clause corrected next.)
+#
+# (CORRECTED AGAIN, the hard-link fix, and this correction is the reason
+# the words above are "NAMES A LOCATION" rather than the "resolves
+# inside" they replace. Every reader of the old wording - including the
+# author of the layers below - took it to mean THE BYTES REACHED ARE
+# INSIDE THE ROOT. For a hard link that is false, and it was false in
+# production: `ln $HOME/.ssh/id_rsa $HOME/.squirrel/hoard/global/notes.md`
+# creates a second NAME for the private key inside the governed root, and
+# both a Read and a Write of that name came back `allow` - the key read
+# and overwritten with no prompt, in either root. No layer saw it,
+# because a hard link is not a symlink, is indistinguishable from an
+# ordinary file by every `[ -L ]` test, and leaves the path text
+# completely ordinary. Layer 2b below closes it. What the corrected
+# sentence claims is exactly what the layers check: the NAME, at the
+# moment this hook is asked. Three limits of that claim, each stated
+# where it is enforced rather than only here: it is a decision-time test
+# and nothing in POSIX sh survives the file being swapped between the
+# decision and the tool call it approved (see the `..` section's TOCTOU
+# paragraph); Layer 2b needs `find` and does not run without it; and the
+# secret refusal needs `grep` and does not run without it.)
 #
 #   Layer 0 (the `..` gate, always active, no external tool): a
 #   file_path carrying a `..` PATH COMPONENT defers outright, before
@@ -98,7 +138,10 @@
 #   normalize_path() lexically resolves "." and ".." segments in the
 #   given absolute path AGAINST THE PATH TEXT ITSELF - no filesystem
 #   access, no symlink awareness - and the result is compared against
-#   the checkpoints directory via a LITERAL (non-glob) prefix strip,
+#   EACH GOVERNED ROOT IN TURN (the checkpoints directory, then the
+#   hoard directory; the first one that matches is the root the rest of
+#   decide() reasons about, and no match at all defers) via a LITERAL
+#   (non-glob) prefix strip,
 #   `${normalized#"$prefix"}`, not a `case`/glob pattern match. This
 #   matters: quoting a variable inside a `${var#pattern}` pattern makes
 #   its glob-metacharacters (`*`, `?`, `[`) literal per POSIX, which a
@@ -107,8 +150,11 @@
 #     - prefix-escape: ".../checkpoints-evil/x" is rejected by the
 #       literal prefix strip because "checkpoints-evil" is not
 #       "checkpoints" followed by "/" - the boundary character is
-#       checked, not merely the substring. Layer 1 is the WHOLE defence
-#       here, and its `..` handling is not involved at all.
+#       checked, not merely the substring. ".../hoard-evil/x" is
+#       rejected by the identical strip against the identical boundary
+#       character, which is the whole point of the roots sharing one
+#       loop rather than each getting its own test. Layer 1 is the WHOLE
+#       defence here, and its `..` handling is not involved at all.
 #     - traversal: ".../checkpoints/../../../.ssh/id_rsa" normalizes to
 #       "/.../.ssh/id_rsa", which does not start with the checkpoints
 #       prefix at all - so this defers at Layer 1 too. But Layer 1 is NO
@@ -121,20 +167,146 @@
 #       does not control.
 #   Layer 1 has no symlink awareness at all - a symlink's target is a
 #   filesystem fact, not something present in the path's own text - so
-#   it cannot by itself defeat a symlink planted AT or BELOW
-#   checkpoints_dir.
+#   it cannot by itself defeat a symlink planted AT or BELOW whichever
+#   root matched.
 #
 #   Layer 2 (ALWAYS ACTIVE, the only fallback, zero external tools):
-#   component_walk_has_symlink() tests checkpoints_dir ITSELF, then
-#   walks every path component between checkpoints_dir and the leaf -
+#   component_walk_has_symlink() tests THE MATCHED ROOT ITSELF -
+#   checkpoints_dir or hoard_dir, whichever Layer 1 selected - then
+#   walks every path component between that root and the leaf -
 #   "escape-dir", then "escape-dir/evil.md", and so on - and defers the
 #   instant `[ -L ... ]` (a POSIX shell builtin, not an external
-#   command) finds ANY of them, INCLUDING checkpoints_dir, to be a
+#   command) finds ANY of them, INCLUDING the root itself, to be a
 #   symlink, regardless of where it points. It never calls `realpath`
 #   or `readlink` at all, so it works identically with an empty PATH.
 #   Layer 2 walks the NORMALISED remainder, which is only the same set
 #   of components the OS will actually traverse because Layer 0 has
 #   already removed every `..` from the string - see below.
+#
+#   Layer 2b (the hard-link refusal; needs `find`, and does not run
+#   without it): if the LEAF already exists and is a regular file, its
+#   link count must be 1. This is the one layer that is not free and the
+#   one that is not always active, and both facts are load-bearing enough
+#   to be stated in its name. See "A HARD LINK IS THE ONE ESCAPE THE
+#   COMPONENT WALK CANNOT SEE", below, for the attack, and the code at
+#   the end of decide() for why it is the last test rather than an early
+#   one.
+#
+# A HARD LINK IS THE ONE ESCAPE THE COMPONENT WALK CANNOT SEE (Layer 2b).
+# Layers 0 to 2 all reason about the path: its text, its prefix, and
+# whether any component of it is a symlink. A hard link is none of those
+# things. It is a second directory entry pointing at an inode that
+# already has one somewhere else, it is not distinguishable from "the"
+# file by any test in POSIX `sh`, and the path leading to it is entirely
+# ordinary. Reproduced against this script before the fix, on both roots
+# and for both tools:
+#
+#   printf 'CHAVE\n' > "$HOME/.ssh/id_rsa"
+#   ln "$HOME/.ssh/id_rsa" "$HOME/.squirrel/hoard/global/notes.md"   # no -s
+#
+# Read of that path: `allow`. Write of that path: `allow`. The hook read
+# the user's private key and let it be overwritten, with the permission
+# prompt suppressed by this very script - while the SYMLINK spelling of
+# the identical attack deferred at Layer 2, which is what made the gap
+# easy to miss for anyone reasoning from the tests rather than from the
+# filesystem.
+#
+# THE TEST IS LINK COUNT, AND WHAT IT COSTS IS ONE PROMPT ON A
+# DEDUPLICATED STORE (CORRECTED, cycle 2). Every file either root
+# legitimately holds is created by one Write from this plugin's own flow,
+# and NOTHING THIS PLUGIN DOES gives it a second name. That is a property
+# of the plugin. It is not a property of the user's filesystem, and the
+# sentence here used to claim the stronger thing - "has exactly one name,
+# so this is a guard with no correct traffic behind it". A filesystem-wide
+# deduplicator breaks it without any attack: `jdupes -L`,
+# `rdfind -makehardlinks` and `hardlink(1)` all replace duplicate files
+# with hard links, and two identical memories - or a memory and its own
+# copy elsewhere - become one inode with two names, BOTH of them inside
+# the governed root. Every later read or rewrite of such a file then costs
+# one permission prompt. That is the honest cost of this layer: not zero,
+# but one prompt per deduplicated file, never a denial, on a machine whose
+# owner ran a deduplicator. Two neighbouring cases were checked and are
+# NOT affected: an APFS clone (`cp -c`) leaves nlink at 1, and a directory
+# is never tested at all.
+#
+# A leaf that does not exist yet has no link count and is not tested. A
+# directory is not tested either - directories always carry at least two
+# links, so testing them would defer the legitimate `Read` of a
+# checkpoint's per-project directory for a reason unrelated to this
+# attack. What is left is the one shape with no producer inside this
+# plugin: an existing regular file inside a governed root that some other
+# name also points at.
+#
+# THE COST, AND THE ESCAPE HATCH THIS FILE TOOK. There is no way to read
+# a link count from POSIX `sh` without an external command; `[ ]` has no
+# operator for it and neither does any expansion. `find <file> -links +1`
+# is the narrowest one available (no output parsing, no `stat`, whose
+# flags are not portable between BSD and GNU). The tech-lead rule for
+# this file is that the `allow` path may take one more command - it
+# already REQUIRES `jq` - while the defer path may take no NEW one, so
+# the test is placed after every other decision, where the answer would
+# otherwise already be `allow`. With `find` absent from PATH the layer
+# does not run and the hard link is auto-approved again; that limit is
+# recorded here, in docs/adr/0008-hoard-auto-allow.md, and asserted by
+# tests/test_hooks.sh HOARD-14e, which runs the real hook on a PATH
+# holding only jq, cat and grep - grep is there deliberately, because
+# HOARD-14e's isolation assertion needs the secret refusal to still work
+# - and pins the `allow` it produces.
+#
+# WHAT "THE DEFER PATH TAKES NO NEW COMMAND" MEANS, MEASURED (CORRECTED,
+# cycle 2). It does not mean a defer is free of processes, and the
+# sentence that used to sit here implied that. Counted with shims that
+# log every invocation, on this file as it stands:
+#
+#   over MAX_PAYLOAD_LEN     defer   1 cat
+#   `..` component           defer   1 cat, 2 jq
+#   outside both roots       defer   1 cat, 2 jq
+#   symlink component        defer   1 cat, 2 jq
+#   credential in the body   defer   1 cat, 4 jq, 1 grep
+#   hard link, Read          defer   1 cat, 2 jq, 1 find
+#   hard link, Write         defer   1 cat, 4 jq, 2 grep, 1 find
+#   allow, leaf absent       allow   1 cat, 4 jq, 2 grep
+#   allow, leaf present      allow   1 cat, 4 jq, 2 grep, 1 find
+#   jq absent from PATH      defer   1 cat, 1 sed, 1 head
+#
+# `input=$(cat)` runs on every call before any decision, and the two
+# field extractions run `jq`. The true and narrow claim, and the only one
+# Layer 2b's placement buys, has to be stated with its enumeration
+# attached: EVERY DEFER DECIDED BEFORE LAYER 2B - the five classes above
+# the rule - SPAWNS NO `find`. `find` runs only after every other layer
+# has already said `allow`, and only when the leaf already exists. The
+# sixth and seventh rows are the exception and they are not a leak in the
+# claim: THAT defer is Layer 2b's own, and it is produced BY the `find`,
+# exactly as the credential defer is produced by a `grep`. Writing the
+# claim without its enumeration - "no find on any defer" - is false for
+# precisely those two rows, which is the same shape of overstatement this
+# paragraph exists to correct. HOARD-14f asserts every row of this table.
+#
+# "ASSERTS EVERY ROW" WAS ITSELF FALSE, and it is repaired by adding the
+# assertion rather than by softening the sentence. The table had nine
+# rows and HOARD-14f asserted eight: `allow, leaf absent` - the row that
+# names what Layer 2b's placement actually buys, since the FIRST write of
+# a new memory spawns no `find` at all - was measured correct and never
+# pinned. That is the same defect one iteration after the correction of
+# "scenario 29 said it pinned FOUR claims and pins two": a coverage claim
+# nothing checked. It is now the ninth assertion, with a failure proof
+# that drops the `[ -f "$leaf" ]` guard - which changes no DECISION,
+# only the process count, which is why only a count could see it.
+#
+# THE LAST ROW IS NEW TOO, for the other half of the same defect. A
+# paragraph whose whole job is to enumerate had no row for the machine
+# with no `jq`: that decision spends a `sed` and a `head` - the regex
+# fallback extract_field drops to - and neither tool appeared anywhere
+# above. Nothing in the strong claim breaks (no `find`; the defer is
+# still decided before Layer 2b), so this was an INCOMPLETE enumeration
+# rather than an untrue sentence. Filled in because the three defects
+# this paragraph already records are all exactly that: a true sentence
+# standing in for a complete one.
+#
+# WHY A HARD LINK IS NOT ALSO REJECTED ABOVE THE LEAF: it cannot be
+# there. POSIX forbids hard links to directories, so every component
+# between a governed root and its leaf is either a directory (unlinkable)
+# or a symlink (Layer 2's job). The leaf is the whole surface.
 #
 # WHY A `..` COMPONENT IS REJECTED OUTRIGHT (Layer 0). Layer 1 resolves
 # `..` LEXICALLY - against the path's own text, with no filesystem
@@ -198,10 +370,33 @@
 # component_walk_has_symlink(), below.
 #
 # WHERE THE TRUST BOUNDARY SITS, DELIBERATELY: this walk starts AT
-# checkpoints_dir and never inspects anything above it. `checkpoints/`
-# is created by this plugin itself (on first checkpoint write or
-# `/squirrel:init`), so a symlink AT or BELOW it is never legitimate -
-# every one of those must defer. `$HOME/.squirrel` itself, by contrast,
+# checkpoints_dir and never inspects anything above it. Nothing this
+# plugin's own flow ever produces is a symlink AT or BELOW either
+# governed root, so every one of those must defer.
+#
+# (CORRECTED, audit item 10. That sentence used to justify itself by
+# asserting that the plugin creates these directories - naming the first
+# checkpoint write or `/squirrel:init` for checkpoints/, and saying the
+# same of both roots in component_walk_has_symlink's own doc comment.
+# The stale phrasings are not restated here, so that
+# tests/test_hooks.sh HOARD-18 can forbid them by needle without this
+# correction being the thing its needle finds. It is not true of
+# either root and `grep -rn mkdir` over this repo is the whole
+# disproof: no shipped script, skill or rule creates
+# $HOME/.squirrel/checkpoints/ or $HOME/.squirrel/hoard/. `/squirrel:init`
+# creates $HOME/.squirrel/ and writes profile.md into it, nothing deeper.
+# Both governed roots come into existence IMPLICITLY, as the parent
+# directories the model's first Write to a path inside them creates. The
+# conclusion survives the correction and the reasoning is now the one
+# that actually holds: what makes a symlink there illegitimate is not
+# that this plugin owns the inode, it is that the only mechanism that
+# ever creates either root is a plain file write through this plugin's
+# own flow, and a plain file write never produces a symlink. The cost
+# when this fires is one ordinary permission prompt, never a denial -
+# which is also why the boundary can afford to be drawn this strictly on
+# a directory nobody explicitly created.)
+#
+# `$HOME/.squirrel` itself, by contrast,
 # is ordinary user configuration that this plugin did not create once it
 # exists: dotfile managers (chezmoi, stow, yadm) routinely symlink a
 # whole config directory like this one into a dotfiles repo, and that is
@@ -425,6 +620,68 @@
 # carry. The shape test is also the more conservative of the two: it
 # covers every flat child of checkpoints/, not just the one this project
 # happens to own.
+#
+# ======================================================================
+# ADDED BY THE HOARD, PHASE 1. Self-contained; nothing above this line is
+# restated or amended by it.
+# ======================================================================
+#
+# This script now governs TWO roots under $HOME/.squirrel/: the original
+# `checkpoints/` and the new `hoard/` (durable cross-project memory - see
+# docs/adr/0008-hoard-auto-allow.md and
+# docs/specs/2026-08-13-hoard-design.md).
+#
+# THE SECURITY BOUNDARY DID NOT LOOSEN, IT WAS COPIED. Layer 0 (the `..`
+# rejection), the length cap, Layer 1 (literal prefix strip) and Layer 2
+# (component symlink walk) are shared verbatim by both roots; the walk
+# starts at whichever root matched and, exactly as before, tests that
+# root ITSELF first, so a symlink planted AT hoard/ defers the same way
+# one planted at checkpoints/ does. The whole attack matrix is run
+# against the hoard shape rather than assumed to transfer - see
+# tests/test_hooks.sh's HOARD-* scenarios.
+#
+# (CORRECTED, audit item 8, and the correction was to the TESTS rather
+# than to the claim. When this sentence was written, HOARD-3 held four
+# assertions - a `..` component, a prefix escape, a symlink below the
+# root and a symlink at the root - while the matrix the checkpoint root
+# is held to also contains field shadowing (AB1), the nested decoy (AC1),
+# jq absent, jq returning `null`, jq returning empty, a malformed
+# payload, a file_path over the length cap, and $HOME absent, empty or
+# relative. None of those had ever been run with a hoard path, so "the
+# whole attack matrix" named eight things that had not happened. Running
+# them showed the behaviour does transfer - every one defers - which is
+# what makes the honest fix adding the assertions rather than shrinking
+# the sentence: the claim is now true because the scenarios exist, in
+# HOARD-3f through HOARD-3n, each with the checkpoint-root scenario it
+# mirrors named in its own comment.)
+#
+# TWO RULES DIFFER, deliberately, and both ADD refusals to the hoard
+# root rather than removing any from it. (This paragraph said "ONE RULE
+# DIFFERS" until the secret refusal below was added; it is corrected
+# here rather than left to read as a complete list it no longer is.)
+#
+#   1. A DIRECT CHILD FILE of hoard/ defers for EVERY tool, including
+#      Read, while the same shape under checkpoints/ still allows a Read
+#      (the pre-P1 legacy fold, decision D1 above). The hoard has no
+#      legacy flat layout - every memory lives one level down in global/
+#      or projects/<slug>/ - so the Read exception has nothing to serve
+#      there and is not granted.
+#
+#   2. THE SECRET REFUSAL: a Write or Edit whose written text looks like
+#      it carries a credential does not get auto-approved. It is REFUSAL
+#      OF AUTO-APPROVAL, never a denial - the operation falls back to the
+#      ordinary permission prompt and the user decides, which is exactly
+#      what would happen if this hook did not exist. It is the last line
+#      of a defence whose earlier lines are advisory: the agent writes
+#      memories with the Write tool, so a "do not record secrets" rule
+#      stated in a skill is a request, and this is the only place it is
+#      enforced. Scoped to the hoard root only - a scan over
+#      checkpoints/ would put a permission prompt in the middle of the
+#      one write ADR-0002 exists to keep silent - and to Write/Edit only,
+#      since a Read writes nothing there is to leak. Oversized written
+#      text defers rather than being scanned, on the same reasoning as
+#      MAX_FILE_PATH_LEN. See payload_has_secret() for what it does and
+#      does not claim to detect.
 set -eu
 
 # MAX_FILE_PATH_LEN: the DoS cap (see "FIXED MAJOR" above). 4096 bytes
@@ -434,6 +691,91 @@ set -eu
 # below to a fixed, small number of segments - not to "fast", but to
 # "bounded, and never growing with attacker input".
 MAX_FILE_PATH_LEN=4096
+
+# MAX_SCAN_LEN: the bound on how much written text is scanned for
+# credentials. A memory body is a title and a short paragraph; 65536 is
+# far past anything legitimate. Beyond it, the write DEFERS
+# rather than being scanned - an unbounded scan of attacker-controlled
+# text is a cost that grows with attacker input, which is the property
+# MAX_FILE_PATH_LEN exists to remove too, and deferring is this script's
+# cost for every answer it will not give.
+#
+# WHAT MAX_FILE_PATH_LEN CLOSES IS NOT WHAT THIS ONE CLOSES (CORRECTED,
+# hard-link/measurement fix). This comment used to call the two "the same
+# shape of exposure". They are not the same shape and the difference is
+# the whole reason the third cap below exists. MAX_FILE_PATH_LEN bounds a
+# QUADRATIC cost - normalize_path and component_walk_has_symlink are
+# O(segments^2), so a few thousand segments already cost seconds (the
+# measurements are in the "FIXED MAJOR" paragraph above). The scan below
+# is LINEAR in the text it walks. Linear is not free - it is unbounded
+# unless something bounds it - but capping it is a bound on a straight
+# line, not the removal of a curve, and saying otherwise overstated what
+# one of the two caps was doing.
+#
+# WHAT `${#var}` COUNTS IS DECIDED BY THE LOCALE, and the cap is
+# therefore looser OR TIGHTER than 65536 bytes depending on where this
+# hook runs (CORRECTED, measurement fix). This comment used to state
+# without qualification that "THE UNIT IS CHARACTERS, NOT BYTES ... POSIX
+# defines as the length in CHARACTERS", and concluded the cap was loose -
+# up to roughly four times 65536 bytes. That is only the multibyte-locale
+# half of the truth. Under LC_ALL=C the same expansion counts BYTES, so
+# the cap is TIGHTER there, and the difference is observable end to end:
+# one 40000-character payload of `€` (three bytes each) DEFERS under
+# LC_ALL=C and is AUTO-APPROVED under LC_ALL=en_US.UTF-8, same hook, same
+# input, same machine. Apple's /bin/dash counts bytes under both.
+# docs/adr/0008-hoard-auto-allow.md had this right from the start - "the
+# 65536 cap admits between 65536 bytes and roughly four times that many"
+# - and this comment was the copy that fell behind it.
+#
+# What survives either reading, and the only property the cap is here
+# for: it is a FIXED bound at both ends and it never grows with attacker
+# input. Tightening it to an exact byte count would mean an external
+# command on the hot path of every hoard write, which is the wrong trade.
+# MAX_FILE_PATH_LEN and MAX_PAYLOAD_LEN are measured the same way and
+# carry the same locale slack.
+MAX_SCAN_LEN=65536
+
+# MAX_PAYLOAD_LEN: the bound on the WHOLE stdin payload, applied before
+# any field is extracted from it.
+#
+# WHY IT EXISTS (added by the measurement fix). The comment beside the
+# secret scan below used to say "Both length caps are applied BEFORE
+# either scan, so no oversized string is walked by `case` or handed to
+# `grep` on any path." That was true of the SCAN and false of everything
+# in front of it. `${#written}` cannot exist until `written` does, and
+# `written=$(extract_tool_input_field "$input" "content")` has by then
+# run `jq` over the entire payload and materialised the entire field.
+# The same is true one step earlier still: `tool_name` and `file_path`
+# are each read by a `jq` invocation over the whole payload, before ANY
+# cap in this file has been consulted, on EVERY tool call this hook sees.
+# Measured on this machine, 32 MB of `content` in one payload, before
+# this cap existed: 8.22s wall and 407 MB peak RSS for a hoard write
+# (which reaches the scan), 2.91s and 237 MB for a checkpoint write
+# (which does not) - so even the path with no scan at all was paying for
+# two full parses of an attacker-sized string. Machine-specific numbers,
+# not a portable guarantee; the shape is what matters.
+#
+# 1048576 is sixteen times MAX_SCAN_LEN and orders of magnitude past any
+# real Write, Edit or Read payload Claude Code emits for a path this hook
+# can approve. Over it, this script defers - one ordinary permission
+# prompt - before `jq` is invoked even once. It is checked with
+# `${#input}`, a shell parameter expansion, so the cap itself adds no
+# command to any path, including the defer path.
+#
+# The same 32 MB payloads, same machine, after this cap: 0.71s / 273 MB
+# for the hoard write and 0.70s / 273 MB for the checkpoint write - the
+# two paths converge because neither now parses anything.
+#
+# WHAT THIS CAP DOES NOT BOUND, said plainly rather than left to be
+# rediscovered: `input=$(cat)` runs BEFORE it and reads whatever the
+# harness hands this process, so the residual 0.70s and 273 MB above are
+# stdin itself and are not removed by any number written here. Bounding
+# THAT would mean reading stdin incrementally and abandoning it partway,
+# which POSIX `sh` cannot do without an external command on the entry
+# path of every file operation in the session. What the cap removes is
+# every DERIVED copy and every parse: nothing past this point is
+# proportional to an oversized payload.
+MAX_PAYLOAD_LEN=1048576
 
 extract_field() {
   # extract_field <json> <key>: reads a TOP-LEVEL string field ONLY,
@@ -663,10 +1005,15 @@ normalize_path() {
 # component_walk_has_symlink <base> <relative-path>: THE Layer 2
 # defence, and - since the cycle-3 fix - the ONLY symlink defence this
 # script has (see "LAYER 3 WAS REMOVED" above). First tests <base>
-# ITSELF (this is the cycle-3 BLOCKER fix: <base> is always
-# checkpoints_dir at the one call site below, and a symlink planted
-# there is never legitimate - see the header's trust-boundary note for
-# why this stops at <base> and never inspects anything above it). Then
+# ITSELF (this is the cycle-3 BLOCKER fix: <base> is the root Layer 1
+# matched - checkpoints_dir or hoard_dir, never a fixed one - at the one
+# call site below, and a symlink planted at either root is never
+# legitimate, because the only thing that ever creates either root is a
+# plain file write through this plugin's own flow and a plain file write
+# never produces a symlink - see the header's trust-boundary note, which
+# records which earlier justification this replaced and why that one was
+# false, and why this stops at <base> and never inspects anything above
+# it). Then
 # walks every component of <relative-path> - for "escape-dir/evil.md"
 # that is "escape-dir", then "escape-dir/evil.md" - joined onto <base>,
 # and returns 0 (true - a symlink WAS found) the instant `[ -L ... ]`
@@ -708,8 +1055,125 @@ component_walk_has_symlink() {
   return 1
 }
 
+payload_has_secret() {
+  # payload_has_secret <text>: 0 (true) when <text> looks like it carries
+  # a credential. Used ONLY to withhold auto-approval for a hoard write -
+  # never to deny one. A hit costs the user one ordinary permission
+  # prompt, which is exactly what would happen if this hook did not exist.
+  #
+  # PRECISION IS NOT THE POINT HERE, AND THAT IS DELIBERATE. A false
+  # positive costs one prompt on one write; a false negative writes a
+  # credential into a store that is re-read in every future session, in
+  # every project. The two costs are not comparable, so the patterns
+  # below are the unambiguous shapes only - PEM private-key headers and
+  # provider token prefixes - plus one assignment-shaped rule for the
+  # `<name> = <long opaque string>` case that carries no prefix of its
+  # own. It is not, and does not claim to be, a complete secret scanner.
+  #
+  # THE ASSIGNMENT RULE'S KEY NAME IS A SUBSTRING OF THE NAME, NOT THE
+  # WHOLE NAME (FIXED, audit item 2). The rule used to require one of its
+  # keywords to sit IMMEDIATELY before the `[:=]`, which meant every
+  # compound name escaped it while the rule's own comment claimed to
+  # cover "the `api_key = <long opaque string>` case". An AWS secret
+  # access key IS that case, and `aws_secret_access_key = <40 opaque
+  # chars>` was auto-approved; so were `secret_key = ...`,
+  # `password_hash=...` and `token_value: ...`, while the bare
+  # `api_key = ...` deferred. A `[A-Za-z0-9_-]*` run is now allowed
+  # between the keyword and the separator, so the keyword may sit
+  # anywhere in the name rather than only at its end.
+  #
+  # THE VALUE MAY CARRY PUNCTUATION (FIXED, audit item 3). The value
+  # class used to be `[A-Za-z0-9/+_-]{16,}`, which breaks at the first
+  # character outside it: `password = Tr0ub4dor&3xK9!zQmW#pL2vN` was
+  # auto-approved because of the `&`. The class is now
+  # `[^[:space:]]{16,}` - any run of sixteen or more non-blank
+  # characters. `grep` matches within one line, so this can never run
+  # past a line ending; it is a run inside one line, not the rest of the
+  # file. The widening is stated in ADR-0008 with the false positives it
+  # buys, because it does buy some: a prose value of sixteen unbroken
+  # characters after a keyword-bearing name now defers too.
+  #
+  # The caller is responsible for bounding <text> to MAX_SCAN_LEN BEFORE
+  # calling this: neither the `case` below nor `grep` is given an
+  # unbounded attacker-controlled string to walk.
+  #
+  # WHAT IT STOPS CATCHING WITH `grep` ABSENT FROM PATH, stated here and
+  # in docs/adr/0008-hoard-auto-allow.md rather than left for someone to
+  # find. The `case` arms are pure shell and always run, so PEM headers
+  # and provider token prefixes still defer. The assignment rule below
+  # is the only part that shells out, and with no `grep` on PATH the
+  # pipeline fails, `-q` reports no match, and `api_key = <opaque
+  # string>` is auto-approved. It degrades safely - it never crashes,
+  # never denies, and never turns a defer into a wrong allow for a
+  # credential the `case` arms know - but that class stops being caught.
+  #
+  # AND WHAT IT CATCHES THAT IS NOT A CREDENTIAL. The prefixes above are
+  # matched as SUBSTRINGS, unanchored, so ordinary prose containing
+  # AKIA, AIza, sk-ant or ghp_ defers - a memory ABOUT this guard would,
+  # and so would the word MAKIAVELIAN. The two widenings recorded above
+  # add their own: a name is matched by a keyword ANYWHERE inside it, so
+  # `secretary:` and `tokens_left=` reach the rule, and a value is any
+  # sixteen unbroken characters, so `password: correct-horse-battery`
+  # does too. Each costs one permission prompt, never a denial. That
+  # asymmetry is the design and is argued in full in ADR-0008.
+  phs_text=$1
+  case "$phs_text" in
+    # `PRIVATE KEY-----` (ADDED, audit item 4) catches every PEM private
+    # key by its delimiter rather than by algorithm: DSA - which the five
+    # explicit arms below missed and which was auto-approved - and any
+    # algorithm invented after this line was written. The five explicit
+    # arms are kept beside it rather than folded into it: they also match
+    # a header whose trailing dashes have been stripped or reflowed,
+    # which the delimiter arm by construction cannot.
+    *"PRIVATE KEY-----"* | \
+    *"BEGIN RSA PRIVATE KEY"* | *"BEGIN OPENSSH PRIVATE KEY"* | \
+    *"BEGIN PRIVATE KEY"* | *"BEGIN EC PRIVATE KEY"* | \
+    *"BEGIN PGP PRIVATE KEY"*)
+      return 0
+      ;;
+    # Provider token prefixes. `sk-proj-` (OpenAI project keys),
+    # `sk_live_`/`sk_test_` (Stripe), `glpat-` (GitLab personal access
+    # tokens), `GOCSPX-` (Google OAuth client secrets) and `xapp-1-`
+    # (Slack app-level tokens) were ADDED by audit item 4; every one of
+    # them was auto-approved before. Which families were deliberately
+    # left OUT, and why, is in docs/adr/0008-hoard-auto-allow.md - the
+    # short version is that a prefix is a false-positive surface as well
+    # as a catch, and `ASIA` (AWS STS) or a bare `sk-` would fire on the
+    # continent and on the word "task-force" respectively.
+    *sk-ant-* | *sk-proj-* | *sk_live_* | *sk_test_* | \
+    *ghp_* | *gho_* | *github_pat_* | *glpat-* | \
+    *AKIA* | *xoxb-* | *xoxp-* | *xapp-1-* | *GOCSPX-* | *AIza*)
+      return 0
+      ;;
+  esac
+  # The bracket expressions carry a literal double quote and a literal
+  # single quote (the two ways a value is commonly wrapped). Spelled as a
+  # DOUBLE-quoted assignment with the double quotes backslash-escaped and
+  # the single quotes written plainly - the equivalent single-quoted
+  # spelling needs the '"'"' splice four times over and is a transcription
+  # hazard for no gain. There is no `$` or backtick in the pattern, so
+  # double quoting expands nothing.
+  phs_re="(api[_-]?key|secret|token|password|passwd)[A-Za-z0-9_-]*[\" ']*[[:space:]]*[:=][[:space:]]*[\" ']*[^[:space:]]{16,}"
+  if printf '%s' "$phs_text" | grep -qiE "$phs_re"; then
+    return 0
+  fi
+  return 1
+}
+
 decide() {
   input=$(cat)
+
+  # PAYLOAD CAP, FIRST OF EVERYTHING (see MAX_PAYLOAD_LEN above). This
+  # has to precede the two extractions below, not merely the scan: each
+  # of them invokes `jq` over the WHOLE payload, so a cap applied to
+  # their RESULTS bounds nothing about the work that produced them.
+  # `${#input}` is a shell parameter expansion, so this adds no command
+  # to any path - the defer path included.
+  if [ "${#input}" -gt "$MAX_PAYLOAD_LEN" ]; then
+    printf 'defer'
+    return 0
+  fi
+
   tool_name=$(extract_field "$input" "tool_name")
   file_path=$(extract_tool_input_field "$input" "file_path")
 
@@ -780,26 +1244,98 @@ decide() {
   # producing a false "defer" for an otherwise legitimate write - a
   # safe failure mode (never a false "allow"), but still a correctness
   # bug worth closing rather than shipping.
+  # TWO ROOTS, ONE BOUNDARY (phase 1 of the hoard). This script now
+  # governs `checkpoints/` and `hoard/`. Every layer above and below is
+  # shared verbatim: the `..` rejection, the length cap, the literal
+  # prefix strip and the component symlink walk all run identically on
+  # whichever root matched. Two rules differ between
+  # them - the direct-child rule below, and the secret refusal further
+  # down - and each difference is stated where it is applied. (This said
+  # "Only the direct-child rule differs" until Task 8. It was false the
+  # moment the secret refusal landed; the file's header was corrected
+  # then and this comment was not, which is the whole reason a list that
+  # claims to be complete has to be checked against the code below it.)
+  #
+  # THIS SCRIPT'S NAME NOW NAMES ONLY ONE OF THE TWO ROOTS IT GOVERNS.
+  # That is a known, deliberate mismatch, not an oversight: renaming it
+  # touches hooks/hooks.json and, in tests/test_hooks.sh, the three
+  # figures recorded below. Doing that in the same change that widens a
+  # security boundary braids two risky edits together. The rename is
+  # deferred to the phase that rewrites this file's ADR trail. Recorded
+  # here so the mismatch is documented rather than discovered.
+  #
+  # THE FIGURES WERE NEVER RIGHT, AND NOTHING RECOUNTED THEM (FIXED,
+  # audit item 7). This note used to read "103 occurrences of the literal
+  # filename plus 136 uses of the variable built from it - counted, not
+  # estimated, against the 8300-line file this note was written beside,
+  # because the figure it replaced ('roughly forty') was neither." At the
+  # commit that introduced that sentence the file held 104, 146 and 8510;
+  # no counting method available produces 136 or 8300, so the sentence
+  # censured an estimate for being an estimate while being wrong itself,
+  # in the same breath, twice. The fix is not a better number - a number
+  # nobody rechecks rots again on the next edit, which is exactly how
+  # this one rotted. The three figures are written below one per line, in
+  # a fixed shape a machine can read, and tests/test_hooks.sh
+  # RENAME-COUNT re-derives all three on every run and fails with the
+  # recomputed values when any of them has drifted. That test is the
+  # reason these numbers can be trusted; the numbers themselves are just
+  # its last known-good state.
+  #
+  # "occurrences" below means what the test counts, stated exactly so the
+  # words and the assertion cannot disagree: every occurrence of the
+  # literal string, and every occurrence of the identifier (which
+  # includes the one line that assigns it, not only the uses of it).
+  #
+  #   rename-cost literal-occurrences: 122
+  #   rename-cost identifier-occurrences: 198
+  #   rename-cost test-file-lines: 11680
   checkpoints_dir=$(normalize_path "$home_dir/.squirrel/checkpoints") || checkpoints_dir="$home_dir/.squirrel/checkpoints"
+  hoard_dir=$(normalize_path "$home_dir/.squirrel/hoard") || hoard_dir="$home_dir/.squirrel/hoard"
 
   normalized=$(normalize_path "$file_path") || { printf 'defer'; return 0; }
 
-  # Layer 1: literal (non-glob) prefix containment.
-  prefix="$checkpoints_dir/"
-  after=${normalized#"$prefix"}
-  if [ "$after" = "$normalized" ] || [ -z "$after" ]; then
+  # Layer 1: literal (non-glob) prefix containment, against each root in
+  # turn. `${normalized#"$prefix"}` with the variable QUOTED inside the
+  # pattern is what keeps a `*` or `[` in $HOME literal - see the Layer 1
+  # paragraph in this file's header; a `case ... in $prefix*)` would not
+  # guarantee that.
+  root=""
+  after=""
+  for candidate in "$checkpoints_dir" "$hoard_dir"; do
+    prefix="$candidate/"
+    rest=${normalized#"$prefix"}
+    if [ "$rest" != "$normalized" ] && [ -n "$rest" ]; then
+      root=$candidate
+      after=$rest
+      break
+    fi
+  done
+  if [ -z "$root" ]; then
     printf 'defer'
     return 0
   fi
 
-  # Layer 1b (P1, tech-lead decision D1): a DIRECT CHILD FILE of
-  # checkpoints/ - no further "/" in the remainder - is the pre-P1 flat
-  # layout. Reading one is legitimate (that is how the legacy file gets
-  # folded in); writing one is not, because post-P1 nothing correct
-  # targets it. See the P1 paragraph in this file's header.
+  # Layer 1b, and the first of the TWO places the two roots diverge (the
+  # secret refusal below is the second; this comment said "the ONE
+  # place" until Task 8, which the secret refusal had already falsified).
+  #
+  # checkpoints/: a direct child file is the pre-P1 flat layout. Reading
+  # one is legitimate (that is how the legacy file gets folded in);
+  # writing one is not. Unchanged from before the hoard existed.
+  #
+  # hoard/: a direct child file is legitimate for NOTHING. Every memory
+  # lives one level down, in global/ or projects/<slug>/, and there is no
+  # legacy flat layout to fold in - so the Read exception has nothing to
+  # serve here and is not granted. Both are tripwires with no correct
+  # traffic behind them, and the cost when either fires is one ordinary
+  # permission prompt, never a denial.
   case "$after" in
     */*) ;;
     *)
+      if [ "$root" = "$hoard_dir" ]; then
+        printf 'defer'
+        return 0
+      fi
       case "$tool_name" in
         Read) ;;
         *)
@@ -811,12 +1347,187 @@ decide() {
   esac
 
   # Layer 2: unconditional POSIX component walk (see header) - the
-  # only, always-active fallback, zero external tools. Tests
-  # checkpoints_dir itself first, then defers the instant any component
-  # between checkpoints_dir and the leaf is itself a symlink.
-  if component_walk_has_symlink "$checkpoints_dir" "$after"; then
+  # only, always-active fallback, zero external tools. Tests $root -
+  # whichever of checkpoints_dir and hoard_dir the loop above matched -
+  # itself first, then defers the instant any component between that
+  # root and the leaf is itself a symlink. One call, one walk, both
+  # roots: a symlink planted AT hoard/ defers exactly as one planted at
+  # checkpoints/ does, and that is a property of passing $root here
+  # rather than of a second copy of this check.
+  if component_walk_has_symlink "$root" "$after"; then
     printf 'defer'
     return 0
+  fi
+
+  # THE SECRET REFUSAL applies to the hoard root only, and only to a
+  # tool that writes. checkpoints/ is excluded on purpose: its content
+  # is the model's own Doing/Next state, it is rewritten every turn under
+  # rule 14, and adding a scan there would put a permission prompt in the
+  # middle of a task for the one write ADR-0002 exists to keep silent.
+  #
+  # BOTH written fields are read and BOTH are scanned - `content` (what
+  # Write carries) and `new_string` (what Edit carries) - rather than
+  # reading `content` and only falling back to `new_string` when it is
+  # empty. That fallback shape is bypassable in exactly the way this
+  # file's header records for file_path (S10 review, AB1): `content` is
+  # not a parameter the Edit tool reads, so a payload carrying a benign
+  # one alongside a credential-bearing `new_string` would have had its
+  # DECOY scanned and its real write auto-approved. A field the tool does
+  # not read must never be able to satisfy a check on the field it does.
+  # See tests/test_hooks.sh HOARD-5's field-shadowing assertions.
+  #
+  # Both length caps are applied BEFORE either scan, so no oversized
+  # string is walked by `case` or handed to `grep`.
+  #
+  # WHAT THAT SENTENCE DOES NOT COVER, AND USED TO CLAIM IT DID
+  # (CORRECTED, measurement fix). It used to end "on any path", which
+  # read as a statement about the whole hook and was one about the two
+  # `case`/`grep` calls only. By the time `${#written}` can be evaluated,
+  # `extract_tool_input_field` has already run `jq` over the entire
+  # payload and materialised the entire field - the cap bounds what is
+  # SCANNED, never what was PARSED to produce it. MAX_PAYLOAD_LEN, tested
+  # at the top of decide() before any extraction runs, is what bounds
+  # that; see its own comment for the measurements that motivated it.
+  if [ "$root" = "$hoard_dir" ]; then
+    case "$tool_name" in
+      Write | Edit)
+        written=$(extract_tool_input_field "$input" "content")
+        written_new=$(extract_tool_input_field "$input" "new_string")
+        if [ "${#written}" -gt "$MAX_SCAN_LEN" ] || [ "${#written_new}" -gt "$MAX_SCAN_LEN" ]; then
+          printf 'defer'
+          return 0
+        fi
+        if payload_has_secret "$written" || payload_has_secret "$written_new"; then
+          printf 'defer'
+          return 0
+        fi
+        ;;
+    esac
+  fi
+
+  # LAYER 2b: THE HARD-LINK REFUSAL (see "A HARD LINK IS THE ONE ESCAPE
+  # THE COMPONENT WALK CANNOT SEE" in the header for the attack and the
+  # reproduction).
+  #
+  # PLACED LAST, DELIBERATELY, AND THAT PLACEMENT IS THE WHOLE REASON
+  # THIS IS AFFORDABLE. It runs ONLY where the answer would otherwise
+  # already be `allow`: every defer above - a `..` component, an over-cap
+  # path, a path outside both roots, a symlink, a credential - is reached
+  # WITHOUT SPAWNING `find`. `jq` is already a hard requirement of this
+  # exact path (no `jq`, no `allow`, ever - see the header), so one more
+  # command HERE costs a path that already pays for one; one more command
+  # on the defer path would have been a new cost on every file operation
+  # in the session, and is not what this is.
+  #
+  # (CORRECTED, cycle 2. This paragraph used to open "It is the only test
+  # in this file that spawns a process", which is false three times over:
+  # `input=$(cat)` at the top of decide() spawns one on EVERY call before
+  # any decision is taken, both field extractions spawn `jq`, and
+  # payload_has_secret spawns `grep` - twice on an allowed hoard write,
+  # once on a credential defer, which is a defer PRODUCED BY a spawned
+  # process. The measured per-path table is in this file's header, beside
+  # "THE COST, AND THE ESCAPE HATCH THIS FILE TOOK". What is true, and is
+  # all that this placement ever bought, is the sentence above WITH its
+  # enumeration attached: every defer decided BEFORE this rule spawns no
+  # `find`. Dropping the enumeration - "no `find` on any defer" - would be
+  # false, because THIS rule's own defer is produced by a `find`, exactly
+  # as the credential defer is produced by a `grep`. A correction that
+  # over-reaches is the defect it was correcting.)
+  #
+  # `[ -f ]` FIRST, for two reasons and not only for the spawn it saves.
+  # A leaf that does not exist yet - the ordinary case for a brand-new
+  # checkpoint or memory write - has no link count to read and cannot be
+  # a hard link to anything. And a DIRECTORY always has a link count of
+  # at least two (its own `.`), so testing one would defer
+  # `Read $HOME/.squirrel/checkpoints/<slug>` - a legitimate, allowed
+  # shape - for a reason that has nothing to do with hard links. Only an
+  # existing REGULAR FILE is asked.
+  #
+  # THIS NEEDS `find`, AND WITH `find` ABSENT IT DOES NOT RUN. That is
+  # the same shape of degradation `grep` already has for the secret scan
+  # (see payload_has_secret), it is deliberate rather than overlooked,
+  # and it is stated here, in docs/adr/0008-hoard-auto-allow.md, and
+  # pinned by tests/test_hooks.sh HOARD-14e so the limit and the code
+  # cannot drift apart. Deferring instead when `find` is missing was
+  # considered and rejected: it would put a permission prompt on every
+  # checkpoint write on such a machine, which is a guard that bars
+  # correct work, and the hard-link hole it would close is exactly the
+  # hole that exists today.
+  #
+  # `find <file> -links +1` prints the file when its link count is
+  # greater than one and prints nothing otherwise - no output parsing, no
+  # `stat`, whose flags differ between BSD and GNU. `find` is already in
+  # this repo's shipped-command inventory (docs/ACCEPTANCE.md), so this
+  # adds a command to one path, not a dependency to the plugin.
+  #
+  # THE OUTPUT MUST BE WELL FORMED, NOT MERELY NON-EMPTY (FIXED, cycle 2).
+  # This used to read `[ -n "$(find ...)" ]`: ANY byte on stdout was taken
+  # for "link count above one". Measured against a `find` shim that prints
+  # one unrelated line - a wrapper with a banner is all it takes - an
+  # ORDINARY in-place rewrite of an ordinary one-link checkpoint came back
+  # `defer`, which is a permission prompt on the exact write ADR-0002
+  # exists to keep silent, for a file with nothing wrong with it. The test
+  # is now that some LINE of the output is the leaf's own path, which is
+  # what `find` prints and what a banner is not. A noisy `find` that still
+  # reports the match therefore still defers; a noisy `find` with nothing
+  # to report no longer blocks correct work.
+  #
+  # A LEAF WHOSE NAME CARRIES A NEWLINE cannot be compared line-wise
+  # against line-oriented output, so for that shape - and only that shape
+  # - any output at all defers, which is what the old test did for every
+  # shape. It is the conservative reading, it costs at most one prompt,
+  # and nothing this plugin writes has that name.
+  #
+  # THE EXIT STATUS IS DELIBERATELY NOT CONSULTED, and that is a stated
+  # limit rather than an oversight. There is no reading of it that changes
+  # an answer: a `find` that fails and a file with exactly one link both
+  # mean "no hard link was proven here", and this layer's rule for an
+  # unproven hard link is `allow` - the same answer it gives with `find`
+  # absent from PATH entirely, for the same reason (see the paragraph
+  # above: deferring would put a prompt on every write on such a machine).
+  # So a `find` that exits 127, or 1, or is a shim that does nothing, is
+  # treated exactly as an absent one. What CANNOT be closed from POSIX
+  # `sh` is a `find` that never returns: there is no portable timeout, so
+  # a wedged `find` on PATH hangs this hook. Both limits are in
+  # docs/adr/0008-hoard-auto-allow.md and pinned by HOARD-14f.
+  leaf="$root/$after"
+  if [ -f "$leaf" ] && command -v find >/dev/null 2>&1; then
+    hl_out=$(find "$leaf" -links +1 2>/dev/null) || true
+    hl_nl='
+'
+    hl_cr=$(printf '\r')
+    hl_hit=no
+    case "$hl_nl$hl_out$hl_nl" in
+      *"$hl_nl$leaf$hl_nl"*) hl_hit=yes ;;
+      # A TRAILING CR IS ACCEPTED TOO, and that is the one line-formatting
+      # variant closed rather than documented. A `find` behind a CRLF
+      # wrapper prints "<path>\r\n", so the line this reads is the leaf
+      # followed by one CR - it NAMES the file exactly, and losing that
+      # match auto-approved a genuine hard link. Costs no process and no
+      # new tool. Measured with a real shim before and after.
+      #
+      # WHAT IS DELIBERATELY NOT MATCHED, measured the same way and left
+      # open: a `find` printing "./<path>" and one printing only the
+      # basename both still auto-approve. Both name the file; neither
+      # spells the absolute path this layer built, and matching either
+      # means matching a SUBSTRING of a line rather than the line - at
+      # which point a banner merely CONTAINING the basename defers every
+      # ordinary rewrite again, which is the exact defect the line-wise
+      # comparison was introduced to fix. They fall into the documented
+      # "a find that never names the leaf" limit; what was missing from
+      # the ADR and from this comment was that LINE FORMATTING is a way
+      # into that limit at all. A duplicate path on two lines was checked
+      # and is unaffected - one of those lines is an exact match, so it
+      # still defers.
+      *"$hl_nl$leaf$hl_cr$hl_nl"*) hl_hit=yes ;;
+    esac
+    case "$leaf" in
+      *"$hl_nl"*) [ -z "$hl_out" ] || hl_hit=yes ;;
+    esac
+    if [ "$hl_hit" = yes ]; then
+      printf 'defer'
+      return 0
+    fi
   fi
 
   printf 'allow'
@@ -832,13 +1543,30 @@ fi
 # THE EMISSION LAYER (see "HOW 'NO OPINION' IS EXPRESSED" in the header).
 # decide() still speaks in the two internal tokens `allow` and `defer`;
 # only the translation into what this process actually WRITES changed.
-# The `allow` arm is byte-for-byte the JSON it has always been - it is
-# the verified-working half and was deliberately not touched. The
-# no-opinion arm prints NOTHING at all, which is the documented way for
-# a PreToolUse hook to decline to decide.
+# The no-opinion arm prints NOTHING at all, which is the documented way
+# for a PreToolUse hook to decline to decide.
+#
+# THE `allow` ARM'S JSON SHAPE IS UNCHANGED; ITS REASON TEXT IS NOT
+# (Task 8). Until then this comment said the arm was byte-for-byte what
+# it had always been, and that stopped being accurate here rather than
+# staying true by being left alone. What was frozen after the v0.3.1
+# live probe is the SHAPE - the same three keys, in the same order, in
+# one object on one line - and that is untouched: same
+# hookSpecificOutput, same hookEventName, same permissionDecision. Only
+# permissionDecisionReason's text changed, because the old text told the
+# user that a HOARD write "targets its own checkpoint directory", which
+# is not where that write was going. It is a string the user reads.
+#
+# ONE ARM, ONE STRING, NO BRANCH. The reason names both governed
+# directories rather than the one that matched, so there is still
+# exactly one `allow` emission in this file and no place for two
+# spellings to drift apart. tests/test_hooks.sh HOARD-13 pins the whole
+# line byte for byte, asserts a hoard allow and a checkpoint allow emit
+# the IDENTICAL line, and asserts this file carries exactly one such
+# emission - none of which was pinned by anything before Task 8.
 case "$decision" in
   allow)
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: operation targets its own checkpoint directory (ADR-0002)."}}\n'
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"squirrel-mode: operation targets one of its own data directories - checkpoints or hoard (ADR-0002, ADR-0008)."}}\n'
     ;;
   *)
     :

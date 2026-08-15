@@ -32,6 +32,24 @@ Named plainly instead:
 - **Rule 16 (Match tone).** `tone` is a register preference (`neutral`/`warm`/`terse`); nothing
   here claims one register improves comprehension over another for anyone.
 
+**Not a base rule, and registered here for the same reason.** The entry below is a constant in a
+shipped script rather than one of the sixteen, so it is deliberately not written in the `Rule N`
+form the six above use — the partition of the sixteen is unchanged by it. It is here because the
+question this section answers ("what looks like it has evidence behind it and does not?") is the
+same question, and a number in a scoring function is exactly the kind of thing a later reader
+mistakes for a result.
+
+- **The hoard's scoring weights** — three constants in `scripts/hoard-search.sh`, checked against
+  that file rather than against the design document that proposed them: the decay base `0.16` and
+  the importance sensitivity `0.8` inside `lambda = 0.16 * (1 - imp * 0.8 / 5)`, and the
+  reinforcement coefficient `0.2` inside `(1 + 0.2 * log(1 + uses))`. Importance also enters the
+  score directly, as `imp / 5`, and it does so linearly — there is no exponent anywhere in that
+  expression, and an earlier draft of this entry named one. They are conventional choices for that
+  shape of scoring function. They have never been measured against a real store at real scale, and
+  no finding is claimed for them. They are stated here so a later reader does not mistake an
+  arbitrary constant for a result, and `docs/specs/2026-08-13-hoard-design.md` §5 says the same
+  thing at the point where they are specified.
+
 ## What this document is not
 
 This is not a systematic review. It is not exhaustive, it was not produced by a structured search

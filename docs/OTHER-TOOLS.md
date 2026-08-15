@@ -7,13 +7,13 @@ feature set; this page states the practical consequences plainly, with no hedgin
 
 ## Parity at a glance
 
-| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |
-| :-- | :-- | :-- | :-- | :-- |
-| Claude Code | output style, `force-for-plugin` | **8** namespaced skills | `SessionStart` hook | `PreToolUse` hook |
-| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no |
+| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints | Hoard |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
+| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
+| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no | no |
 
-## Which commands port, and why the other four cannot
+## Which commands port, and why the other six cannot
 
 | Command | Claude Code | Codex | Cursor | Reason |
 | :-- | :-- | :-- | :-- | :-- |
@@ -23,6 +23,8 @@ feature set; this page states the practical consequences plainly, with no hedgin
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |
 | `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
 | `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
+| `stash` | ✅ | ❌ | ❌ | Not built for either target in phase 1 of the hoard, and porting it is a rewrite rather than a copy. It writes a memory with Claude Code's `Write` tool, which it names explicitly because that is what the `PreToolUse` hook auto-approves — the memory *write* therefore costs no permission prompt there, though the command still costs one for the `date` stamp it builds, which is a `Bash` call: squirrel-mode registers its `PreToolUse` hook for `Write|Edit|Read` only, so none of its hooks runs on that call — a choice of this plugin's configuration, not a limit of Claude Code, as README.md sets out. Neither other target has that tool name or that auto-approval, so every sentence resting on the mechanism has to be rewritten for what the target actually does. The files themselves are plain markdown under `~/.squirrel/hoard/`, so a memory written on Claude Code is readable from anywhere. |
+| `dig` | ✅ | ❌ | ❌ | Same, plus one more reason: its rules for telling squirrel-mode's own injected lines from a profile that copies them are about lines a Claude Code `SessionStart` hook puts in context, and neither other target has a lifecycle hook to put them there. It also names the `Read` tool for the same auto-approval reason `stash` names `Write`. |
 | `rules` | ✅ | ❌ | ❌ | Pulls the base rules back into one conversation after Claude Code's forced output style has been turned off. Neither other target has an output style to turn off, so there is nothing for this to recover from: on Codex the rules are a block in `AGENTS.md`, on Cursor a `.mdc` rules file, and both are re-applied by restoring the file rather than by a command. |
 
 ## What each target loses, explicitly
@@ -41,6 +43,11 @@ feature set; this page states the practical consequences plainly, with no hedgin
 - **The calibration interview's automatic follow-through.** `init` and `tune` both run as skills, but
   nothing on Codex reminds you they exist the way Claude Code's `SessionStart` hook does when no
   profile is found yet.
+- **The hoard commands.** No `stash`, no `dig`. Phase 1 of the hoard builds them for Claude Code
+  only. What is *not* lost is the data: memories are plain markdown files under
+  `~/.squirrel/hoard/`, so anything recorded from Claude Code can be read on Codex by asking it to
+  read the file. The port table above says why copying the two skills across would not work as
+  written.
 - **A hard block against starting calibration unprompted.** Claude Code's `disable-model-invocation:
   true` is a harness-level guarantee: the model cannot invoke `init` or `tune` on its own, full stop.
   Codex has no equivalent field. Each skill's description says, in prose, never to run unprompted —

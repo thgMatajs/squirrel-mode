@@ -1198,8 +1198,11 @@ assert_eq "Doing Next Open decisions Done" "$plan_template_heading_order" "PLAN.
 #
 # hooks/hooks.json's PreToolUse matcher is "Write|Edit|Read" - letters
 # and pipes, which Claude Code reads as an exact-string LIST, not a
-# substring regex - and ADR-0002 records that a `Bash` call is never
-# auto-approved at any path by any hook. Rule 14 said only "update this
+# substring regex - so no hook OF THIS PLUGIN'S runs on a `Bash` call at
+# any path, and none of them can auto-approve one. ADR-0002 records that
+# as a decision and not as a limit: a PreToolUse hook may match `Bash`
+# and may answer permissionDecision "allow", and that ADR says in as many
+# words why squirrel-mode declines to register one. Rule 14 said only "update this
 # session's own checkpoint file", and docs/ACCEPTANCE.md records from a
 # live run that with tool-agnostic wording "the model reaches for a
 # `Bash` heredoc first" - so the rule's own "do not ask permission
@@ -1215,7 +1218,7 @@ RULE14_TOOLS_PHRASE='`Read` and `Write` tools'
 RULE14_NO_SHELL_PHRASE="never a shell command"
 
 assert_contains "$rule_14_body" "$RULE14_TOOLS_PHRASE" "rule 14's canonical body must name the Read and Write tools - the PreToolUse auto-approval covers exactly those, and a tool-agnostic rule sends the model to a Bash heredoc that always prompts"
-assert_contains "$rule_14_body" "$RULE14_NO_SHELL_PHRASE" "rule 14's canonical body must rule out a shell command for the checkpoint write, since no hook can auto-approve one"
+assert_contains "$rule_14_body" "$RULE14_NO_SHELL_PHRASE" "rule 14's canonical body must rule out a shell command for the checkpoint write, since this plugin registers no hook that runs on one"
 assert_contains "$plan_rule_14_flat" "$RULE14_TOOLS_PHRASE" "PLAN.md's rule-14 summary must name the same two tools as rules/base-rules.md (cross-file agreement, invariant 6e)"
 assert_contains "$plan_rule_14_flat" "$RULE14_NO_SHELL_PHRASE" "PLAN.md's rule-14 summary must rule out a shell command the same way rules/base-rules.md does (cross-file agreement, invariant 6e)"
 

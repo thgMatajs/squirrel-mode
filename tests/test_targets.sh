@@ -1940,8 +1940,9 @@ assert_file_absent "$home32f/.cursor/.squirrel-install.lock" "the lock must be a
 #    in PLAN.md Section 3 ("Codex and Cursor (ADR-0004)") - pinned here
 #    too, as a third copy of the identical table. It is NOT extended to
 #    docs/adr/0004-tiered-parity-across-targets.md's own copy: that one
-#    is a deliberately different rendering (unbolded "8 namespaced
-#    skills", "skills in `~/.agents/skills/`" instead of the specific
+#    is a deliberately different rendering (unbolded "10 namespaced
+#    skills", no Hoard column,
+#    "skills in `~/.agents/skills/`" instead of the specific
 #    per-file path, "instructed file read only" without ", best-effort",
 #    no `**N**` counts) written when the ADR was drafted, before the
 #    paths were finalized - a design-history record, not a
@@ -1959,13 +1960,23 @@ assert_file_exists "$plan_doc" "PLAN.md must exist"
 
 extract_parity_table() {
   # extract_parity_table <file> - prints the 5-line "| Target | Always-on
-  # rules | Commands | Auto profile injection | Auto checkpoints |" table
-  # (header, separator, and the three target rows) verbatim, or nothing
-  # if no such table exists in <file>.
+  # rules | Commands | Auto profile injection | Auto checkpoints | Hoard |"
+  # table (header, separator, and the three target rows) verbatim, or
+  # nothing if no such table exists in <file>.
+  #
+  # THE HEADER GAINED A SIXTH COLUMN in phase 1 of the hoard, and this
+  # exact-match pattern moved with it, in all three files at once. That is
+  # the point of the pattern being exact: adding a column to one copy makes
+  # the extractor return NOTHING for that file, and the equality assertions
+  # below then fail loudly rather than comparing two tables that happen to
+  # share five columns. What this guard exists to catch is one copy drifting
+  # from the other two, not the column set being frozen forever - the same
+  # distinction tests/test_research.sh's docs/ listing assertion draws for
+  # itself.
   file=$1
   awk '
     BEGIN { capture = 0 }
-    /^\| Target \| Always-on rules \| Commands \| Auto profile injection \| Auto checkpoints \|$/ { capture = 1; print; next }
+    /^\| Target \| Always-on rules \| Commands \| Auto profile injection \| Auto checkpoints \| Hoard \|$/ { capture = 1; print; next }
     capture == 1 && /^\|/ { print; next }
     capture == 1 { capture = 0 }
   ' "$file" 2>/dev/null
@@ -2008,10 +2019,338 @@ assert_eq "no" "$parity_mutant_matches" "FAILURE PROOF (scenario 33): editing on
 plan_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-plan-parity-mutant.XXXXXX")
 cleanup_dirs="$cleanup_dirs $plan_mutant_dir"
 plan_mutant="$plan_mutant_dir/PLAN.md"
-sed 's/| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints |/| Target | Always-on rules | Commands | Auto profile | Auto checkpoints |/' "$plan_doc" >"$plan_mutant"
+sed 's/| Target | Always-on rules | Commands | Auto profile injection | Auto checkpoints | Hoard |/| Target | Always-on rules | Commands | Auto profile | Auto checkpoints | Hoard |/' "$plan_doc" >"$plan_mutant"
 plan_mutant_table=$(extract_parity_table "$plan_mutant")
 plan_mutant_line_count=$(printf '%s\n' "$plan_mutant_table" | sed '/^$/d' | wc -l | awk '{print $1}')
 assert_eq "0" "$plan_mutant_line_count" "FAILURE PROOF (scenario 33, PLAN.md): reverting PLAN.md's table header to the old 'Auto profile' wording in a scratch copy must make the exact-header extractor find no table at all"
+
+# ==========================================================================
+# 33b. The OTHER cross-file table, which scenario 33 never covered.
+#
+#      WHY THIS EXISTS. docs/OTHER-TOOLS.md and PLAN.md Section 3 each
+#      carry a "Which commands port" table, and the two drifted apart in
+#      exactly the way scenario 33 was written to catch for the parity
+#      table - and nothing caught it, because scenario 33 pins only the
+#      table whose header starts "| Target |". docs/OTHER-TOOLS.md gained
+#      a `stash` row and a `dig` row and moved its heading from "the other
+#      four" to "the other six"; PLAN.md kept seven rows and the word
+#      "four". Both copies were wrong about something a reader would act
+#      on, and the suite was green throughout. One unpinned copy of a
+#      pinned kind of table is the whole defect.
+#
+#      WHAT IS PAIRED, AND WHAT DELIBERATELY IS NOT. The first four
+#      columns - the command name and its ✅/❌ for the three targets -
+#      are pinned line for line. The fifth column, "Reason", is NOT: the
+#      two documents legitimately explain the same fact at different
+#      length and for different readers (PLAN.md is the build plan,
+#      docs/OTHER-TOOLS.md is the page a user reads before installing),
+#      and forcing those paragraphs to match byte for byte would be
+#      pinning a writing style rather than a fact. What a reader acts on
+#      is which commands exist and which targets have them; that is what
+#      is pinned. Truncation is by `|` count, which is safe here because
+#      no cell in the first four columns contains a `|` - they hold a
+#      command name in backticks and single characters.
+#
+#      NAMING WHAT THAT EXEMPTION LETS THROUGH, because "prose varies"
+#      was too kind a description of it. The Reason column is free text,
+#      but it is not free of FACTS: it is where both files explain what a
+#      command costs, and a cost is a number a reader acts on exactly as
+#      much as a ✅ is. A review mutated ONLY that column, in PLAN.md
+#      alone, to "A stash costs ZERO permission prompts on Claude Code" -
+#      false, and contradicted by docs/OTHER-TOOLS.md's own stash row and
+#      by README.md - and the whole suite closed green. Nothing in this
+#      scenario looked at the cell, and nothing anywhere else pinned that
+#      claim, so the exemption was covering a factual assertion and not a
+#      difference of length or audience.
+#
+#      The class is therefore: a PROMPT-COST claim about a command,
+#      written in the one column no cross-file check reads. Proof (d)
+#      below closes the shape the review actually produced - the two
+#      files may not say a stash costs zero or no permission prompts,
+#      which is the assertion the mutant fails - without pinning the
+#      wording around it. The residual is stated rather than implied: a
+#      cost claim spelled some other way ("free", "silently", a different
+#      command) still escapes, exactly as MARKER_REGEX cannot catch a
+#      marker spelled some new way. The pairing that would close the
+#      class outright is a cost claim carried in ONE place both files
+#      cite, and neither file is written that way today.
+#
+#      THE HEADING'S NUMBER IS PINNED TWICE, on purpose. Once across the
+#      two files (they must agree), and once against the table itself
+#      (the word must be the number of COMMANDS marked ❌ for both Codex
+#      and Cursor). Cross-file equality alone would pass if both copies
+#      went stale together, which is the more likely next failure now
+#      that one of them is being kept in step by hand. Deriving it from
+#      the table is what makes the heading a claim about the rows rather
+#      than a sentence nobody re-counts.
+#
+#      COMMANDS, NOT ROWS: `off` / `on` is one row naming two commands,
+#      which is why nine rows and six unported commands are both correct
+#      at once. The first cell is split on " / " and each name counted.
+# ==========================================================================
+extract_port_table() {
+  # extract_port_table <file> - prints the "| Command | Claude Code |
+  # Codex | Cursor | Reason |" table with everything from the fifth `|`
+  # onward removed, or nothing if no such table exists in <file>. Same
+  # exact-header discipline as extract_parity_table above, and for the
+  # same reason: a column added to one copy makes this return NOTHING for
+  # that file, and the equality assertion below fails loudly rather than
+  # comparing two tables that happen to share four columns.
+  awk '
+    BEGIN { capture = 0 }
+    /^\| Command \| Claude Code \| Codex \| Cursor \| Reason \|$/ { capture = 1; print; next }
+    capture == 1 && /^\|/ { print; next }
+    capture == 1 { capture = 0 }
+  ' "$1" 2>/dev/null | sed 's/^\(\([^|]*|\)\{5\}\).*$/\1/'
+}
+
+port_heading_word() {
+  # port_heading_word <file> - the number word in that file's "Which
+  # commands port, and why the other <word> cannot" heading. Matched
+  # without anchoring to the surrounding markup, because the two files
+  # render the same sentence differently on purpose: a `##` heading in
+  # docs/OTHER-TOOLS.md, a bolded line ending in a full stop in PLAN.md.
+  grep -o 'Which commands port, and why the other [a-z][a-z]* cannot' "$1" 2>/dev/null \
+    | sed 's/^.*why the other //; s/ cannot$//' | head -n 1
+}
+
+port_unported_command_count() {
+  # port_unported_command_count <file> - how many COMMANDS the table
+  # marks ❌ for both Codex and Cursor. `index()` against the literal
+  # character, not a regex and not a \x escape: the first keeps any awk's
+  # regex engine from having an opinion about a multi-byte character
+  # under any locale, and the second is a non-POSIX awk extension this
+  # file has no reason to depend on when the character itself is already
+  # written literally in the sed patterns below.
+  # Fields: $1 is empty (before the leading `|`), $2 Command, $3 Claude
+  # Code, $4 Codex, $5 Cursor.
+  extract_port_table "$1" | awk -F'|' '
+    NF >= 5 && index($4, "❌") > 0 && index($5, "❌") > 0 {
+      total += split($2, port_cmds, " / ")
+    }
+    END { print total + 0 }
+  '
+}
+
+port_number_word() {
+  case "$1" in
+    1) printf 'one' ;;
+    2) printf 'two' ;;
+    3) printf 'three' ;;
+    4) printf 'four' ;;
+    5) printf 'five' ;;
+    6) printf 'six' ;;
+    7) printf 'seven' ;;
+    8) printf 'eight' ;;
+    9) printf 'nine' ;;
+    10) printf 'ten' ;;
+    *) printf '<%s-has-no-word-here>' "$1" ;;
+  esac
+}
+
+other_tools_port_table=$(extract_port_table "$other_tools_doc")
+plan_port_table=$(extract_port_table "$plan_doc")
+
+# Vacuous-pass guard, the same shape scenario 33 uses: docs/OTHER-TOOLS.md's
+# own port table must yield exactly 11 lines (header + separator + 9 command
+# rows), or "identical" below could be true because nothing parsed on either
+# side.
+other_tools_port_line_count=$(printf '%s\n' "$other_tools_port_table" | sed '/^$/d' | wc -l | awk '{print $1}')
+assert_eq "11" "$other_tools_port_line_count" "parsing docs/OTHER-TOOLS.md's port table must yield exactly 11 lines: header + separator + 9 command rows (vacuous-pass guard for scenario 33b)"
+
+assert_eq "$other_tools_port_table" "$plan_port_table" "PLAN.md Section 3's port table must match docs/OTHER-TOOLS.md's, command for command and ✅/❌ for ✅/❌ (the Reason column is deliberately not compared)"
+
+other_tools_port_word=$(port_heading_word "$other_tools_doc")
+plan_port_word=$(port_heading_word "$plan_doc")
+assert_eq "six" "$other_tools_port_word" "docs/OTHER-TOOLS.md's port heading must name a number word this scenario can read - a heading that stopped matching would make the two comparisons below vacuous"
+assert_eq "$other_tools_port_word" "$plan_port_word" "PLAN.md's 'why the other <N> cannot' heading must name the same number as docs/OTHER-TOOLS.md's"
+
+other_tools_unported=$(port_unported_command_count "$other_tools_doc")
+assert_eq "$(port_number_word "$other_tools_unported")" "$other_tools_port_word" "docs/OTHER-TOOLS.md's heading number must equal the commands its own table marks ❌ for both Codex and Cursor ($other_tools_unported), so the sentence is a claim about the rows rather than one nobody re-counts"
+
+# --- Failure proof (a): a scratch copy of PLAN.md with one ✅/❌ cell of ---
+#     its port table flipped must stop matching docs/OTHER-TOOLS.md's. The
+#     mutant is diffed BEFORE it is trusted: a sed that matched nothing
+#     leaves a byte-identical copy, which the assertion correctly passes,
+#     and this proof would then report clean while proving the opposite.
+port_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-port-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $port_mutant_dir"
+port_cell_mutant="$port_mutant_dir/PLAN-cell.md"
+# shellcheck disable=SC2016 # single-quoted deliberately: the backticks below are
+# literal characters in PLAN.md's own markdown table cell, not command substitution.
+sed 's/^| `stash` | ✅ | ❌ | ❌ |/| `stash` | ✅ | ✅ | ❌ |/' "$plan_doc" >"$port_cell_mutant"
+if cmp -s "$plan_doc" "$port_cell_mutant"; then port_cell_differs=no; else port_cell_differs=yes; fi
+assert_eq "yes" "$port_cell_differs" "FAILURE PROOF (scenario 33b), control: the cell mutation must genuinely change PLAN.md - if it does not, PLAN.md no longer carries the row this proof mutates and the proof below is passing for a reason nobody chose"
+if [ "$(extract_port_table "$port_cell_mutant")" = "$other_tools_port_table" ]; then
+  port_cell_mutant_matches=yes
+else
+  port_cell_mutant_matches=no
+fi
+assert_eq "no" "$port_cell_mutant_matches" "FAILURE PROOF (scenario 33b): flipping one target cell of PLAN.md's port table in a scratch copy must make the line-for-line equality check fail"
+
+# --- Failure proof (b): the exact regression this scenario was written ---
+#     against - PLAN.md's heading left at "four" while the table carries
+#     nine rows - must be caught, both against docs/OTHER-TOOLS.md and
+#     against the table's own ❌/❌ count.
+port_word_mutant="$port_mutant_dir/PLAN-four.md"
+sed 's/why the other six cannot/why the other four cannot/' "$plan_doc" >"$port_word_mutant"
+if cmp -s "$plan_doc" "$port_word_mutant"; then port_word_differs=no; else port_word_differs=yes; fi
+assert_eq "yes" "$port_word_differs" "FAILURE PROOF (scenario 33b), control: the heading mutation must genuinely change PLAN.md"
+assert_eq "four" "$(port_heading_word "$port_word_mutant")" "FAILURE PROOF (scenario 33b): the stale 'why the other four cannot' heading must be readable as such in the mutant"
+if [ "$(port_heading_word "$port_word_mutant")" = "$other_tools_port_word" ]; then
+  port_word_mutant_matches=yes
+else
+  port_word_mutant_matches=no
+fi
+assert_eq "no" "$port_word_mutant_matches" "FAILURE PROOF (scenario 33b): PLAN.md's pre-fix 'four' heading must no longer agree with docs/OTHER-TOOLS.md's"
+
+# --- Failure proof (c): deleting the `dig` row from a scratch copy of ---
+#     docs/OTHER-TOOLS.md must break the derived count, proving the
+#     heading is pinned to the rows and not merely to the other file.
+port_row_mutant="$port_mutant_dir/OTHER-TOOLS-norow.md"
+# shellcheck disable=SC2016 # literal markdown, see above.
+sed '/^| `dig` | ✅ | ❌ | ❌ |/d' "$other_tools_doc" >"$port_row_mutant"
+if cmp -s "$other_tools_doc" "$port_row_mutant"; then port_row_differs=no; else port_row_differs=yes; fi
+assert_eq "yes" "$port_row_differs" "FAILURE PROOF (scenario 33b), control: the row deletion must genuinely change docs/OTHER-TOOLS.md"
+assert_eq "5" "$(port_unported_command_count "$port_row_mutant")" "FAILURE PROOF (scenario 33b): with the \`dig\` row deleted the derived count must fall to 5, so the 'six' in the heading no longer matches the table it describes"
+
+# --- The one factual class the free-form Reason column let through. See ---
+#     "NAMING WHAT THAT EXEMPTION LETS THROUGH" in this scenario's header
+#     for what this does and does not cover.
+port_reason_false_cost_hits() {
+  # port_reason_false_cost_hits <file> - prints the Reason cell of every
+  # port-table row of <file> that claims zero or no permission prompts
+  # without also stating what the command does cost.
+  #
+  # THE UNIT IS THE CELL, AND IT USED TO BE THE SENTENCE. The sentence
+  # version flattened the file to one line, split it on `.`, and required
+  # the word `stash` and the cost claim inside one chunk. `tr` knows
+  # nothing about table cells, so what actually bounded that scan was the
+  # FULL STOP, and it was wrong in both directions - measured, both:
+  #
+  #   - FALSE POSITIVE on true prose. docs/OTHER-TOOLS.md's stash row says
+  #     the memory *write* costs no permission prompt and that the command
+  #     still costs one, in two sentences. Join those two sentences with a
+  #     dash instead of a stop - an ordinary edit, changing no fact - and
+  #     the row name lands in the same chunk as the cost claim and this
+  #     guard goes red on a document that is telling the truth.
+  #   - FALSE NEGATIVE on the lie it exists for. Write the false claim as
+  #     two sentences - `A stash is instant on Claude Code. It costs zero
+  #     permission prompts.` - and neither chunk holds both anchors, so it
+  #     passes untouched.
+  #
+  # A guard that fails on true prose and passes the false claim is worse
+  # than no guard, so the boundary is now the thing the claim actually
+  # lives in: the Reason cell of one table row, whole, however many
+  # sentences it is written in and wherever the stops fall. The first five
+  # `|`-separated fields are stripped off and everything after them is the
+  # cell; the cell is NOT split on `|` because it legitimately contains
+  # one (`Write|Edit|Read`), which is the same truncation the four-column
+  # comparison above performs and the reason that comparison cannot see
+  # this column at all.
+  #
+  # WHAT EXCULPATES A CELL is saying what the command costs: `costs one`.
+  # That is what makes the true sentence true, and a cell claiming a zero
+  # cost without it is claiming it unqualified.
+  #
+  # RESIDUE, NAMED, because this is a grep and not a reader:
+  #   - a false claim written OUTSIDE the port table is not scanned here.
+  #     This column is scanned because it is free text no other check
+  #     reads; ordinary prose elsewhere in these files is subject to the
+  #     scans in tests/test_repo_invariants.sh.
+  #   - a cell that lies AND happens to contain the words `costs one`
+  #     passes. No pattern can tell which clause those two words belong
+  #     to; the exculpation is a marker, not a proof.
+  awk -F '|' '
+    /^\| `[^`]*` \| / {
+      cell = $0
+      n = 0
+      while (n < 5) { sub(/^[^|]*\|/, "", cell); n++ }
+      low = tolower(cell)
+      if (low ~ /(zero|no) permission prompts?/ && low !~ /costs one/) print cell
+    }
+  ' "$1" 2>/dev/null
+}
+
+port_reason_retired_sentence_hits() {
+  # The scan this replaced, kept for the two failure proofs below and used
+  # nowhere else. Both of its directions are asserted against the same
+  # inputs the new one is, so the repair is measured rather than asserted.
+  tr '\n' ' ' <"$1" 2>/dev/null | tr '.' '\n' \
+    | grep -i 'stash' | grep -iE '(zero|no) permission prompts?'
+}
+
+assert_eq "" "$(port_reason_false_cost_hits "$plan_doc")" "PLAN.md must not claim a stash costs zero or no permission prompts - it costs one (README.md's command table, and docs/specs/2026-08-13-hoard-design.md section 12), and the Reason column of the table above is free text no other check reads"
+assert_eq "" "$(port_reason_false_cost_hits "$other_tools_doc")" "docs/OTHER-TOOLS.md must not claim it either - the same scan on the other side of the same table, so the guard cannot be satisfied by whichever file happens to stay honest"
+
+# --- Failure proof (d): the review's ACTUAL mutant. Only the Reason cell ---
+#     of PLAN.md's stash row is replaced, exactly as the review did it. Two
+#     things are asserted about it, and the second is the point: the new
+#     scan catches it, AND the four-column equality check above still
+#     PASSES on the same mutant - which is what proves this assertion is
+#     closing a real gap rather than duplicating a check that already fired.
+port_reason_mutant="$port_mutant_dir/PLAN-zero-cost.md"
+awk 'BEGIN { FS = "|"; OFS = "|" }
+  /^\| `stash` \| / {
+    print "| `stash` | ✅ | ❌ | ❌ | A stash costs ZERO permission prompts on Claude Code. |"
+    next
+  }
+  { print }
+' "$plan_doc" >"$port_reason_mutant"
+if cmp -s "$plan_doc" "$port_reason_mutant"; then port_reason_differs=no; else port_reason_differs=yes; fi
+assert_eq "yes" "$port_reason_differs" "FAILURE PROOF (scenario 33b, prompt cost), control: the Reason-cell mutation must genuinely change PLAN.md - if PLAN.md no longer carries a stash row in that shape, everything below passes for a reason nobody chose"
+if [ -n "$(port_reason_false_cost_hits "$port_reason_mutant")" ]; then port_reason_caught=yes; else port_reason_caught=no; fi
+assert_eq "yes" "$port_reason_caught" "FAILURE PROOF (scenario 33b, prompt cost): the review's own mutant - 'A stash costs ZERO permission prompts on Claude Code', in the Reason column and nowhere else - must be caught"
+if [ "$(extract_port_table "$port_reason_mutant")" = "$other_tools_port_table" ]; then
+  port_reason_table_still_matches=yes
+else
+  port_reason_table_still_matches=no
+fi
+assert_eq "yes" "$port_reason_table_still_matches" "FAILURE PROOF (scenario 33b, prompt cost), the gap itself: the four-column equality check must STILL PASS on that mutant. This is why the assertion above had to be added - the Reason column is truncated before comparison, so every other check in this scenario is green while the file publishes a false cost"
+assert_eq "$other_tools_port_word" "$(port_heading_word "$port_reason_mutant")" "FAILURE PROOF (scenario 33b, prompt cost), the gap itself: and the heading checks stay green on it too - the mutant touches nothing they read"
+
+# --- Failure proof (e): the FALSE POSITIVE the retired scan produced on ---
+#     TRUE prose. One edit, no fact changed: docs/OTHER-TOOLS.md's stash
+#     row says the same two things in one sentence instead of two.
+port_reason_joined="$port_mutant_dir/OTHER-TOOLS-joined.md"
+sed 's/porting it is a rewrite rather than a copy\. It writes a memory/porting it is a rewrite rather than a copy - it writes a memory/' \
+  "$other_tools_doc" >"$port_reason_joined"
+if cmp -s "$other_tools_doc" "$port_reason_joined"; then port_joined_differs=no; else port_joined_differs=yes; fi
+assert_eq "yes" "$port_joined_differs" "FAILURE PROOF (scenario 33b, false positive), control: joining the stash row's first two sentences must genuinely change docs/OTHER-TOOLS.md, or the two assertions below pass against the file that was already there"
+if [ -n "$(port_reason_retired_sentence_hits "$port_reason_joined")" ]; then port_joined_old=yes; else port_joined_old=no; fi
+assert_eq "yes" "$port_joined_old" "FAILURE PROOF (scenario 33b, false positive): the RETIRED sentence scan goes red on that file - a document stating the cost correctly, failed by a guard because of where a full stop sits. That is the defect this repair is about, reproduced"
+assert_eq "" "$(port_reason_false_cost_hits "$port_reason_joined")" "FAILURE PROOF (scenario 33b, false positive), the repair: the cell-scoped scan is silent on the same file. The claim never changed, so neither may the verdict - a guard that reprimands correct prose is a guard that gets edited out"
+
+# --- Failure proof (f): the FALSE NEGATIVE. The same lie as (d), split ---
+#     across two sentences inside the one cell.
+port_reason_split="$port_mutant_dir/PLAN-zero-cost-split.md"
+awk 'BEGIN { FS = "|"; OFS = "|" }
+  /^\| `stash` \| / {
+    print "| `stash` | ✅ | ❌ | ❌ | A stash is instant on Claude Code. It costs zero permission prompts. |"
+    next
+  }
+  { print }
+' "$plan_doc" >"$port_reason_split"
+if cmp -s "$plan_doc" "$port_reason_split"; then port_split_differs=no; else port_split_differs=yes; fi
+assert_eq "yes" "$port_split_differs" "FAILURE PROOF (scenario 33b, two sentences), control: the split-sentence mutation must genuinely change PLAN.md"
+if [ -n "$(port_reason_retired_sentence_hits "$port_reason_split")" ]; then port_split_old=yes; else port_split_old=no; fi
+assert_eq "no" "$port_split_old" "FAILURE PROOF (scenario 33b, two sentences): the RETIRED sentence scan does NOT catch it - the row name and the cost claim land in different chunks, so the exact claim the guard was written for walks straight through by being punctuated differently"
+if [ -n "$(port_reason_false_cost_hits "$port_reason_split")" ]; then port_split_new=yes; else port_split_new=no; fi
+assert_eq "yes" "$port_split_new" "FAILURE PROOF (scenario 33b, two sentences), the repair: the cell-scoped scan catches it, because the cell is the boundary and both sentences are inside it"
+
+# --- And the residue, asserted rather than only written down: a cell ---
+#     that lies and also carries the exculpating words is not caught.
+port_reason_hedged="$port_mutant_dir/PLAN-zero-cost-hedged.md"
+awk 'BEGIN { FS = "|"; OFS = "|" }
+  /^\| `stash` \| / {
+    print "| `stash` | ✅ | ❌ | ❌ | A stash costs zero permission prompts. Reading one back costs one. |"
+    next
+  }
+  { print }
+' "$plan_doc" >"$port_reason_hedged"
+if cmp -s "$plan_doc" "$port_reason_hedged"; then port_hedged_differs=no; else port_hedged_differs=yes; fi
+assert_eq "yes" "$port_hedged_differs" "DECLARED LIMIT (scenario 33b), control: the hedged mutation must genuinely change PLAN.md"
+assert_eq "" "$(port_reason_false_cost_hits "$port_reason_hedged")" "DECLARED LIMIT (scenario 33b): a cell that makes the false claim AND contains the words \`costs one\` about something else is NOT caught. The exculpation is a marker and cannot be a proof - no pattern can tell which clause two words belong to. This assertion exists so the limit is a measured boundary rather than a sentence in a comment, and it is the reason the four-column equality check and the two heading checks are not the only things standing behind this table"
 
 # ==========================================================================
 # 34. [S9, PLAN.md Section 5: "Installs user-scoped; zero files written
@@ -2075,18 +2414,32 @@ assert_eq "$before34" "$after34u" "cursor install.sh --yes (install then uninsta
 #     (expect that one specifically absent, the other still present).
 # ==========================================================================
 readme_content_35=$(read_file "$readme_doc")
+# The symlink needle is the WHOLE clause, not the bare "never auto-approved"
+# it used to be. Since the hard-link refusal below became its own paragraph,
+# "never auto-approved" appears twice in README.md, and a mutant that deleted
+# the symlink paragraph would still contain the phrase - the proof at the
+# bottom of this scenario would then report clean while proving nothing.
+# shellcheck disable=SC2016 # single-quoted deliberately: the backtick is a literal Markdown character in README.md's text.
+symlink_pin_needle='checkpoints/` itself, or anywhere below it, is never auto-approved'
+# The two needles scenario 35a below pins, defined here because the symlink
+# proof further down asserts the hard-link paragraph SURVIVES its mutation.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal Markdown backticks, not command substitution.
+hardlink_pin_needle='that some other name also points at is never auto-approved either'
+# shellcheck disable=SC2016 # ditto.
+hardlink_find_needle='the test needs `find` on `PATH`'
 assert_contains "$readme_content_35" "a symlink at" "README.md's checkpoint auto-approval disclosure must still name the ADR-0002 symlink trust boundary (S8-5)"
-assert_contains "$readme_content_35" "checkpoints/\` itself, or anywhere below it, is never auto-approved" "README.md's checkpoint auto-approval disclosure must still state that a symlink at or below checkpoints/ is never auto-approved (S8-5)"
+assert_contains "$readme_content_35" "$symlink_pin_needle" "README.md's checkpoint auto-approval disclosure must still state that a symlink at or below checkpoints/ is never auto-approved (S8-5)"
 assert_contains "$readme_content_35" "cap them at one checkpoint write per turn" "README.md's checkpoint auto-approval disclosure must still state the one-write-per-turn cap (S8-5)"
 
 symlink_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-symlink-pin-mutant.XXXXXX")
 cleanup_dirs="$cleanup_dirs $symlink_pin_mutant_dir"
 symlink_pin_mutant="$symlink_pin_mutant_dir/README.md"
 # shellcheck disable=SC2016 # single-quoted deliberately: literal sed pattern, not substitution.
-sed '/^The auto-approval only covers paths that genuinely resolve inside that directory/,/^normal permission prompt instead of being silently redirected through the symlink\.$/d' "$readme_doc" >"$symlink_pin_mutant"
+sed '/^The auto-approval decides about the path as a \*\*name\*\*/,/^normal permission prompt instead of being silently redirected through the symlink\.$/d' "$readme_doc" >"$symlink_pin_mutant"
 symlink_pin_mutant_content=$(read_file "$symlink_pin_mutant")
-if printf '%s' "$symlink_pin_mutant_content" | grep -qF "never auto-approved"; then symlink_pin_removed=no; else symlink_pin_removed=yes; fi
+if printf '%s' "$symlink_pin_mutant_content" | grep -qF "$symlink_pin_needle"; then symlink_pin_removed=no; else symlink_pin_removed=yes; fi
 assert_eq "yes" "$symlink_pin_removed" "FAILURE PROOF (scenario 35, symlink boundary): deleting that paragraph from a scratch copy of README.md must remove the pinned text"
+assert_contains "$symlink_pin_mutant_content" "$hardlink_pin_needle" "FAILURE PROOF (scenario 35, symlink boundary): deleting the SYMLINK paragraph alone must leave the hard-link paragraph standing - the two refusals are separate facts and one must not cover for the other"
 assert_contains "$symlink_pin_mutant_content" "cap them at one checkpoint write per turn" "FAILURE PROOF (scenario 35, symlink boundary): deleting the symlink-boundary paragraph alone must leave the SEPARATE one-write-per-turn sentence untouched (proving the two pins are independent, not one accidentally covering for the other)"
 
 perturn_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-perturn-pin-mutant.XXXXXX")
@@ -2096,7 +2449,57 @@ sed '/^The base rules that trigger these writes also cap them at one checkpoint 
 perturn_pin_mutant_content=$(read_file "$perturn_pin_mutant")
 if printf '%s' "$perturn_pin_mutant_content" | grep -qF "cap them at one checkpoint write per turn"; then perturn_pin_removed=no; else perturn_pin_removed=yes; fi
 assert_eq "yes" "$perturn_pin_removed" "FAILURE PROOF (scenario 35, per-turn cap): deleting that sentence from a scratch copy of README.md must remove the pinned text"
-assert_contains "$perturn_pin_mutant_content" "never auto-approved" "FAILURE PROOF (scenario 35, per-turn cap): deleting the one-write-per-turn sentence alone must leave the SEPARATE symlink-boundary paragraph untouched (proving the two pins are independent)"
+assert_contains "$perturn_pin_mutant_content" "$symlink_pin_needle" "FAILURE PROOF (scenario 35, per-turn cap): deleting the one-write-per-turn sentence alone must leave the SEPARATE symlink-boundary paragraph untouched (proving the two pins are independent)"
+
+# ==========================================================================
+# 35a. [hard-link fix] The SECOND exception, which this disclosure claimed
+#      did not exist.
+#
+#      README.md used to open this paragraph with "The auto-approval only
+#      covers paths that genuinely resolve inside that directory" and then
+#      name the symlink as the single exception. The hard-link refusal
+#      (scripts/allow-checkpoint.sh Layer 2b, shipped in this same branch)
+#      falsified both halves at once: a hard link inside checkpoints/ IS a
+#      path that genuinely resolves inside the directory, and it is not
+#      auto-approved. One sentence enumerating one exception where there
+#      are two is exactly the shape scenario 35 above exists to stop, so
+#      the second exception gets the same treatment as the first.
+#
+#      Three pins, each proved by deleting what it pins:
+#        1. README states there IS a hard-link refusal.
+#        2. README states its LIMIT - the check needs `find` on PATH, and
+#           without it the hard link is auto-approved again. A refusal
+#           published without the condition it depends on is the
+#           overstated guarantee this repo keeps having to retract.
+#        3. It is pinned against the hook that has to actually implement
+#           it, so README cannot go on claiming a refusal that
+#           scripts/allow-checkpoint.sh stopped making (invariant 6e,
+#           the same cross-file shape as scenario 35b's pin 2).
+# ==========================================================================
+assert_contains "$readme_content_35" "$hardlink_pin_needle" "README.md's checkpoint auto-approval disclosure must name the hard-link refusal: a hard link resolves inside the directory and is still not auto-approved, so a disclosure naming only the symlink enumerates one exception where there are two"
+assert_contains "$readme_content_35" "$hardlink_find_needle" "README.md must also state the hard-link refusal's LIMIT - it needs \`find\` on PATH and does not run without it (docs/adr/0008-hoard-auto-allow.md:65-72, tests/test_hooks.sh HOARD-14e) - because a refusal published without its precondition is a guarantee wider than the code makes"
+assert_contains "$(read_file "$repo_root/scripts/allow-checkpoint.sh")" "-links +1" "scripts/allow-checkpoint.sh must actually carry the link-count test, or README.md's hard-link disclosure is claiming a refusal that no longer exists (cross-file agreement, invariant 6e)"
+
+hardlink_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-hardlink-pin-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $hardlink_pin_mutant_dir"
+
+hardlink_pin_mutant="$hardlink_pin_mutant_dir/README-hardlink.md"
+sed '/^The second is a hard link, and it is the reason the sentence above says/,/records that limit)\.$/d' "$readme_doc" >"$hardlink_pin_mutant"
+if cmp -s "$readme_doc" "$hardlink_pin_mutant"; then hardlink_pin_differs=no; else hardlink_pin_differs=yes; fi
+assert_eq "yes" "$hardlink_pin_differs" "FAILURE PROOF (scenario 35a), control: deleting the hard-link paragraph must genuinely change README.md - a sed that matched nothing would leave a byte-identical copy and turn the proof below into a second copy of the passing test"
+hardlink_pin_mutant_content=$(read_file "$hardlink_pin_mutant")
+if printf '%s' "$hardlink_pin_mutant_content" | grep -qF "$hardlink_pin_needle"; then hardlink_pin_removed=no; else hardlink_pin_removed=yes; fi
+assert_eq "yes" "$hardlink_pin_removed" "FAILURE PROOF (scenario 35a): deleting that paragraph from a scratch copy of README.md must remove the pinned text"
+assert_contains "$hardlink_pin_mutant_content" "$symlink_pin_needle" "FAILURE PROOF (scenario 35a): deleting the HARD-LINK paragraph alone must leave the symlink-boundary paragraph standing (proving the two pins are independent, not one accidentally covering for the other)"
+
+hardlink_find_mutant="$hardlink_pin_mutant_dir/README-hardlink-find.md"
+grep -vF "$hardlink_find_needle" "$readme_doc" >"$hardlink_find_mutant"
+if cmp -s "$readme_doc" "$hardlink_find_mutant"; then hardlink_find_differs=no; else hardlink_find_differs=yes; fi
+assert_eq "yes" "$hardlink_find_differs" "FAILURE PROOF (scenario 35a, find limit), control: the deletion must genuinely change README.md"
+hardlink_find_mutant_content=$(read_file "$hardlink_find_mutant")
+if printf '%s' "$hardlink_find_mutant_content" | grep -qF "$hardlink_find_needle"; then hardlink_find_removed=no; else hardlink_find_removed=yes; fi
+assert_eq "yes" "$hardlink_find_removed" "FAILURE PROOF (scenario 35a, find limit): dropping the line that states the \`find\` dependency must remove the pinned text - README would then publish the refusal without the one condition that switches it off"
+assert_contains "$hardlink_find_mutant_content" "$hardlink_pin_needle" "FAILURE PROOF (scenario 35a, find limit): dropping the limit alone must leave the refusal claim itself standing (proving the two pins are independent)"
 
 # ==========================================================================
 # 35b. Same disclosure, the half about which TOOL writes a checkpoint.
@@ -2104,7 +2507,7 @@ assert_contains "$perturn_pin_mutant_content" "never auto-approved" "FAILURE PRO
 #      README used to disclose a live gap here: the auto-approval covers
 #      Write|Edit|Read, and the base rule that keeps a checkpoint current
 #      named no tool at all, so the model could reach for a Bash heredoc
-#      no hook can auto-approve. Commit cecbd7c closed it - rule 14 now
+#      this plugin registers no hook for. Commit cecbd7c closed it - rule 14 now
 #      names the `Read` and `Write` tools (pinned at the rule's own end by
 #      tests/test_base_rules.sh scenario 36, which also pins PLAN.md's
 #      copy). README now says so, which makes it the THIRD file carrying
@@ -2130,7 +2533,7 @@ base_rules_content_35b=$(read_file "$repo_root/rules/base-rules.md")
 
 assert_contains "$readme_content_35" "$readme_tools_needle" "README.md's checkpoint auto-approval disclosure must state that the base rule names the Read and Write tools - that is what closed the Bash-heredoc gap this paragraph used to disclose as open"
 assert_contains "$base_rules_content_35b" "$readme_tools_needle" "rules/base-rules.md must actually name those two tools, or README.md's disclosure is claiming a closure that no longer exists (cross-file agreement, invariant 6e)"
-assert_contains "$readme_content_35" "$readme_unenforced_needle" "README.md must keep saying the tool naming is an INSTRUCTION and not enforcement - a model can still reach for a Bash heredoc, and no hook can auto-approve one, so 'names the tools' must never be read as 'cannot happen'"
+assert_contains "$readme_content_35" "$readme_unenforced_needle" "README.md must keep saying the tool naming is an INSTRUCTION and not enforcement - a model can still reach for a Bash heredoc, and this plugin registers no hook that would run on one, so 'names the tools' must never be read as 'cannot happen'"
 
 readme_35b_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-tools-pin-mutant.XXXXXX")
 cleanup_dirs="$cleanup_dirs $readme_35b_mutant_dir"

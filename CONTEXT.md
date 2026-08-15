@@ -35,7 +35,7 @@ _Avoid_: onboarding, setup, wizard, init
 ### What survives interruption
 
 **Checkpoint**:
-A per-project record of the current mental model: what is being worked on, the single next step, and unresolved decisions. Exists so that returning after an interruption costs seconds instead of the usual recovery tax.
+A per-project record of the current mental model: what is being worked on, the single next step, and unresolved decisions. Exists so that returning after an interruption costs seconds instead of the usual recovery tax. Its `_Avoid_` list reserves "memory" against a live term, not a hypothetical one: a **Memory** is a different thing with its own entry below, and calling a checkpoint one collapses the distinction the hoard exists to draw.
 _Avoid_: state file, session file, memory, context file
 
 **Done log**:
@@ -49,6 +49,20 @@ _Avoid_: backlog, icebox, TODO, notes
 **Scope guard**:
 The single-line flag raised when the conversation drifts from the declared task. It offers to park the tangent and never argues.
 _Avoid_: drift detection, focus check, nag
+
+### What outlives the project
+
+**hoard**:
+squirrel-mode's durable cross-project memory, machine-wide and personal, at `~/.squirrel/hoard/`. Named for scatter-hoarding: squirrels bury nuts across a territory and recover them from memory. Distinct from the checkpoint in what it holds — the checkpoint carries this session's working state, the hoard carries what was learned. Lowercase, like `squirrel`, because it is typed as part of a path far more often than it is read as a name.
+_Avoid_: memory bank, knowledge base
+
+**Memory**:
+One atomic unit in the hoard: a title, a short body, and its frontmatter. Small enough that a memory needing three paragraphs is two memories. The word is reserved for this and never for a checkpoint — see the Checkpoint entry above, whose `_Avoid_` list is the other half of the same rule.
+_Avoid_: note, entry, fact, record
+
+**Layer**:
+Of the hoard: `global` (about the user) or `project` (about one repository). Every memory is in exactly one. `global` is the name `scripts/hoard-search.sh` and the directory on disk both use; "shared" is not a second name for it. Unrelated to the always-on rules each target installs, which this document does not call a layer.
+_Avoid_: namespace
 
 ### What restructures input
 

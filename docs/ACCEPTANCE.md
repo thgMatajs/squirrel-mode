@@ -880,11 +880,28 @@ probe reached and which it did not.
 - `tests/test_hooks.sh`'s `allow-checkpoint.sh` scenarios (roughly 14–21, plus the symlink defenses
   at 19, 25, 29–32, and the DoS-cap scenario 33 — each now mirrored for `Read`, not only `Write`/
   `Edit`, per S10-1 below) prove the hook returns `allow` for a `Write`, `Edit`, **or `Read`** whose
-  path genuinely resolves inside `$HOME/.squirrel/checkpoints/`, and `defer` for every
+  path lies inside `$HOME/.squirrel/checkpoints/` and is not shown to be a second name for a file
+  living elsewhere, and `defer` for every
   boundary case tried (traversal, prefix-escape, a symlink at or below the directory, an oversized
-  path) — this is what removes the permission prompt specifically for legitimate checkpoint reads
+  path). **That is broader than "an ordinary, singly-linked file", which is what this sentence used
+  to say and is not the condition the code applies.** The link count is read only when the leaf
+  already exists **and is a regular file**: a leaf that does not exist yet is auto-approved, which is
+  the shape of every first write of every memory and every checkpoint, and so is a leaf that is a
+  directory, because a directory always carries at least two links and testing one would defer a
+  legitimate `Read` of the checkpoint folder itself. Both are pinned in `tests/test_hooks.sh`
+  (HOARD-14 for the absent leaf) and both are stated at the `[ -f ]` test in
+  `scripts/allow-checkpoint.sh` — this is what removes the permission prompt specifically for legitimate checkpoint reads
   and writes, with the symlink and traversal cases proving it cannot be tricked into auto-approving
-  somewhere else. **What those scenarios assert is the decision string the script prints, never what
+  somewhere else. **"Resolves inside the directory" was the wrong test, and a hard link is what showed
+  it.** A second name created inside `checkpoints/` for a file that lives somewhere else — `ln
+  ~/.ssh/id_rsa ~/.squirrel/checkpoints/<slug>/x.md` — resolves inside that directory by every test
+  the traversal, prefix-escape and symlink cases apply, and both a `Read` and a `Write` of it once
+  came back `allow`. `tests/test_hooks.sh` HOARD-14 now pins the `defer` for that shape in this root
+  as well as the hoard's, HOARD-14b reproduces the pre-fix `allow` against a mutant with the guard
+  disabled, and HOARD-14e pins the limit: the check needs `find` on `PATH`, and with `find` absent the
+  identical payload is auto-approved again. The boundary this criterion claims is therefore about the
+  **name** the hook is handed, at the moment it is handed it, and it excludes two shapes rather than
+  one. **What those scenarios assert is the decision string the script prints, never what
   Claude Code does with it** — a distinction that cost this project a release-blocking defect, found
   live and written up as finding 1 in "Live-sweep findings" below. The `allow` half is unaffected and
   is confirmed live twice (AE1 and L12 below); it is the `defer` half that was never what this
@@ -1023,7 +1040,10 @@ construction, not by luck, for the reason spelled out next.
 `pickup` had to enumerate the checkpoint directory before it could fold sessions together; the harness
 it ran under exposes no Glob/Grep tool at all (only `Read`, `Write`, `Edit`, `Bash`), so the model
 shelled out to `ls`/`find` — and `hooks/hooks.json`'s `PreToolUse` matcher is `Write|Edit|Read`, which
-a `Bash` call can never match. No hook can auto-approve it, at any path.
+a `Bash` call can never match, so this plugin's hook is never invoked for one and cannot auto-approve
+it. That is how squirrel-mode is configured and not something Claude Code forbids: a `PreToolUse`
+hook may match `Bash` and answer `permissionDecision: "allow"`, and
+`docs/adr/0002-checkpoint-auto-allow.md` records the decision not to register one.
 `docs/adr/0002-checkpoint-auto-allow.md` promises that a checkpoint interaction never costs a
 permission prompt; for pickup, it did. This paragraph recorded the remedy — injecting the session's
 checkpoint file list at `SessionStart` so pickup only ever needs `Read` on paths it was handed,
@@ -1781,8 +1801,10 @@ the `observed` word, and the "Live probe method" section, exist to keep visible.
 **2. FIXED since this entry was written — `/squirrel:pickup` used to cost one permission prompt.**
 `pickup` had to enumerate the checkpoint directory to fold work across sessions. The harness it ran
 under exposes no Glob/Grep tool at all (only `Read`, `Write`, `Edit`, `Bash`), so the model shelled out
-to `ls`/`find` — and `hooks/hooks.json`'s `PreToolUse` matcher is `Write|Edit|Read`, so a `Bash` call
-can never be auto-approved, at any path, by any hook. `docs/adr/0002-checkpoint-auto-allow.md`
+to `ls`/`find` — and `hooks/hooks.json`'s `PreToolUse` matcher is `Write|Edit|Read`, so this plugin's
+hook is never invoked for a `Bash` call and cannot auto-approve one, at any path. That is a property
+of what squirrel-mode registers, not of Claude Code, which permits a `PreToolUse` hook to match
+`Bash`; `docs/adr/0002-checkpoint-auto-allow.md`
 promises that a checkpoint interaction never costs a permission prompt; for pickup, it did. The entry
 above this line originally recorded the remedy as deliberately deferred rather than landed at release
 time. **It was landed instead** — commit `d403ea3`, recorded as

@@ -1495,7 +1495,10 @@ fixture_arxiv_bad=$(check_arxiv_violations "$arxiv_fixture")
 assert_eq "1" "$fixture_arxiv_bad" "FAILURE PROOF (scenario 9): a malformed arXiv ID (3-digit prefix) must be caught"
 
 # ================================================================================================
-# 10. docs/ contains no stray files beyond ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md and adr/.
+# 10. docs/ contains no stray files beyond ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md, adr/,
+#     plans/ and specs/. The expected set below and this heading are kept in step by hand; the
+#     message a reader gets on failure has to name the same set the assertion enforces, or the
+#     failure sends them looking for a file that is supposed to be there.
 # ================================================================================================
 if [ -d "$docs_dir" ]; then
   docs_listing=""
@@ -1509,10 +1512,10 @@ else
   docs_listing="<directory missing>"
 fi
 # OTHER-TOOLS.md is S7's deliverable and ACCEPTANCE.md is S9's, both named in PLAN.md's repository
-# layout / this build's own acceptance sweep. The point of this assertion is that nothing
-# UNEXPECTED lands in docs/, not that the set never grows -- so the expected set is stated here
-# and a genuinely stray file still fails.
-assert_eq "ACCEPTANCE.md OTHER-TOOLS.md RESEARCH.md SKILLS-ADAPTATION.md adr" "$docs_listing" "docs/ must contain exactly ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md, SKILLS-ADAPTATION.md and adr/, nothing else"
+# layout / this build's own acceptance sweep. specs/ and plans/ hold the hoard phase planning and
+# specifications. The point of this assertion is that nothing UNEXPECTED lands in docs/, not that
+# the set never grows -- so the expected set is stated here and a genuinely stray file still fails.
+assert_eq "ACCEPTANCE.md OTHER-TOOLS.md RESEARCH.md SKILLS-ADAPTATION.md adr plans specs" "$docs_listing" "docs/ must contain exactly ACCEPTANCE.md, OTHER-TOOLS.md, RESEARCH.md, SKILLS-ADAPTATION.md, adr/, plans/ and specs/, nothing else"
 
 # ================================================================================================
 # 11. The citation policy section names all four checks (identity, support, whose finding it is,
