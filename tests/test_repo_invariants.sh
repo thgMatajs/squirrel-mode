@@ -3891,6 +3891,57 @@ assert_eq "yes" "$([ -n "$mbkb_files_GC" ] && echo yes || echo no)" "GLOSSARY-CO
 assert_eq "" "$mbkb_in_scope_GC" "GLOSSARY-COST: every file carrying 'memory bank' or 'knowledge base' must be one the glossary denylist exempts (it is quoting the avoid list, not breaking it). A file in the scan's own scope carrying either phrase is the violation the two terms were added to catch"
 
 # ==========================================================================
+# PROFILE-CAP-COUNT. PLAN.md's profile cap figure, re-derived from the hook.
+#
+#     PLAN.md said "The SessionStart hook caps what it injects at 100 lines
+#     / 4 KB". It caps the profile BODY at those, and two fixed additions
+#     were deliberately moved OUTSIDE that budget when the per-line/
+#     per-stream byte bug was fixed: the truncation notice, and the
+#     "[profile] " marker neutralise_forged_lines puts in front of any body
+#     line spelling a reserved prefix - PROFILE_MAX_LINES of them in the
+#     worst case. So the sentence understated the real ceiling by about a
+#     kilobyte, and understated it in the one document a reader goes to for
+#     the budget.
+#
+#     scripts/load-profile.sh already carries the arithmetic beside
+#     PROFILE_MAX_LINES, and tests/test_hooks.sh 34b-G already asserts the
+#     1000-byte marker cost against the real hook. What was missing is
+#     anything tying PLAN.md to either. This recomputes the ceiling from
+#     the script's own three constants and requires both documents to
+#     publish it, so the two cannot drift apart again - and, like
+#     GLOSSARY-COST, it fails and prints the right number rather than
+#     needing anyone to remember to recheck.
+#
+#     KB here is 1000 bytes, not 1024, because that is the unit
+#     scripts/load-profile.sh's own comment uses ("About 5.1 KB, against
+#     4.1 KB before"); the point of the figure is the order of magnitude
+#     and the fact that neither addition scales with profile.md.
+# ==========================================================================
+lp_file_PC="$repo_root/scripts/load-profile.sh"
+plan_body_PC=$(cat "$repo_root/PLAN.md" 2>/dev/null || printf '')
+lp_body_PC=$(cat "$lp_file_PC" 2>/dev/null || printf '')
+
+max_lines_PC=$(sed -n 's/^PROFILE_MAX_LINES=\([0-9][0-9]*\)$/\1/p' "$lp_file_PC")
+max_bytes_PC=$(sed -n 's/^PROFILE_MAX_BYTES=\([0-9][0-9]*\)$/\1/p' "$lp_file_PC")
+marker_len_PC=$(sed -n "s/^PROFILE_LINE_MARKER='\\(.*\\)'\$/\\1/p" "$lp_file_PC" | awk '{ print length($0) }')
+
+assert_eq "yes" "$([ -n "$max_lines_PC" ] && [ -n "$max_bytes_PC" ] && [ -n "$marker_len_PC" ] && [ "$marker_len_PC" -gt 0 ] && echo yes || echo no)" "PROFILE-CAP-COUNT, control: PROFILE_MAX_LINES, PROFILE_MAX_BYTES and PROFILE_LINE_MARKER must all be readable out of scripts/load-profile.sh - a renamed or reshaped constant would otherwise make every figure below compare against an empty string"
+
+marker_cost_PC=$((max_lines_PC * marker_len_PC))
+# LC_ALL=C on the awk: `printf "%.1f"` honours the locale's decimal
+# separator, so under pt_BR/de_DE/fr_FR this produced "5,1" and reported a
+# drift that was really a comma. Caught on the machine this was written on,
+# which is exactly the kind of environment-shaped false failure a fixed
+# figure must not have.
+ceiling_kb_PC=$(LC_ALL=C awk -v b="$max_bytes_PC" -v m="$marker_cost_PC" 'BEGIN { printf "%.1f", (b + m) / 1000 }')
+
+assert_contains "$plan_body_PC" "$max_lines_PC × $marker_len_PC" "PROFILE-CAP-COUNT: PLAN.md must show where the marker budget comes from - PROFILE_MAX_LINES × the marker's length, $max_lines_PC × $marker_len_PC as the hook defines them today"
+assert_contains "$plan_body_PC" "= $marker_cost_PC bytes" "PROFILE-CAP-COUNT: PLAN.md must publish the marker budget itself, $marker_cost_PC bytes"
+assert_contains "$plan_body_PC" "$ceiling_kb_PC KB" "PROFILE-CAP-COUNT: PLAN.md must publish the real worst case, about $ceiling_kb_PC KB (PROFILE_MAX_BYTES $max_bytes_PC + $marker_cost_PC bytes of markers + one notice line), not the body cap alone"
+assert_contains "$lp_body_PC" "$ceiling_kb_PC KB" "PROFILE-CAP-COUNT: scripts/load-profile.sh must publish the same worst case beside its own constants - two documents naming one ceiling is how they stay in step"
+assert_not_contains "$plan_body_PC" "caps what it injects at $max_lines_PC lines" "PROFILE-CAP-COUNT: PLAN.md must not describe the cap as bounding what the hook INJECTS. It bounds the profile BODY; the truncation notice and the markers are added after the cut, on purpose, and saying otherwise understates the ceiling by about a kilobyte"
+
+# ==========================================================================
 # SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.
 # This file's own leak was one directory per run, caused by a second
 # `trap ... EXIT` replacing the first — see the cleanup header at the top.

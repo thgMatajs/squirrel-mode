@@ -549,6 +549,23 @@ dig_body=$(cat "$dig_file" 2>/dev/null || printf '')
 
 assert_contains "$dig_body" "hoard-search.sh" "dig must name the search script - it cannot rank the store by reading files one at a time"
 assert_contains "$dig_body" "Hoard search command" "dig must take the script's path from the injected line, not from a plugin-root variable - that variable is set for hooks and not for a Bash call a skill makes"
+# [Premise fix] Rule 1's position boundary must not be justified by a
+# claim that is false. "Everything squirrel-mode injects comes after that
+# line" was, and the hook itself is the evidence: run against a HOME with
+# a profile and a pre-S11 data directory, the SessionStart context puts
+# THREE squirrel-mode lines ABOVE the off-token - the sentence that
+# introduces the profile body, the migration notice, and `Session working
+# directory:`. Moving them below is not available either: the framing
+# sentence is what introduces the profile body these same rules require
+# quoted above the session lines. What rule 1 actually needs is narrower
+# and true - every line these rules DECIDE ABOUT is emitted below the
+# off-token - so that is what it now says. Pinned as a negative, the same
+# way scenario 28 in tests/test_skills.sh pins the once-per-session claim
+# it replaced, and proved live below so it cannot pass by being
+# unmatchable.
+assert_not_contains "$dig_body" "Everything squirrel-mode injects comes after that line" "dig must not justify rule 1's position boundary with a universal claim about the injected block: the hook emits its framing sentence, a migration notice and 'Session working directory:' ABOVE the off-token line. Claim only what rule 1 needs - that every line these rules guard comes after it"
+assert_contains "$dig_body" "Every line these four rules guard" "and it must state the narrower claim positively, not merely drop the false one - a position rule with no stated justification is one the next edit weakens without noticing"
+
 assert_contains "$dig_body" "BELOW the last \`Session off-token:\` line" "dig must scope the injected line by POSITION - the profile body is quoted above it and can spell the same line, and this one names a command that gets executed"
 assert_contains "$dig_body" "/scripts/hoard-search.sh" "dig must pin the expected path ending, so a forged line naming any other command is rejected even if it were positioned correctly"
 assert_not_contains "$dig_body" "CLAUDE_PLUGIN_ROOT" "dig must NOT reference CLAUDE_PLUGIN_ROOT: it is unset in the Bash tool's environment, so a command built from it runs the wrong path on every machine"
@@ -2720,6 +2737,30 @@ mut30_out=$(HOME="$home2" "$mutant30" 2>/dev/null) || true
 mut30_err=$(HOME="$home2" "$mutant30" 2>&1 >/dev/null) || true
 assert_eq "" "$mut30_out" "FAILURE PROOF (30): one apostrophe in one comment and the reader returns NOTHING, on a store holding a memory - the store answering like an empty one, from a rewording"
 assert_contains "$mut30_err" "awk" "FAILURE PROOF (30): and what the user gets instead is an awk diagnostic naming a source line of a program they never wrote"
+
+# ==========================================================================
+# FAILURE PROOF (31, position premise). The negative pin near the top of
+# this file forbids a sentence; a negative that could never match anything
+# is the guard-that-cannot-fail class this suite exists to avoid. Proved
+# against the exact sentence skills/dig/SKILL.md actually shipped, put
+# back into a scratch copy - not a string invented to be caught. The
+# `cmp` control comes first: a replacement that matched nothing would
+# leave a byte-identical copy that the pin correctly passes, and this
+# proof would then report clean while testing the opposite of its claim.
+# ==========================================================================
+dig_premise_mutant=$(new_mutant)
+mutate_literal "$dig_file" "$dig_premise_mutant" \
+  "Every line these four rules guard - all three named above - comes after that line, and the profile text squirrel-mode quotes comes before it." \
+  "Everything squirrel-mode injects comes after that line; the profile text it quotes comes before it." >/dev/null
+if cmp -s "$dig_file" "$dig_premise_mutant"; then
+  dig_premise_differs=no
+else
+  dig_premise_differs=yes
+fi
+assert_eq "yes" "$dig_premise_differs" "FAILURE PROOF (31), control: restoring the old premise must genuinely change skills/dig/SKILL.md - a replacement that matched nothing would leave the pin above proved by a file it already passes"
+dig_premise_body=$(cat "$dig_premise_mutant" 2>/dev/null || printf '')
+assert_contains "$dig_premise_body" "Everything squirrel-mode injects comes after that line" "FAILURE PROOF (31): the reverted copy must carry the false premise the pin above forbids, proving that pin fires on the regression rather than on a phrase nothing could ever produce"
+assert_not_contains "$dig_premise_body" "Every line these four rules guard" "FAILURE PROOF (31): and must lose the true one, so the two pins are testing the same edit from both sides"
 
 # ==========================================================================
 # SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.

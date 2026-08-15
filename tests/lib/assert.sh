@@ -207,6 +207,20 @@ assert_exit_code() {
 # other programs' scratch. The snapshot is what makes that residue
 # invisible to the check - it subtracts whatever was already there.
 #
+# NARROWED TO THIS SUITE'S OWN PREFIX, deliberately, and this is what it
+# costs. The snapshot subtracts residue that existed BEFORE the run; it
+# cannot subtract a file some unrelated process drops into $TMPDIR
+# DURING it, and a suite run takes minutes on a real machine whose
+# $TMPDIR is shared with everything else the user is running. Without a
+# filter this lock would eventually go red naming a path the suite never
+# touched - a guard that blocks correct work, which this repo deletes
+# rather than ships. So it only judges entries named `squirrel-*`, which
+# every mktemp template in tests/ uses, scratch roots included. WHAT
+# THAT GIVES UP, since a narrowing that does not say so is the half-true
+# guarantee these files exist to stop: a future helper that mktemps
+# under some other prefix leaks silently, exactly as the four fixed here
+# did. The prefix is the contract; keep to it.
+#
 # Called BEFORE the trap fires (the last assertions in a file), so the
 # paths still exist: what is asserted is that each is on the list the
 # trap will remove, not that it is already gone.
@@ -236,6 +250,15 @@ assert_no_scratch_leak() {
   ansl_leaked=""
   for ansl_e in "${TMPDIR:-/tmp}"/*; do
     [ -e "$ansl_e" ] || continue
+    case "${ansl_e##*/}" in
+      squirrel-*)
+        # This suite's scratch, by the prefix every mktemp template here
+        # uses. See the header above for what judging only these gives up.
+        ;;
+      *)
+        continue
+        ;;
+    esac
     case "$ansl_before" in
       *"|$ansl_e|"*)
         # Already there before this file ran - not ours.
