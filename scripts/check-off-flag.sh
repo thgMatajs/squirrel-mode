@@ -374,6 +374,14 @@ sanitize_session_id() {
 nl='
 '
 
+# cr: the carriage return, built with printf for the reason a literal one
+# cannot be used - it cannot be seen in a source file, and an editor that
+# normalises line endings would silently eat it. Needed alongside $nl by
+# fold_line_breaks below, which folds the same two bytes
+# scripts/load-profile.sh folds, in the same order and by the same
+# structure - see that function for why the order is load-bearing.
+cr=$(printf '\r')
+
 # read_sentinel_trimmed <path>: sets the global SENTINEL_CONTENTS to the
 # exact byte content of <path> with AT MOST ONE trailing newline byte
 # removed - not "however many trailing newlines happen to be there"
@@ -475,7 +483,95 @@ sentinel_basename_suffix() {
 #     ignored; cwd may be empty)
 #   - foreign token-shaped: suffix sanitises but differs → not claimable
 #   - legacy tokenless: suffix fails sanitise → claimable only when
-#     trimmed contents equal <cwd> and <cwd> is non-empty
+#     trimmed contents equal <cwd>, OR equal the FOLDED spelling of
+#     <cwd> that the model was actually shown (see below), and <cwd>
+#     is non-empty
+#
+# THE FOLDED SPELLING IS ACCEPTED TOO, AND THAT CLOSES A REAL DIVERGENCE
+# BETWEEN TWO HOOKS. The value the model writes into a legacy sentinel is
+# the one it was given, and it was given the "Session working directory:"
+# line that scripts/load-profile.sh emits - which that hook FOLDS, every
+# line break in the value becoming one space, so the interpolated value
+# cannot open a second line in the model's context. This hook then
+# compared the sentinel against the RAW `cwd` off its own stdin. For any
+# project whose path contains a line break the two hooks were therefore
+# talking about different strings: what was emitted could never equal
+# what was compared, and the legacy claim silently never fired.
+#
+# NOT A REGRESSION, AND SAID SO PLAINLY: before the fold existed that
+# same path broke the injected line in two, so the model was never shown
+# a usable value either. What was missing was that the fold's own list of
+# costs did not name this consumer at all. Accepting BOTH spellings
+# closes it without invalidating any sentinel already on disk - the raw
+# comparison is tried first and is unchanged.
+#
+# THE FOLD IS RE-IMPLEMENTED HERE RATHER THAN SHARED. These are two
+# separate POSIX sh programs that the harness runs as separate processes
+# on different events; there is no library either can source, and this
+# plugin ships no mechanism to make one. So the rule is duplicated, and
+# it is duplicated VISIBLY, named after its origin, rather than hidden
+# behind a helper that reads as if it were independent.
+#
+# THE RESIDUAL COLLISION, STATED RATHER THAN CLOSED: a path containing a
+# literal space and a path containing a line break in the same position
+# fold to the SAME string, so a legacy sentinel written by one is
+# claimable by the other. It costs an off-switch binding between two
+# sibling projects whose paths differ only by that byte, on the legacy
+# tokenless path that every current /squirrel:off has already stopped
+# writing. Narrowing it would mean not folding, which re-opens the
+# forged-line hole the fold exists to close.
+#
+# THE CAP IS NOT MIRRORED, deliberately. load-profile.sh also caps the
+# emitted value at 4096 bytes, so a cwd past that is emitted shortened
+# and would not match here. That case is left alone because no real path
+# reaches it - macOS PATH_MAX is 1024 and Linux's 4096 - and mirroring a
+# cut here would mean this hook could claim a sentinel on a PREFIX of a
+# path, which is a worse failure than not claiming one.
+squash_one_break_local() {
+  # squash_one_break_local <text> <delimiter>: <text> with every
+  # occurrence of <delimiter> replaced by a single space. Deliberately
+  # the same shape, and the same name-stem, as squash_one_break in
+  # scripts/load-profile.sh: this must mirror that function, and a mirror
+  # that is spelled differently is a mirror nobody can check.
+  sobl_text=$1
+  sobl_sep=$2
+  sobl_out=""
+  while :; do
+    case "$sobl_text" in
+      *"$sobl_sep"*)
+        sobl_out="$sobl_out${sobl_text%%"$sobl_sep"*} "
+        sobl_text=${sobl_text#*"$sobl_sep"}
+        ;;
+      *) break ;;
+    esac
+  done
+  printf '%s%s' "$sobl_out" "$sobl_text"
+}
+
+fold_line_breaks() {
+  # fold_line_breaks <text>: <text> with every LF and CR replaced by one
+  # space - the same transformation scripts/load-profile.sh performs on
+  # the value it emits, applied here to the value this hook compares.
+  #
+  # ONE DELIMITER PER PASS, TWO PASSES, IN THAT ORDER, because the
+  # obvious single loop over both delimiters IS WRONG and the origin's
+  # own comment says why: "a single pass that tried to handle two
+  # delimiters would have to decide which comes first in the remaining
+  # text, and getting that wrong drops bytes."
+  #
+  # This function was first written as that single loop and reproduced
+  # the predicted defect exactly. On a CRLF value "A\r\nB" the LF arm
+  # matches first and swallows the CR into the output, where nothing ever
+  # revisits it: the result was "A\r B", CR intact, while load-profile.sh
+  # emits "A  B". So the two hooks STILL disagreed on precisely the input
+  # this function exists to reconcile - a fix whose own headline claim
+  # was false for CRLF. Written the origin's way, they agree.
+  flb_text=$1
+  flb_text=$(squash_one_break_local "$flb_text" "$nl")
+  flb_text=$(squash_one_break_local "$flb_text" "$cr")
+  printf '%s' "$flb_text"
+}
+
 sentinel_matches_this_session() {
   path=$1
   prefix=$2
@@ -494,6 +590,18 @@ sentinel_matches_this_session() {
   if [ "$SENTINEL_CONTENTS" = "$cwd" ]; then
     return 0
   fi
+  # The folded spelling, tried only when the raw one did not match, so
+  # the ordinary case is byte-identical to what it always was and costs
+  # nothing extra. Guarded with `case` first for the same reason: a cwd
+  # with no line break in it cannot fold to anything different, and most
+  # have none.
+  case "$cwd" in
+    *"$nl"* | *"$cr"*)
+      if [ "$SENTINEL_CONTENTS" = "$(fold_line_breaks "$cwd")" ]; then
+        return 0
+      fi
+      ;;
+  esac
   return 1
 }
 

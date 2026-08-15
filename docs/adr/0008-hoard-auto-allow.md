@@ -113,6 +113,7 @@ remembered writing it.
    | hard link, `Write` | defer | 1 `cat`, 4 `jq`, 2 `grep`, 1 `find` |
    | `allow`, leaf absent | allow | 1 `cat`, 4 `jq`, 2 `grep` |
    | `allow`, leaf present | allow | 1 `cat`, 4 `jq`, 2 `grep`, 1 `find` |
+   | `jq` absent from `PATH` | defer | 1 `cat`, 1 `sed`, 1 `head` |
 
    `input=$(cat)` runs on every call before any decision; both field extractions run `jq`; and the
    credential defer is not merely un-free, it is **produced by** a `grep`. The claim that survives
@@ -121,9 +122,17 @@ remembered writing it.
    are not a leak: that defer is Layer 2b's own, produced *by* the `find`, exactly as the credential
    defer is produced by the `grep`. Written without the enumeration — "no `find` on any defer" — the
    corrected claim would be false for those two rows, which is the same shape of overstatement it
-   replaces. `HOARD-14f` asserts the table row by row. The same overstatement sat in
-   `scripts/allow-checkpoint.sh` as "the only test in this file that spawns a process", and was
-   corrected there in the same pass.
+   replaces. `HOARD-14f` asserts every row of the table, the last one included. The same
+   overstatement sat in `scripts/allow-checkpoint.sh` as "the only test in this file that spawns a
+   process", and was corrected there in the same pass.
+
+   **The last row is new, and it is why "enumerate" is the operative word.** A paragraph whose whole
+   job is to enumerate had no row for the machine with no `jq`: that decision spends a `sed` and a
+   `head` — the regex fallback `extract_field` drops to — and neither tool appeared anywhere in the
+   table. Nothing in the corrected claim becomes false (`find` is still not spawned; the defer is
+   still decided before Layer 2b), so this is an incomplete enumeration rather than an untrue one.
+   It is filled in because the previous three defects in this section were all of exactly that
+   shape: a true sentence standing in for a complete one.
 
    **What `find` must say before this layer believes it, and what it cannot be asked.** The test was
    `[ -n "$(find …)" ]`: any byte on stdout counted as "link count above one", the exit status was
@@ -142,6 +151,18 @@ remembered writing it.
    - **A `find` whose output never names the leaf cannot prove a hard link**, so on such a machine
      the hard-linked path is auto-approved. That is the price of not deferring on a banner, and it
      is the same class of limit as `find` being absent.
+
+     *How a machine actually ends up there is line FORMATTING, not exotic behaviour, and that was
+     not written down.* Measured with real shims, on a leaf that genuinely has two links: a `find`
+     printing `./<path>` auto-approves, and one printing only the basename auto-approves. Both name
+     the file; neither spells the string this layer compares, which is the absolute path it built.
+     A `find` printing the path with a trailing CR — a CRLF wrapper — used to fall in here too and
+     **no longer does**: the comparison now also accepts the leaf followed by one CR, which costs no
+     process and no new tool. The other two are left open deliberately. Matching a basename or a
+     `./`-relative form means matching a substring of a line rather than the line, and a banner that
+     merely *contains* the basename would then defer every ordinary rewrite again — which is the
+     exact defect the line-wise comparison was introduced to fix. A duplicate path on two lines was
+     checked and is **not** affected: it still defers, because one of those lines is an exact match.
    - **A `find` that never returns hangs this hook.** POSIX `sh` has no timeout, so there is nothing
      to close. It is not tested either, because a test for it would hang too.
 
@@ -274,10 +295,27 @@ api_key_rotation: docs/runbooks/rotacao-de-chaves.md
 
 None is a credential. The dominant trigger is the value class `[^[:space:]]{16,}`, which **any URL
 and any file path satisfies**; two of the five are ordinary Portuguese words whose first letters
-spell a keyword. The other ten of the fifteen — `type: feedback`, `title: …`, `tags: git, tests`,
-`runbook: docs/runbooks/deploy-blue-green.md`, `owner: time-de-plataforma`, and five more — are
-auto-approved. `HOARD-16f` asserts all fifteen rows, from both ends, so this rate is re-derived on
-every run instead of being a number in a document.
+spell a keyword. The other ten of the fifteen are auto-approved:
+
+```
+type: feedback
+title: never commit without running the test suite
+tags: git, tests
+importance: 4
+status: active
+runbook: docs/runbooks/deploy-blue-green.md
+owner: time-de-plataforma
+o build quebrou porque o cache do gradle ficou desatualizado
+prefer removing a check, with its limit written down, over narrowing one
+a suite leva 5 minutos; rode antes de commitar
+```
+
+**All ten are printed, and that is a correction.** This paragraph used to name five of them and end
+"and five more", so the published rate of 5/15 could not be checked against anything this document
+contains — a reader had to open `HOARD-16f` to find out what the denominator was made of. A rate
+whose corpus is half-published is a rate on trust. `HOARD-16f` asserts all fifteen rows, from both
+ends, so the number is re-derived on every run instead of being a figure in a document; printing
+the corpus here is what lets a reader audit it without running anything.
 
 **The rate was not treated as a reason to undo the widening**, because the asymmetry this ADR is
 built on has not changed: a false positive costs one prompt on one write, a false negative writes a

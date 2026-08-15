@@ -415,7 +415,7 @@ PIN_SKILLS_ON_HARDOFF='The hard off is `/plugin disable squirrel@squirrel-mode`,
 # six (the `client` entry below was never declared at all), and its one
 # line-number citation pointed 136 lines above the sentence it quoted,
 # because the ADR grew after the citation was written.
-#   - `adr-glossary-hit docs/adr/0008-hoard-auto-allow.md:200` — "the
+#   - `adr-glossary-hit docs/adr/0008-hoard-auto-allow.md:221` — "the
 #     skill's own instruction not to write one is the only thing in front
 #     of it". `the skill` is in the regex. Defensible: that paragraph is
 #     reasoning about one specific skill file (skills/stash/SKILL.md) and
@@ -427,7 +427,7 @@ PIN_SKILLS_ON_HARDOFF='The hard off is `/plugin disable squirrel@squirrel-mode`,
 #     `adr-glossary-hit docs/adr/0005-session-flag-off-switch.md:62` —
 #     three more `the skill`, all of them about `/squirrel:off`'s own
 #     skill file. Same shape, same judgement.
-#   - `adr-glossary-hit docs/adr/0008-hoard-auto-allow.md:219` — "Google
+#   - `adr-glossary-hit docs/adr/0008-hoard-auto-allow.md:240` — "Google
 #     OAuth client secrets", in the list of token families the secret
 #     scanner has no arm for. `client` is in the regex because
 #     CONTEXT.md's Target entry reserves it, and this is not that word at
@@ -3672,63 +3672,118 @@ assert_eq "" "$mutant15_addsentence_manual_violations" "LEGITIMATE REWORDING 4/4
 # every tracked file outside `tests/` — the exclusion those content scans all take, for the
 # self-reference reason the top of this file sets out: this very block has to name the phrase it
 # forbids.
+# IT IS SCANNED FLATTENED, NOT LINE BY LINE, AND THAT IS THE SECOND FIX. The scan used to be
+# `git grep -lF`, which matches inside ONE line, so the identical claim written across two lines of
+# the same comment passed clean. Proved by mutation rather than argued: with the sentence on a
+# single line the suite reported `pass=141 fail=1`; with the SAME sentence broken across two comment
+# lines it reported `pass=142 fail=0`. That is not a hypothetical shape either — the file this
+# invariant most needs to cover, `scripts/allow-checkpoint.sh`, wraps its comments at about 72
+# columns, so a claim of this length is MORE likely to be split than not. That both original
+# occurrences happened to sit on one line each was luck, and a guard resting on luck about line
+# breaks is a guard that reports on formatting rather than on content.
+#
+# So each tracked file is flattened first — leading indentation and any comment or list marker
+# stripped from every line, runs of blank space squashed, the whole file joined into one line — and
+# the needles are matched against that. What that costs is stated rather than implied: the flattened
+# form can join two genuinely unrelated sentences across a paragraph break, so a file that ended one
+# sentence with "…plugin creates" and began the next with "that directory…" would be reported. No
+# tracked file does, the needles are long enough to make it unlikely, and a false report here costs
+# one reader one minute — while a false pass costs a whole cycle, which is what happened.
 NO_PLUGIN_CREATES_ROOT_NEEDLES='plugin creates that directory
 plugin creates both directories'
 
-plugin_creates_hits=""
-old_ifs_16=$IFS
-IFS='
+plugin_creates_scan() {
+  # plugin_creates_scan <root> <newline-separated relative paths> — prints one "<needle>:<path>"
+  # line per hit, reading each file FLATTENED.
+  #
+  # A FUNCTION, AND THAT IS THE THIRD FIX. The live assertion and the failure proof must run THE
+  # SAME CODE, or the proof does not prove anything about the assertion. The previous proof only
+  # showed that `grep -F` could match the stale sentence in a scratch file — a fact about `grep`,
+  # not about this invariant. It never once showed the assertion going red, so a scan that skipped
+  # every file, or read the wrong tree, would have satisfied it exactly as well.
+  pcs_root=$1
+  pcs_files=$2
+  printf '%s\n' "$pcs_files" | while IFS= read -r pcs_f; do
+    [ -n "$pcs_f" ] || continue
+    [ -f "$pcs_root/$pcs_f" ] || continue
+    # `sed | tr | tr` rather than an awk accumulator: appending to one string per line is quadratic
+    # in the awks this repo ships to, and some tracked files run to thousands of lines. Each stage
+    # here is a linear stream. The marker class covers shell comments, Markdown blockquotes and
+    # Markdown list bullets, which is every way a wrapped claim is spelled in this tree.
+    pcs_flat="$glossary_avoid_scratch/flat.$$"
+    sed -e 's/^[[:space:]]*//' -e 's/^[#>*-][#>*-]*[[:space:]]*//' "$pcs_root/$pcs_f" 2>/dev/null \
+      | tr '\n' ' ' | tr -s ' ' >"$pcs_flat" 2>/dev/null || continue
+    pcs_old_ifs=$IFS
+    IFS='
 '
-for needle_16 in $NO_PLUGIN_CREATES_ROOT_NEEDLES; do
-  IFS=$old_ifs_16
-  hits_16=$(git -C "$repo_root" grep -lF -- "$needle_16" 2>/dev/null | grep -v '^tests/' || true)
-  if [ -n "$hits_16" ]; then
-    plugin_creates_hits="$plugin_creates_hits $needle_16:$(printf '%s' "$hits_16" | tr '\n' ',')"
-  fi
-  IFS='
+    for pcs_needle in $NO_PLUGIN_CREATES_ROOT_NEEDLES; do
+      IFS=$pcs_old_ifs
+      if grep -qF -- "$pcs_needle" "$pcs_flat" 2>/dev/null; then
+        printf '%s:%s\n' "$pcs_needle" "$pcs_f"
+      fi
+      IFS='
 '
-done
-IFS=$old_ifs_16
+    done
+    IFS=$pcs_old_ifs
+    rm -f "$pcs_flat"
+  done
+}
+
+plugin_creates_tracked=$(git -C "$repo_root" ls-files 2>/dev/null | grep -v '^tests/' || true)
+assert_eq "yes" "$([ -n "$plugin_creates_tracked" ] && echo yes || echo no)" "control (invariant 16): the tracked-file list outside tests/ must be non-empty — an empty list makes the scan below pass by reading nothing at all, which is the exact way a repo-wide negative goes quietly vacuous"
+plugin_creates_hits=$(plugin_creates_scan "$repo_root" "$plugin_creates_tracked" | tr '\n' ' ')
 assert_eq "" "$plugin_creates_hits" "no tracked file outside tests/ may say this plugin creates either governed root — nothing does; both come into existence as the parent directory of the model's first Write, and the symlink boundary rests on 'a plain file write never produces a symlink' instead"
 
 # FAILURE PROOF. A negative that could never match anything is the "guard that cannot fail for its
-# own target" class this repo has been bitten by repeatedly, so each needle is proved against real
-# document text with the stale sentence restored — not against a phrase typed to match itself.
-plugin_creates_mutant="$glossary_avoid_scratch/adr0002_stale.md"
+# own target" class this repo has been bitten by repeatedly. Both needles are proved against real
+# document text with the stale sentence restored — and, unlike the version this replaces, proved by
+# running THE ASSERTION'S OWN SCAN over a corpus containing the mutant and watching it come back
+# NON-EMPTY. "The needle matches in a scratch file" was the old proof and it is not the same claim.
+plugin_creates_corpus="$glossary_avoid_scratch/inv16-corpus"
+mkdir -p "$plugin_creates_corpus/docs/adr" "$plugin_creates_corpus/scripts"
+
+# Mutant one: ADR-0002 with the stale clause restored, ON ONE LINE — the shape the old scan could
+# see, kept so the new scan is proved to be a superset of the old one and not a replacement that
+# lost a case.
 sed "s|the only mechanism that ever creates that directory is a plain file write through this plugin's own flow, and a plain file write never produces a symlink|only the plugin creates that directory|" \
-  "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" >"$plugin_creates_mutant"
-if cmp -s "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" "$plugin_creates_mutant"; then
+  "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" >"$plugin_creates_corpus/docs/adr/0002-checkpoint-auto-allow.md"
+if cmp -s "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" "$plugin_creates_corpus/docs/adr/0002-checkpoint-auto-allow.md"; then
   plugin_creates_mutant_differs=no
 else
   plugin_creates_mutant_differs=yes
 fi
 assert_eq "yes" "$plugin_creates_mutant_differs" "FAILURE PROOF (invariant 16), control: restoring the stale clause must genuinely change docs/adr/0002-checkpoint-auto-allow.md — a sed that matched nothing would leave a byte-identical copy and prove nothing"
-if grep -qF -- "plugin creates that directory" "$plugin_creates_mutant" 2>/dev/null; then
-  plugin_creates_needle_live=yes
-else
-  plugin_creates_needle_live=no
-fi
-assert_eq "yes" "$plugin_creates_needle_live" "FAILURE PROOF (invariant 16): with the stale clause restored in a real copy of ADR-0002, the needle must find it — this is the sentence that survived a whole cycle because the guard that forbade it only ever read one script"
 
-# The second needle's own liveness, proved the same way against the OTHER document that used to
-# carry the both-roots spelling: scripts/allow-checkpoint.sh, whose stale wording HOARD-18b already
-# restores in a mutant. Re-derived here rather than cross-referenced, so this file's assertion does
-# not depend on another file having run.
-plugin_creates_mutant2="$glossary_avoid_scratch/allow_checkpoint_stale.sh"
-sed "s|legitimate, because the only thing that ever creates either root is a|legitimate, because this plugin creates both directories itself - see|" \
-  "$repo_root/scripts/allow-checkpoint.sh" >"$plugin_creates_mutant2"
-if cmp -s "$repo_root/scripts/allow-checkpoint.sh" "$plugin_creates_mutant2"; then
+# Mutant two: allow-checkpoint.sh with the both-roots spelling restored and BROKEN ACROSS TWO
+# COMMENT LINES at roughly the column that file actually wraps at. This is the case the old scan
+# missed entirely, written the way the real file would have written it.
+# The replacement carries a BACKSLASH FOLLOWED BY A REAL NEWLINE, which is how POSIX sed spells
+# "insert a line break here". `\n` in a replacement is NOT portable - BSD sed writes a literal "n",
+# which would put the whole phrase back on one line and make the control below fail loudly. It did,
+# on the first attempt; kept as a real newline rather than as an escape for exactly that reason.
+#
+# THE BREAK FALLS INSIDE THE NEEDLE, not merely somewhere in the sentence, and that is the whole
+# construction. A first attempt broke the line just BEFORE the phrase, which left
+# "plugin creates both directories" sitting contiguously on line two - and a plain grep found it,
+# so the mutant proved nothing about flattening. The needle has to straddle the boundary:
+# "…plugin creates" ends one line and "both directories…" opens the next.
+plugin_creates_split_repl='legitimate, because this plugin creates\
+# both directories itself - see'
+sed "s|legitimate, because the only thing that ever creates either root is a|$plugin_creates_split_repl|" \
+  "$repo_root/scripts/allow-checkpoint.sh" >"$plugin_creates_corpus/scripts/allow-checkpoint.sh"
+if cmp -s "$repo_root/scripts/allow-checkpoint.sh" "$plugin_creates_corpus/scripts/allow-checkpoint.sh"; then
   plugin_creates_mutant2_differs=no
 else
   plugin_creates_mutant2_differs=yes
 fi
 assert_eq "yes" "$plugin_creates_mutant2_differs" "FAILURE PROOF (invariant 16), control: restoring the both-roots spelling must genuinely change scripts/allow-checkpoint.sh"
-if grep -qF -- "plugin creates both directories" "$plugin_creates_mutant2" 2>/dev/null; then
-  plugin_creates_needle2_live=yes
-else
-  plugin_creates_needle2_live=no
-fi
-assert_eq "yes" "$plugin_creates_needle2_live" "FAILURE PROOF (invariant 16): and the both-roots needle must find its own sentence when restored — two needles, two live proofs, so neither can pass by being unmatchable"
+assert_eq "no" "$(grep -qF -- 'plugin creates both directories' "$plugin_creates_corpus/scripts/allow-checkpoint.sh" 2>/dev/null && echo yes || echo no)" "FAILURE PROOF (invariant 16), control: and the split mutant must be INVISIBLE to a plain line-wise grep — if a contiguous grep could still see it, the row below would not be measuring the flattening fix at all. This is the mutation that turned pass=141 fail=1 into pass=142 fail=0 under the old scan"
+
+plugin_creates_proof_hits=$(plugin_creates_scan "$plugin_creates_corpus" 'docs/adr/0002-checkpoint-auto-allow.md
+scripts/allow-checkpoint.sh')
+assert_contains "$plugin_creates_proof_hits" "plugin creates that directory:docs/adr/0002-checkpoint-auto-allow.md" "FAILURE PROOF (invariant 16): the assertion's OWN scan must REPORT the one-line stale clause — this is the sentence that survived a whole cycle because the guard that forbade it only ever read one script"
+assert_contains "$plugin_creates_proof_hits" "plugin creates both directories:scripts/allow-checkpoint.sh" "FAILURE PROOF (invariant 16): and it must report the clause BROKEN ACROSS TWO COMMENT LINES, which a line-wise grep cannot see. Two needles, two live proofs, and both run the scan the live assertion runs rather than a grep typed beside it"
+assert_eq "2" "$(printf '%s\n' "$plugin_creates_proof_hits" | grep -c 'plugin creates' || true)" "FAILURE PROOF (invariant 16), the tally: exactly two hits, so the scan returns non-empty for the corpus that violates the invariant — which is the thing the previous proof never showed. A scan that read nothing would report zero here and still pass the live assertion above"
 
 # ==========================================================================
 # GLOSSARY-COST. Every figure the exclusion-4 comment publishes, re-derived.

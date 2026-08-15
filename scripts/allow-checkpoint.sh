@@ -267,6 +267,7 @@
 #   hard link, Write         defer   1 cat, 4 jq, 2 grep, 1 find
 #   allow, leaf absent       allow   1 cat, 4 jq, 2 grep
 #   allow, leaf present      allow   1 cat, 4 jq, 2 grep, 1 find
+#   jq absent from PATH      defer   1 cat, 1 sed, 1 head
 #
 # `input=$(cat)` runs on every call before any decision, and the two
 # field extractions run `jq`. The true and narrow claim, and the only one
@@ -279,7 +280,28 @@
 # exactly as the credential defer is produced by a `grep`. Writing the
 # claim without its enumeration - "no find on any defer" - is false for
 # precisely those two rows, which is the same shape of overstatement this
-# paragraph exists to correct. HOARD-14f asserts every row.
+# paragraph exists to correct. HOARD-14f asserts every row of this table.
+#
+# "ASSERTS EVERY ROW" WAS ITSELF FALSE, and it is repaired by adding the
+# assertion rather than by softening the sentence. The table had nine
+# rows and HOARD-14f asserted eight: `allow, leaf absent` - the row that
+# names what Layer 2b's placement actually buys, since the FIRST write of
+# a new memory spawns no `find` at all - was measured correct and never
+# pinned. That is the same defect one iteration after the correction of
+# "scenario 29 said it pinned FOUR claims and pins two": a coverage claim
+# nothing checked. It is now the ninth assertion, with a failure proof
+# that drops the `[ -f "$leaf" ]` guard - which changes no DECISION,
+# only the process count, which is why only a count could see it.
+#
+# THE LAST ROW IS NEW TOO, for the other half of the same defect. A
+# paragraph whose whole job is to enumerate had no row for the machine
+# with no `jq`: that decision spends a `sed` and a `head` - the regex
+# fallback extract_field drops to - and neither tool appeared anywhere
+# above. Nothing in the strong claim breaks (no `find`; the defer is
+# still decided before Layer 2b), so this was an INCOMPLETE enumeration
+# rather than an untrue sentence. Filled in because the three defects
+# this paragraph already records are all exactly that: a true sentence
+# standing in for a complete one.
 #
 # WHY A HARD LINK IS NOT ALSO REJECTED ABOVE THE LEAF: it cannot be
 # there. POSIX forbids hard links to directories, so every component
@@ -1264,9 +1286,9 @@ decide() {
   # literal string, and every occurrence of the identifier (which
   # includes the one line that assigns it, not only the uses of it).
   #
-  #   rename-cost literal-occurrences: 121
-  #   rename-cost identifier-occurrences: 193
-  #   rename-cost test-file-lines: 10296
+  #   rename-cost literal-occurrences: 122
+  #   rename-cost identifier-occurrences: 198
+  #   rename-cost test-file-lines: 10955
   checkpoints_dir=$(normalize_path "$home_dir/.squirrel/checkpoints") || checkpoints_dir="$home_dir/.squirrel/checkpoints"
   hoard_dir=$(normalize_path "$home_dir/.squirrel/hoard") || hoard_dir="$home_dir/.squirrel/hoard"
 
@@ -1473,9 +1495,31 @@ decide() {
     hl_out=$(find "$leaf" -links +1 2>/dev/null) || true
     hl_nl='
 '
+    hl_cr=$(printf '\r')
     hl_hit=no
     case "$hl_nl$hl_out$hl_nl" in
       *"$hl_nl$leaf$hl_nl"*) hl_hit=yes ;;
+      # A TRAILING CR IS ACCEPTED TOO, and that is the one line-formatting
+      # variant closed rather than documented. A `find` behind a CRLF
+      # wrapper prints "<path>\r\n", so the line this reads is the leaf
+      # followed by one CR - it NAMES the file exactly, and losing that
+      # match auto-approved a genuine hard link. Costs no process and no
+      # new tool. Measured with a real shim before and after.
+      #
+      # WHAT IS DELIBERATELY NOT MATCHED, measured the same way and left
+      # open: a `find` printing "./<path>" and one printing only the
+      # basename both still auto-approve. Both name the file; neither
+      # spells the absolute path this layer built, and matching either
+      # means matching a SUBSTRING of a line rather than the line - at
+      # which point a banner merely CONTAINING the basename defers every
+      # ordinary rewrite again, which is the exact defect the line-wise
+      # comparison was introduced to fix. They fall into the documented
+      # "a find that never names the leaf" limit; what was missing from
+      # the ADR and from this comment was that LINE FORMATTING is a way
+      # into that limit at all. A duplicate path on two lines was checked
+      # and is unaffected - one of those lines is an exact match, so it
+      # still defers.
+      *"$hl_nl$leaf$hl_cr$hl_nl"*) hl_hit=yes ;;
     esac
     case "$leaf" in
       *"$hl_nl"*) [ -z "$hl_out" ] || hl_hit=yes ;;

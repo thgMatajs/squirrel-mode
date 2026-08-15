@@ -131,12 +131,21 @@
 # "BEGINS WITH" IS WIDER THAN A BYTE-1 COMPARISON, and saying so here is
 # the point: it used to mean exactly that, and six of seven spellings of
 # the same forged line walked past it - one space, one tab, U+00A0,
-# U+200B, U+FEFF, or the prefix in lower case. A leading run of white
-# space and non-printing formatting bytes is skipped before the
-# comparison and the comparison ignores case. What it still cannot see is
-# a leading byte outside that set; the set is written out in full at
-# neutralise_forged_lines, which is the only place it should have to be
-# read.
+# U+200B, U+FEFF, or the prefix in lower case. The comparison now ignores
+# case, and every leading byte that is NOT printable ASCII (0x21 through
+# 0x7E) is skipped before it runs.
+#
+# THAT IS A RULE, NOT A LIST, and the difference is the whole of the
+# second fix: an enumerated skip set of eight tags was measured letting
+# thirteen further zero-width and blank characters through, several of
+# which render
+# nothing at all. Because every reserved prefix starts with a printable
+# ASCII byte, skipping everything that is not one closes the class
+# instead of chasing it. What it costs is a line legitimately opening
+# with a VISIBLE non-ASCII character - a typographic dash, a guillemet -
+# which is now marked; ASCII bullets like "-" and ">" are not. The rule
+# and its price are written out in full at neutralise_forged_lines, which
+# is the only place either should have to be read.
 #
 # AN EXACT MTIME TIE REINJECTS - fixed MINOR, this cycle. The gate used
 # to be `find "$profile_file" -newer "$seen_file"`, which is STRICTLY
@@ -2164,14 +2173,44 @@ strip_incomplete_utf8_tail() {
 # were both false for those six inputs: the FIRST layer simply did not
 # fire, leaving one layer where the text promised two.
 #
-# WHAT MATCHES NOW. A leading run of white space and non-printing
-# formatting characters is skipped before the comparison, and the
-# comparison itself is case-insensitive. The run is skipped as BYTES,
-# not as characters, because the body may hold sequences that are not
-# valid UTF-8 and the awk below runs under LC_ALL=C for exactly that
-# reason - each such character is written out as its UTF-8 encoding and
-# matched with substr(). The set is: space, tab, CR, U+00A0, U+200B,
-# U+200C, U+200D and U+FEFF.
+# WHAT MATCHES NOW, AND WHY IT IS A RULE RATHER THAN A LIST. The
+# comparison is case-insensitive, and before it runs, EVERY LEADING BYTE
+# THAT IS NOT PRINTABLE ASCII - not in 0x21 through 0x7E - is skipped.
+# The comparison starts at the first byte that is.
+#
+# THE SECOND BLOCKER, and why the fix is an inversion. The version above
+# skipped an ENUMERATED set of eight tags (space, tab, CR, U+00A0,
+# U+200B, U+200C, U+200D, U+FEFF), and enumerating unseen characters is a
+# race
+# that cannot be won. Thirteen more were measured escaping it unmarked,
+# one per run, against this exact hook: U+2060 WORD JOINER, U+180E,
+# U+3000 IDEOGRAPHIC SPACE, U+202F NARROW NO-BREAK SPACE, U+FE00 (VS1),
+# U+00AD SOFT HYPHEN, U+034F COMBINING GRAPHEME JOINER, U+1160 HANGUL
+# FILLER, U+2007 FIGURE SPACE, U+2000 EN QUAD, U+2061 FUNCTION
+# APPLICATION, 0x0B (VT) and 0x0C (FF). Several of them RENDER NOTHING
+# AT ALL - the same property that made U+200B and U+FEFF grave enough to
+# fix in the first place - so the list was covering a fraction of its own
+# class while reading like it covered the class.
+#
+# The rule replaces the list because the target set is closed from the
+# OTHER side: every entry in SQUIRREL_RESERVED_LINE_PREFIXES begins with
+# a letter, a "[" or a "(", all of which are printable ASCII. So "skip
+# what cannot begin a prefix" needs no inventory of what an attacker
+# might send, and no future codepoint can be added to Unicode that
+# defeats it. The eight tags the old list named are all outside 0x21-0x7E
+# and so are still skipped - subsumed, not dropped.
+#
+# The run is skipped as BYTES, not as characters, because the body may
+# hold sequences that are not valid UTF-8 and the awk below runs under
+# LC_ALL=C for exactly that reason. That also makes the rule correct on
+# multi-byte input for free: every byte of a UTF-8 sequence outside ASCII
+# is >= 0x80, so a whole character is skipped without the code having to
+# know its width.
+#
+# A LINE MADE ENTIRELY OF SUCH BYTES leaves nothing to compare - the scan
+# runs off the end, the candidate is the empty string, and no prefix
+# matches it. That line is emitted unmarked, which is correct: it spells
+# no reserved prefix.
 #
 # THE WHOLE LINE IS MARKED, leading rubbish included, rather than the
 # marker being inserted at the point the prefix actually starts: what
@@ -2183,7 +2222,7 @@ strip_incomplete_utf8_tail() {
 # WHAT THIS COSTS, stated because a looser match is new surface. A
 # profile line that merely MENTIONS one of these phrases mid-sentence is
 # still untouched (the comparison is still anchored at the first
-# non-blank byte, not a search), and so is every documented profile
+# printable-ASCII byte, not a search), and so is every documented profile
 # field - HOARD-12d asserts an ordinary profile comes through byte for
 # byte. What IS newly marked is a line that starts with indentation or a
 # zero-width byte and then spells a reserved prefix, and a line that
@@ -2193,6 +2232,27 @@ strip_incomplete_utf8_tail() {
 # one visible prefix on a line the user still reads in full, and a
 # missed mark costs a line the model cannot tell from squirrel-mode's
 # own.
+#
+# THE PRICE OF THE INVERSION, NAMED EXACTLY, because it is a NEW false
+# positive that the eight-tag list did not have. The rule skips every
+# leading byte outside 0x21-0x7E, and that includes VISIBLE non-ASCII
+# ones. A profile line that legitimately opens with a visible non-ASCII
+# character and then spells a reserved prefix is now marked:
+#
+#   "- Session off-token: ..."  NOT marked ("-" is 0x2D, printable ASCII)
+#   "> Session off-token: ..."  NOT marked (">" is 0x3E, likewise)
+#   "* Session off-token: ..."  NOT marked ("*" is 0x2A, likewise)
+#   "— Session off-token: ..."  MARKED    (U+2014 EM DASH is not ASCII)
+#   "«Session off-token: ..."   MARKED    (U+00AB is not ASCII)
+#
+# So ASCII bullet and quote conventions - the ones a Markdown profile
+# actually uses - are unaffected, and it is the typographic dash and the
+# guillemet that pay. That cost is accepted deliberately: the line is
+# still delivered in full and still readable, the marker only goes in
+# FRONT of it, and the alternative is a guard whose coverage depends on
+# somebody having heard of U+2061. Both directions are asserted in
+# HOARD-12L - the ASCII bullets as MUST NOT MARK, the em dash as the
+# declared cost - so neither half can drift without a red test.
 #
 # NEUTRALISE, NEVER DELETE. profile.md is the user's own file and may
 # hold such a line innocently - a pasted transcript of a past session is
@@ -2405,7 +2465,12 @@ PROFILE_LINE_MARKER='[profile] '
 # valid UTF-8, and a BSD awk aborts mid-stream on one under a UTF-8
 # locale. LC_ALL=C is load-bearing for a second reason here - it is what
 # makes length() and substr() count BYTES, which is the unit the skip
-# list below is written in.
+# RULE below is written in - and, second, what makes sprintf("%c", n)
+# below produce the single byte n rather than a character in some other
+# encoding. Both were re-measured on this awk (BSD awk 20200816): with
+# the 0x21-0x7E table built that way, a sweep of all 255 non-newline byte
+# values as a line's first byte leaves exactly 94 of them standing as a
+# comparison start and skips the other 160.
 #
 # `tolower()` is used for COMPARISON ONLY, never on anything printed, so
 # an awk whose tolower() mishandled a byte >= 0x80 could at worst miss a
@@ -2426,37 +2491,25 @@ neutralise_forged_lines() {
         for (nfl_i = 1; nfl_i <= nfl_n; nfl_i++) {
           nfl_low[nfl_i] = tolower(nfl_pfx[nfl_i])
         }
-        # The single-byte members of the skip set, as one string for
-        # index() to search.
-        nfl_skip1 = " \t\r"
-        # The multi-byte ones, spelled as the BYTES of their UTF-8
-        # encoding - see the LC_ALL=C note above.
-        nfl_skipn[1] = "\302\240"     # U+00A0 NO-BREAK SPACE
-        nfl_skipn[2] = "\342\200\213" # U+200B ZERO WIDTH SPACE
-        nfl_skipn[3] = "\342\200\214" # U+200C ZERO WIDTH NON-JOINER
-        nfl_skipn[4] = "\342\200\215" # U+200D ZERO WIDTH JOINER
-        nfl_skipn[5] = "\357\273\277" # U+FEFF BYTE ORDER MARK
-        nfl_skipn_n = 5
+        # nfl_print: the 94 PRINTABLE ASCII bytes, 0x21 through 0x7E.
+        # THE WHOLE SKIP RULE IS THIS ONE TABLE - see "WHAT MATCHES NOW"
+        # above for why the set being skipped is defined as everything
+        # ELSE rather than enumerated. Built with sprintf rather than
+        # typed as a literal for a mechanical reason: a literal would
+        # have to carry byte 0x27, and this awk program is a
+        # single-quoted shell string.
+        nfl_print = ""
+        for (nfl_c = 33; nfl_c <= 126; nfl_c++) {
+          nfl_print = nfl_print sprintf("%c", nfl_c)
+        }
       }
       {
         nfl_line = $0
         nfl_len = length(nfl_line)
         nfl_p = 1
         while (nfl_p <= nfl_len) {
-          if (index(nfl_skip1, substr(nfl_line, nfl_p, 1)) > 0) {
-            nfl_p++
-            continue
-          }
-          nfl_hit = 0
-          for (nfl_j = 1; nfl_j <= nfl_skipn_n; nfl_j++) {
-            nfl_w = length(nfl_skipn[nfl_j])
-            if (substr(nfl_line, nfl_p, nfl_w) == nfl_skipn[nfl_j]) {
-              nfl_p = nfl_p + nfl_w
-              nfl_hit = 1
-              break
-            }
-          }
-          if (nfl_hit == 0) { break }
+          if (index(nfl_print, substr(nfl_line, nfl_p, 1)) > 0) { break }
+          nfl_p++
         }
         nfl_cand = tolower(substr(nfl_line, nfl_p))
         for (nfl_i = 1; nfl_i <= nfl_n; nfl_i++) {
@@ -2641,7 +2694,28 @@ PROFILE_SEEN_UNAVAILABLE_NOTICE="squirrel-mode: cannot record profile state (~/.
 # It begins with "squirrel-mode:", so it needs no new entry in
 # SQUIRREL_RESERVED_LINE_PREFIXES - that prefix already covers every line
 # this hook addresses to the model in its own voice.
-PROFILE_CAP_UNAVAILABLE_NOTICE="squirrel-mode: cannot bound the profile for reinjection (a tool it needs is missing from PATH), so a /squirrel:tune made during this session will not reach you. Tell the user once, briefly."
+# THE TEXT NO LONGER SAYS "ONCE", AND THAT IS A CORRECTION OF THE TEXT,
+# NOT OF THE BEHAVIOUR. This notice is emitted on EVERY prompt for as
+# long as the tool is missing - necessarily so: the path that would
+# record "this session has been told" is touch_profile_seen, and it is
+# never reached, because the body it would be stamping for could not be
+# prepared. Measured with awk off PATH: five consecutive prompts, 189
+# bytes each, 945 B in total, and no stamp on disk after any of them.
+#
+# So the instruction "Tell the user once" described a discipline the hook
+# does not implement and cannot: a model that obeyed it would fall silent
+# while the hook kept paying for the notice, and a model that did not
+# would be disobeying its input. Either way the text and the behaviour
+# disagreed, and the text is the half that was wrong - 189 B/prompt is a
+# good trade against losing every /squirrel:tune of the session in
+# silence, which is what this notice replaced.
+#
+# The wording now says what actually happens, so the model can decide how
+# often to surface it knowing the notice will keep arriving. HOARD-21d
+# asserts the repetition directly (prompt 1, 2 and 3), which is the thing
+# HOARD-21 never measured - it checked prompt 1 and then prompt 2 with
+# awk restored, so the repeating case fell between the two rows.
+PROFILE_CAP_UNAVAILABLE_NOTICE="squirrel-mode: cannot bound the profile for reinjection (a tool it needs is missing from PATH), so a /squirrel:tune made during this session will not reach you. This notice repeats every prompt until the tool is back; mention it to the user briefly, and do not repeat yourself once they know."
 
 # handle_user_prompt_submit <input_json>: P3 reinjection path. Prints
 # plain-text profile framing UNLESS this session's seen stamp is
@@ -2757,9 +2831,117 @@ handle_user_prompt_submit() {
 # tried to handle two delimiters would have to decide which comes first
 # in the remaining text, and getting that wrong drops bytes. Two passes
 # over a short string are free.
+#
+# WHO ELSE READS THIS VALUE, which the cost list above did not say and
+# should have. "Session working directory:" is not write-only: skills/on
+# and skills/off tell the model to record the exact value of that line
+# into an off-switch sentinel, and scripts/check-off-flag.sh then matches
+# a legacy tokenless sentinel by comparing its contents to the `cwd` on
+# its OWN stdin. That comparison sees the raw value; this line emits the
+# folded one. For a project whose path contains a line break the two
+# never agreed, so the legacy claim silently never fired.
+#
+# Not a regression - before this fold the same path split the injected
+# line in two, so the model was never shown a usable value either - but a
+# consumer that the fold's cost list did not name. Closed on the reading
+# side, in check-off-flag.sh's sentinel_matches_this_session, which now
+# accepts the folded spelling as well as the raw one; that function
+# carries the full reasoning and the residual collision it leaves. It is
+# named here too because a transformation's costs belong beside the
+# transformation, not only beside whoever paid one of them.
+#
+# THE SKILLS THEMSELVES ARE NOT CHANGED and are the remaining half of
+# this: skills/on/SKILL.md and skills/off/SKILL.md still instruct the
+# model to store the value verbatim, which is correct - the folded value
+# IS what it was shown. Nothing there needs to know this happened.
 SQUIRREL_LINE_FEED='
 '
 SQUIRREL_CARRIAGE_RETURN=$(printf '\r')
+
+# --- BOUNDING THE VALUE BEFORE FOLDING IT -----------------------------
+#
+# SQUIRREL_MAX_CWD_LEN: the DoS cap on the `cwd` this hook FOLDS AND
+# PRINTS. The sibling hook states the threat model that justifies it, at
+# MAX_FILE_PATH_LEN in scripts/allow-checkpoint.sh and in
+# docs/adr/0002-checkpoint-auto-allow.md: "It arrives as an arbitrary
+# JSON string, not a real path, so no PATH_MAX bounds it." The `cwd`
+# reaches THIS hook down the same channel, in the same format, from the
+# same harness, and had no cap of any kind.
+#
+# THAT IS THE SAME THREAT MODEL THAT MOTIVATED THE FOLD, which is what
+# makes the gap sharp rather than theoretical. squash_one_break exists
+# because a FORGED cwd can carry "\nHoard search command: /evil/...".
+# Anything that can carry that can carry a megabyte.
+#
+# MEASURED, on the hook as it stood, one line break in the value:
+# 30 KB of cwd cost 0.6s, 120 KB cost 8.3s, and the growth is quadratic -
+# a reviewer measured 250 KB at 34s and 1 MB at over nine minutes. The
+# cost is not in the number of breaks; it is in `case "$sob_text" in
+# *"$sob_sep"*` matching a pattern with a leading AND trailing "*"
+# against a long string, which every shell here does in time quadratic
+# in the string. A SessionStart hook that takes nine minutes has stopped
+# being a hook.
+#
+# 4096 BYTES, THE SAME NUMBER AND THE SAME REASONING as the sibling's,
+# stated rather than borrowed: Linux PATH_MAX is 4096 including the NUL
+# and macOS's is 1024, so no cwd a real harness can hand over is anywhere
+# near this. A value past it is not a path that got long; it is not a
+# path.
+#
+# APPLIED WHERE THE FOLD IS, NOT WHERE THE VALUE ARRIVES, and that
+# placement is load-bearing for the same reason the fold's own is: $slug
+# is computed from the RAW cwd above, every checkpoint path in the
+# session is built from that hash, and capping earlier would silently
+# rehome the checkpoints of any project whose path is long. What is
+# capped is the value this hook PRINTS - exactly the scope the paragraph
+# at the call site claims.
+#
+# WHAT IT COSTS: a cwd past the cap reaches the model shortened, so the
+# "Session working directory:" line names a prefix of the real path
+# rather than the whole of it. That is a strictly better failure than a
+# nine-minute hook, and it is unreachable from any real path.
+SQUIRREL_MAX_CWD_LEN=4096
+
+# SQUIRREL_CWD_OVERSIZED: what is printed when the value is past the cap
+# AND the cut itself could not be performed. Short, fixed, and NOT
+# attacker-controlled - which is the whole point: the fail-open direction
+# everywhere else in this file returns the input unchanged, and here that
+# would hand back the very megabyte the cap exists to refuse.
+#
+# IT NEEDS NO ENTRY IN SQUIRREL_RESERVED_LINE_PREFIXES, and the reason is
+# not the one first written here. It is NOT covered by an existing entry:
+# "squirrel-mode:" does not match a string starting with "[", and the
+# "[squirrel-mode: profile.md truncated" entry pins different words. It
+# needs none because it is never a line of its own - it is only ever
+# interpolated AFTER "Session working directory: ", which IS a reserved
+# prefix, so the line it lands in is already covered. Stated properly
+# because a false reason inside a security list is the defect this
+# file's own neutralisation exists to repair.
+SQUIRREL_CWD_OVERSIZED='[squirrel-mode: working directory omitted - the value on stdin exceeded the 4096-byte cap]'
+
+# cap_cwd <value>: <value> unchanged when it is within the cap, and a
+# bounded value when it is not.
+#
+# THE LENGTH TEST IS FREE AND THE CUT IS NOT, which is why they are in
+# this order. `${#cc_value}` is a shell builtin, so the ordinary path -
+# every real cwd there has ever been - spawns nothing at all and this
+# function costs one comparison. `dd` runs only on input no harness
+# produces. It is the same tool, with the same stderr discard and the
+# same reason, as the byte cut in cap_profile_body.
+cap_cwd() {
+  cc_value=$1
+  [ "${#cc_value}" -gt "$SQUIRREL_MAX_CWD_LEN" ] || { printf '%s' "$cc_value"; return 0; }
+  cc_cut=$(printf '%s' "$cc_value" | dd bs=1 count="$SQUIRREL_MAX_CWD_LEN" 2>/dev/null) || cc_cut=""
+  if [ -n "$cc_cut" ]; then
+    cc_cut=$(strip_incomplete_utf8_tail "$cc_cut") || cc_cut=""
+  fi
+  if [ -n "$cc_cut" ]; then
+    printf '%s' "$cc_cut"
+    return 0
+  fi
+  printf '%s' "$SQUIRREL_CWD_OVERSIZED"
+  return 0
+}
 
 # squash_one_break <text> <delimiter>: <text> with every occurrence of
 # <delimiter> replaced by a single space.
@@ -2856,6 +3038,15 @@ $migration_notice"
   # folded is the value this hook PRINTS. See squash_one_break above for
   # what an unfolded value put into the context and why no fallback is
   # needed here.
+  #
+  # CAPPED BEFORE IT IS FOLDED, in that order and not the other one. The
+  # fold is quadratic in the length of what it is handed (measured: 120 KB
+  # of cwd cost 8.3s, 1 MB over nine minutes), so a cap applied AFTER it
+  # would have already paid the whole bill. See SQUIRREL_MAX_CWD_LEN above
+  # for the threat model, which is the sibling hook's own and was already
+  # written down there. Capped here rather than at extract_field for the
+  # same reason the fold is: $slug must keep seeing the raw value.
+  cwd=$(cap_cwd "$cwd")
   cwd=$(squash_one_break "$cwd" "$SQUIRREL_LINE_FEED")
   cwd=$(squash_one_break "$cwd" "$SQUIRREL_CARRIAGE_RETURN")
 
