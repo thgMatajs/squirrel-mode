@@ -655,6 +655,37 @@ assert_contains "$dig_body" "An apostrophe in this value is accepted" "and dig m
 assert_not_contains "$dig_body" "All three lines.** The value must contain no single-quote character" "and the merged form must be gone rather than joined by the scoped one - two rules disagreeing about the same character is worse than either"
 assert_contains "$dig_body" "Do not tell the user to rename the directory unless it is one they can rename" "dig must not offer a remedy the user cannot act on: the paragraph this replaced told the model to point at 'a directory they could rename', and a home directory is not one"
 assert_contains "$dig_body" "the apostrophe on the other two lines and not on this one" "and the paragraph that explains WHY this line is bounded differently must connect itself to rule 3, or the two sit in the same file contradicting each other exactly as they did"
+# AND THE CONSEQUENCE IS PER LINE, because the two lines are built from
+# different roots and fail independently. Measured on a HOME carrying an
+# apostrophe, with the plugin installed OUTSIDE that HOME - the
+# development shape: the hook emitted `Project checkpoint path:` with the
+# apostrophe in it and `Hoard search command:` WITHOUT one, so the search
+# line qualified and the search ran. With the plugin under
+# `~/.claude/plugins/` - the normal shape - both lines carried it and
+# both failed. The paragraph this replaces answered both cases with one
+# sentence saying the SEARCH is unavailable, which is false for the first
+# of them and turns off a working search. The `<slug>` bullet in the same
+# file already gets it right for its own line, which is what makes the
+# contradiction visible from inside the document.
+assert_contains "$dig_body" "answer per line, because the two lines fail independently" "dig must answer the apostrophe case PER LINE: only the checkpoint path failing leaves the search working, and a blanket 'the search is unavailable' turns off a feature that measurably still runs"
+assert_contains "$dig_body" "The search still runs" "and it must say so in as many words for the case where only the checkpoint line failed, or a reader has no instruction that differs from the blanket one"
+assert_not_contains "$dig_body" "it is the SEARCH that is unavailable" "and the blanket claim must be GONE rather than joined by the per-line one - two answers to the same question in one file is how the wrong one survives"
+
+# THE SAME CORRECTION, IN docs/ACCEPTANCE.md, FOR THE HOOK dig AND stash
+# BOTH RELY ON. Criterion 12 described the `allow` half as a path that
+# "names an ordinary, singly-linked file". scripts/allow-checkpoint.sh
+# reads a link count only for a leaf that EXISTS AND IS A REGULAR FILE,
+# and the suite asserts `allow` for a leaf that does not exist yet -
+# every first write of every memory and every checkpoint has that shape -
+# and for a leaf that is a directory. Neither names an ordinary,
+# singly-linked file, so the criterion excluded the commonest case it is
+# written about.
+acceptance_file="$repo_root/docs/ACCEPTANCE.md"
+assert_file_exists "$acceptance_file" "docs/ACCEPTANCE.md must exist"
+acceptance_body=$(cat "$acceptance_file" 2>/dev/null || printf '')
+assert_not_contains "$acceptance_body" "names an ordinary, singly-linked file" "docs/ACCEPTANCE.md must not describe the auto-approval as covering only an ordinary, singly-linked file: a leaf that does not exist yet is allowed, and that is the shape of every first write this plugin makes"
+assert_contains "$acceptance_body" "is not shown to be a second name for a file" "and must state the condition the code applies - the hook allows unless a hard link is PROVEN, which is a different and broader thing than requiring a single link"
+assert_contains "$acceptance_body" "a leaf that does not exist yet is auto-approved" "and must name the case the old wording excluded, explicitly, because that case is the ordinary one and a criterion that reads as excluding it is a criterion nobody can check a build against"
 # The other half of the blocker: the reader now says on stderr when a
 # query left nothing to search for, and dig must relay that instead of
 # reporting an empty hoard.
@@ -944,6 +975,31 @@ assert_not_contains "$mut_dig_body" "only the global layer was searched" "FAILUR
 assert_contains "$mut_dig_body" "shared layer" "FAILURE PROOF (13f): and must carry the drift the assert_not_contains above forbids, proving that assertion fires on the regression rather than merely being satisfied by its absence"
 assert_contains "$mut_dig_body" "hoard-search.sh" "FAILURE PROOF (13f, isolation): the mutation must leave the rest of the skill alone - it changes one word in one sentence"
 
+# (i-b) The per-line apostrophe answer. The paragraph that shipped is put
+#       back, and both directions are asserted: the new pins fail on it,
+#       and the negative pin fires on it.
+mut_dig_apos="$doc_mutant_dir/dig-blanket-apostrophe.md"
+mutate_literal "$dig_file" "$mut_dig_apos" \
+  "**Say which line you rejected, and answer per line, because the two lines fail independently and cost different things.**" \
+  "If that happens, say which line you rejected and why, and say what is still available: it is the SEARCH that is unavailable." >/dev/null
+if cmp -s "$dig_file" "$mut_dig_apos"; then mut_dig_apos_differs=no; else mut_dig_apos_differs=yes; fi
+assert_eq "yes" "$mut_dig_apos_differs" "FAILURE PROOF (13f, per-line), control: restoring the blanket sentence must genuinely change skills/dig/SKILL.md"
+mut_dig_apos_body=$(cat "$mut_dig_apos" 2>/dev/null || printf '')
+assert_contains "$mut_dig_apos_body" "it is the SEARCH that is unavailable" "FAILURE PROOF (13f, per-line): the reverted copy must carry the blanket claim the negative pin above forbids - proving that pin fires on the regression and not on a phrase nothing could produce"
+assert_not_contains "$mut_dig_apos_body" "answer per line, because the two lines fail independently" "FAILURE PROOF (13f, per-line): and must lose the per-line instruction, so the positive pin is measuring the same edit from the other side"
+
+# (i-c) The docs/ACCEPTANCE.md allow condition, reverted to the narrow
+#       wording. Same two directions.
+mut_acceptance="$doc_mutant_dir/ACCEPTANCE-singly-linked.md"
+mutate_literal "$acceptance_file" "$mut_acceptance" \
+  "path lies inside \`\$HOME/.squirrel/checkpoints/\` and is not shown to be a second name for a file" \
+  "path names an ordinary, singly-linked file inside \`\$HOME/.squirrel/checkpoints/\`, and this line is a second name for a file" >/dev/null
+if cmp -s "$acceptance_file" "$mut_acceptance"; then mut_acceptance_differs=no; else mut_acceptance_differs=yes; fi
+assert_eq "yes" "$mut_acceptance_differs" "FAILURE PROOF (12, allow condition), control: restoring the narrow wording must genuinely change docs/ACCEPTANCE.md"
+mut_acceptance_body=$(cat "$mut_acceptance" 2>/dev/null || printf '')
+assert_contains "$mut_acceptance_body" "names an ordinary, singly-linked file" "FAILURE PROOF (12, allow condition): the reverted copy must carry the phrase the negative pin above forbids, proving that pin fires on the regression"
+assert_not_contains "$mut_acceptance_body" "is not shown to be a second name for a file" "FAILURE PROOF (12, allow condition): and must lose the corrected condition, so the positive pin measures the same edit from the other side"
+
 # (ii) The scan-limit paragraphs. Deleting the grep-absent limit must not
 #      take the other two with it, or one needle is covering for three.
 mut_adr8="$doc_mutant_dir/adr8-nogrep.md"
@@ -1140,12 +1196,16 @@ cat >"$mutant14_py" <<'PY'
 import sys
 src = open(sys.argv[1]).read()
 pairs = [
-    ('set -- "$hoard_dir"/global/*.md\n[ -f "$1" ] || shift\n',
+    ('set -- "$hoard_dir"/global/*.md\n'
+     'if [ -f "$1" ] || [ -e "$1" ] || [ -L "$1" ]; then saw_entry=1; fi\n'
+     '[ -f "$1" ] || shift\n',
      'set --\nfor f in "$hoard_dir"/global/*.md; do\n'
-     '  [ -f "$f" ] && set -- "$@" "$f"\ndone\n'),
-    ('  set -- "$hoard_dir/projects/$slug"/*.md "$@"\n  [ -f "$1" ] || shift\n',
+     '  [ -f "$f" ] && { saw_entry=1; set -- "$@" "$f"; }\ndone\n'),
+    ('  set -- "$hoard_dir/projects/$slug"/*.md "$@"\n'
+     '  if [ -f "$1" ] || [ -e "$1" ] || [ -L "$1" ]; then saw_entry=1; fi\n'
+     '  [ -f "$1" ] || shift\n',
      '  for f in "$hoard_dir/projects/$slug"/*.md; do\n'
-     '    [ -f "$f" ] && set -- "$@" "$f"\n  done\n'),
+     '    [ -f "$f" ] && { saw_entry=1; set -- "$@" "$f"; }\n  done\n'),
 ]
 applied = 0
 for old, new in pairs:
@@ -1398,19 +1458,113 @@ for victim16 in fifo broken adir unreadable; do
   assert_eq "" "$rs16_err" "and nothing may reach stderr: the entry must be filtered before awk ever sees it, not complained about afterwards"
 done
 
-# 16b. A layer whose ONLY entry is irregular is the same as an empty one:
-#      silence, no hang, no error. This is the path where the rebuild
-#      empties the list completely, so it also proves the rebuild can
-#      leave zero files behind without the script mistaking that for
-#      something to report.
+# 16b. A layer whose ONLY entry is irregular prints nothing, hangs on
+#      nothing, and exits 0 - but it is NOT the same as an empty one, and
+#      it says so. This is the path where the rebuild empties the list
+#      completely, so it also proves the rebuild can leave zero files
+#      behind without the script mistaking that for something to report
+#      on stdout.
+#
+#      THIS SCENARIO USED TO ASSERT SILENCE, in as many words: "the same
+#      as an empty one". It is not. A hoard holding a memory this reader
+#      cannot open, answering exactly like a hoard holding none, is the
+#      state the header of scripts/hoard-search.sh calls the worst thing
+#      that file can do - and this assertion was pinning it as correct.
+#      One line on stderr is the repair; stdout, the exit status and the
+#      no-hang guarantee are unchanged.
 home16b=$(new_home)
 mkdir -p "$home16b/.squirrel/hoard/global"
 mkfifo "$home16b/.squirrel/hoard/global/zz-only.md"
 run_search_watched "$home16b"
 assert_eq "done" "$rs16_verdict" "a layer whose only entry is a FIFO must not hang either - the rebuild empties the list, which is the same state as an empty directory"
-assert_eq "" "$rs16_out" "and must print nothing, exactly as an empty layer does"
-assert_eq "" "$rs16_err" "and must say nothing on stderr"
+assert_eq "" "$rs16_out" "and must print nothing on stdout, exactly as an empty layer does: there is no memory to rank"
+assert_contains "$rs16_err" "hoard-search: no readable file in the hoard" "and it must SAY so on stderr rather than answering like an empty hoard - the store holds an entry, this reader could not open it, and stdout alone cannot carry that difference"
+assert_eq "1" "$(printf '%s\n' "$rs16_err" | grep -c . || true)" "exactly ONE line, the same contract the discarded-terms message keeps: stdout stays the four-field format callers parse and stderr stays one sentence a model can relay verbatim"
+assert_not_contains "$rs16_err" "zz-only" "and the line must not echo a path - a filename is text this script does not control, and the sentence has to be relayable as it stands"
 assert_eq "0" "$rs16_status" "and must exit 0, like any other empty layer - read from the WATCHED run above, because a bare \`assert_exit_code\` here would open this FIFO a second time in the foreground and block the suite forever"
+
+# ==========================================================================
+# 16e. A HOARD FULL OF UNREADABLE MEMORIES IS NOT AN EMPTY HOARD.
+#
+#      The realistic shape of 16b, and the one the review reproduced:
+#      three real memories, every one of them at mode 000. `[ -f ]` is
+#      true for each, `[ -r ]` is false for each, so the prescan rebuilds
+#      the list and the rebuild keeps nothing. Until this round that
+#      state produced rc 0, empty stdout and EMPTY STDERR - byte for byte
+#      what a hoard holding nothing produces, for a term that was
+#      discarded and for a term that was perfectly searchable alike.
+#
+#      The comment beside the tokeniser's stderr line justified the
+#      silence by saying that in this state "the store really does hold
+#      nothing". It holds three memories. That sentence is what this
+#      scenario replaces.
+#
+#      ON A ROOT RUNNER this fixture is not a fixture: root reads a
+#      mode-000 file, so the controls below assert the fixture's own
+#      properties first and fail red naming it, rather than passing over
+#      a victim that was never one.
+# ==========================================================================
+home16e=$(new_home)
+for i16e in 1 2 3; do
+  make_memory "$home16e" "global" "20260101T00000${i16e}Z-m16e" "feedback" "3" "builds" \
+    "20991231T000000Z" "0" "active" "real memory $i16e about builds"
+done
+chmod 000 "$home16e/.squirrel/hoard/global/"*.md
+if [ -r "$home16e/.squirrel/hoard/global/20260101T000001Z-m16e.md" ]; then
+  readable16e=yes
+else
+  readable16e=no
+fi
+assert_eq "no" "$readable16e" "scenario 16e control: the memories must actually be unreadable to this user, or the scenario passes against a hoard with nothing wrong with it. Running as root makes this fail rather than silently pass"
+
+out16e=$(run_search "$home16e" -- "builds")
+err16e=$(HOME="$home16e" "$hoard_search_script" -- "builds" 2>&1 >/dev/null) || true
+assert_eq "" "$out16e" "a hoard whose every memory is unreadable has nothing to rank, so stdout is empty"
+assert_contains "$err16e" "hoard-search: no readable file in the hoard" "but the caller must be TOLD - three memories are sitting there and none of them could be opened, which is a different fact from an empty hoard and the only place it can be said is stderr"
+assert_eq "1" "$(printf '%s\n' "$err16e" | grep -c . || true)" "one line, no more: the same one-sentence contract the discarded-terms message keeps"
+assert_exit_code 0 env HOME="$home16e" "$hoard_search_script" -- "builds"
+
+# The two stores, side by side, on the real script - the claim this
+# scenario exists for, made the way scenario 22 makes its own.
+empty16e=$(new_home)
+mkdir -p "$empty16e/.squirrel/hoard/global"
+empty16e_err=$(HOME="$empty16e" "$hoard_search_script" -- "builds" 2>&1 >/dev/null) || true
+assert_eq "" "$empty16e_err" "DECLARED LIMIT (16e), the other side: a hoard that really is empty stays silent. That is the state where an empty answer is honest, and it is what the new line must not be printed for"
+if [ "$err16e" = "$empty16e_err" ]; then same16e=yes; else same16e=no; fi
+assert_eq "no" "$same16e" "a hoard holding three unreadable memories and a hoard holding none must not answer identically - stdout is empty for both, so stderr is the only thing that can tell them apart"
+
+# A DISCARDED QUERY AGAINST THE SAME STORE, because the review measured
+# both and found them identically silent. The unreadable-store line is
+# the one that fires here: the tokeniser never runs, and the terms are
+# beside the point when no file was opened.
+err16e_dropped=$(HOME="$home16e" "$hoard_search_script" -- "que" 2>&1 >/dev/null) || true
+assert_contains "$err16e_dropped" "hoard-search: no readable file in the hoard" "a discarded query against an unreadable store must report the store, not the terms - the search stopped before any term mattered"
+assert_eq "1" "$(printf '%s\n' "$err16e_dropped" | grep -c . || true)" "and still one line, not two"
+
+# 16e-b. FAILURE PROOF: the branch removed. This is the committed
+#        behaviour, and it is byte-identical to an empty hoard.
+mutant16e=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut16e_n=$(mutate_literal "$hoard_search_script" "$mutant16e" \
+  '  if [ "$saw_entry" = 1 ]; then' \
+  '  if [ "$saw_entry" = 2 ]; then')
+assert_eq "1" "$mut16e_n" "FAILURE PROOF (16e), control: the diagnostic branch must be found and disabled exactly once"
+if cmp -s "$hoard_search_script" "$mutant16e"; then mut16e_differs=no; else mut16e_differs=yes; fi
+assert_eq "yes" "$mut16e_differs" "FAILURE PROOF (16e), control: the copy must genuinely differ from scripts/hoard-search.sh"
+mut16e_full=$(HOME="$home16e" "$mutant16e" -- "builds" 2>/dev/null) || true
+mut16e_full_err=$(HOME="$home16e" "$mutant16e" -- "builds" 2>&1 >/dev/null) || true
+mut16e_empty=$(HOME="$empty16e" "$mutant16e" -- "builds" 2>/dev/null) || true
+mut16e_empty_err=$(HOME="$empty16e" "$mutant16e" -- "builds" 2>&1 >/dev/null) || true
+assert_eq "$mut16e_empty|$mut16e_empty_err" "$mut16e_full|$mut16e_full_err" "FAILURE PROOF (16e): without that branch a hoard holding three memories answers BYTE FOR BYTE the way a hoard holding none does - same empty stdout, same empty stderr, same exit 0. The defect, reproduced, and it is the one the header of scripts/hoard-search.sh names as the worst thing that file can do"
+mut16e_ok=$(HOME="$home16e" "$mutant16e" 2>&1 >/dev/null) || true
+assert_eq "" "$mut16e_ok" "FAILURE PROOF (16e), and with no query either - the review measured both a discarded term and a valid one against this store and found the same nothing"
+chmod 644 "$home16e/.squirrel/hoard/global/"*.md
+out16e_after=$(run_search "$home16e" -- "builds")
+assert_contains "$out16e_after" "real memory 1 about builds" "FAILURE PROOF (16e), non-vacuity: with the permissions put back, the same store returns its memories - so every empty answer above is the mode, not a fixture that never held anything"
 
 # 16c. FAILURE PROOF for scenario 16: the pre-prescan construction must
 #      reproduce the silent loss. Without this, scenario 16 could be
@@ -1429,7 +1583,11 @@ import re
 import sys
 src = open(sys.argv[1]).read()
 start = src.index("irregular=0\n")
-end = src.index("[ $# -gt 0 ] || exit 0")
+# The block that follows the prescan is the empty-list exit; it opens
+# with this line and must SURVIVE the excision, because it is what tells
+# an empty hoard from an unreadable one (scenario 16e) and has nothing to
+# do with the prescan this proof removes.
+end = src.index("if [ $# -eq 0 ]; then")
 cut = src[start:end]
 src = src[:start] + src[end:]
 open(sys.argv[2], "w").write(src)
@@ -1846,7 +2004,15 @@ assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 0005)")" "-k 0005 is f
 assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 00005)")" "-k 00005 is ALSO five and must return five, not the whole store: this is where the character count and the value part company, and where the committed script silently returned everything it had"
 assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 000000000000000005)")" "and at any number of leading zeros - a bound whose boundary nobody chose is a bound that will move again"
 assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 0000)")" "a value that is all zeros must reduce to 0 and take the -k 0 arm, not become the empty string and take the not-a-number arm - both land on 5, and this pins that the reduction stops at one digit rather than running the string out"
-assert_eq "7" "$(count_lines20 "$(run_search "$home20" -k 0001000)")" "and a padded value INSIDE the range must be obeyed as the value it is - stripping the zeros must not turn a legitimate request into a clamp"
+# A PADDED VALUE INSIDE THE RANGE, AND IT HAS TO BE ONE THE CLAMP WOULD
+# ANSWER DIFFERENTLY. This assertion used to read `-k 0001000` expecting
+# 7, which cannot fail: this store holds seven memories, so "obeyed as
+# 1000" and "clamped to 1000" both print all seven and the strip is
+# invisible. `0000003` is seven characters carrying the value 3 - obeyed
+# it returns 3, and without the strip its LENGTH puts it out of range and
+# it is clamped to 1000, which returns all 7. One number, two different
+# answers, which is what makes it worth asserting.
+assert_eq "3" "$(count_lines20 "$(run_search "$home20" -k 0000003)")" "and a padded value INSIDE the range must be obeyed as the value it is - stripping the zeros must not turn a legitimate request into a clamp, and a store larger than the request is what makes the two answers distinguishable"
 
 # The rest of the flag surface, behaviourally, for the first time.
 out20_slug=$(run_search "$home20" --slug)
@@ -1913,6 +2079,7 @@ if cmp -s "$hoard_search_script" "$mutant20c"; then mut20c_differs=no; else mut2
 assert_eq "yes" "$mut20c_differs" "FAILURE PROOF (20c), control: the copy must genuinely differ from scripts/hoard-search.sh"
 assert_eq "7" "$(count_lines20 "$(HOME="$home20" "$mutant20c" -k 00005 2>/dev/null || true)")" "FAILURE PROOF (20c): without the strip, -k 00005 returns the WHOLE seven-memory store instead of five - the defect, reproduced, and it is silent: no error, no warning, just more than was asked for"
 assert_eq "5" "$(count_lines20 "$(HOME="$home20" "$mutant20c" -k 0005 2>/dev/null || true)")" "FAILURE PROOF (20c, boundary): and four characters still works on the mutant, which is exactly why the committed tests could not see this - every -k they exercised was four characters or fewer, or not a number at all"
+assert_eq "7" "$(count_lines20 "$(HOME="$home20" "$mutant20c" -k 0000003 2>/dev/null || true)")" "FAILURE PROOF (20c, the padded in-range value): without the strip, \`-k 0000003\` is seven CHARACTERS and is clamped to 1000, so a request for three memories returns the whole store. That is the assertion the vacuous \`-k 0001000\` could never have made - on this fixture the clamp and the value it replaces print the same seven lines"
 mut20c_err=$(HOME="$home20" "$mutant20c" -k 00005 2>&1 >/dev/null) || true
 assert_eq "" "$mut20c_err" "FAILURE PROOF (20c): and the mutant says nothing on stderr while doing it, so no existing assertion about stderr could have caught it either"
 
@@ -2072,7 +2239,7 @@ full22_err=$(HOME="$home22" "$hoard_search_script" -- "é" 2>&1 >/dev/null) || t
 empty22_err=$(HOME="$empty22" "$hoard_search_script" -- "é" 2>&1 >/dev/null) || true
 if [ "$full22_err" = "$empty22_err" ]; then same22=yes; else same22=no; fi
 assert_eq "no" "$same22" "a FULL store and an EMPTY one must not answer the same discarded query identically - that is exactly the state the header of scripts/hoard-search.sh calls the worst thing it can do, and stdout alone cannot tell them apart because both are empty"
-assert_eq "" "$empty22_err" "DECLARED LIMIT (22): with no readable file in the hoard at all, this script exits before the awk pass that prints that line, so a discarded query against an EMPTY store is silent. That is the one state where an empty answer is honest anyway - the store really does hold nothing - and buying the line there would mean a second copy of the tokeniser living in the shell. The limit is written beside the message in scripts/hoard-search.sh; if this assertion ever fails, that comment must change with it"
+assert_eq "" "$empty22_err" "DECLARED LIMIT (22): with no FILE in the hoard at all, this script exits before the awk pass that prints that line, so a discarded query against an EMPTY store is silent. That is the one state where an empty answer is honest anyway - the store really does hold nothing - and buying the line there would mean a second copy of the tokeniser living in the shell. A store that holds files and cannot read any of them is NOT this state and is not silent: see scenario 16e. The limit is written beside the message in scripts/hoard-search.sh; if this assertion ever fails, that comment must change with it"
 
 # 22b. FAILURE PROOF: treat a discarded query as no query.
 mutant22=$(new_mutant)
@@ -2099,7 +2266,7 @@ mutant22c=$(new_mutant)
 # evaluate. Expanding any of them would search for whatever this test
 # happens to hold in a variable of that name, which is nothing.
 mut22c_n=$(mutate_literal "$hoard_search_script" "$mutant22c" \
-  '        if (shredded && length(t) < 2) continue' \
+  '        if (length(t) < 2 && (shredded || nparts > 1)) continue' \
   '        if (length(t) < 2) continue')
 assert_eq "1" "$mut22c_n" "FAILURE PROOF (22c), control: the word-level test must be found and reverted to the blanket length rule exactly once"
 if cmp -s "$hoard_search_script" "$mutant22c"; then mut22c_differs=no; else mut22c_differs=yes; fi
@@ -2124,7 +2291,7 @@ mutant22d=$(new_mutant)
 # evaluate. Expanding any of them would search for whatever this test
 # happens to hold in a variable of that name, which is nothing.
 mut22d_n=$(mutate_literal "$hoard_search_script" "$mutant22d" \
-  '      print "hoard-search: no usable search term - every term given was a stopword or held no letter or digit this reader can look for, so the hoard was not searched." > "/dev/stderr"' \
+  '      print "hoard-search: no usable search term - every term given was a stopword, held no letter or digit this reader can look for, or came apart into one-character fragments, so the hoard was not searched." > "/dev/stderr"' \
   '      q_dropped = q_dropped')
 assert_eq "1" "$mut22d_n" "FAILURE PROOF (22d), control: the stderr line must be found and removed exactly once"
 if cmp -s "$hoard_search_script" "$mutant22d"; then mut22d_differs=no; else mut22d_differs=yes; fi
@@ -2135,6 +2302,175 @@ mut22d_empty=$(HOME="$empty22" "$mutant22d" -- "é" 2>/dev/null) || true
 mut22d_empty_err=$(HOME="$empty22" "$mutant22d" -- "é" 2>&1 >/dev/null) || true
 assert_eq "$mut22d_empty|$mut22d_empty_err" "$mut22d_full|$mut22d_full_err" "FAILURE PROOF (22d): without that line a store holding three memories answers a discarded query BYTE FOR BYTE the way a store holding none does - same empty stdout, same empty stderr, same exit 0. The caller has nothing whatever to tell the two apart with, and skills/dig/SKILL.md turns that into 'Nothing in the hoard about that.' with no route back"
 assert_contains "$full22_err" "hoard-search:" "FAILURE PROOF (22d), the other half: the real script on the SAME fixture puts the line there - one file, one query, one line of difference"
+
+# ==========================================================================
+# 22e. ASCII PUNCTUATION MANUFACTURES ONE-CHARACTER TOKENS TOO, and a
+#      rule that only asked whether the word held a NON-ASCII byte let
+#      every one of them through.
+#
+#      The rule 22c pins is "a one-character token is kept when the user
+#      typed one and dropped when this tokeniser manufactured it". The
+#      first version of it drew the line on the ALPHABET of the word
+#      rather than on how many pieces the word came apart into, so a word
+#      spelled entirely in ASCII contributed all of its pieces however
+#      short - and ASCII punctuation shatters words constantly:
+#
+#        - an English possessive gives the noun and a lone `s`, so a
+#          query about one thing matched every title carrying an
+#          apostrophe;
+#        - `O(n)` gives `o` and `n`, and `o` is a stopword, so the query
+#          became a search for a lone `n`;
+#        - `I/O` gives `i` and `o`.
+#
+#      Measured on the store below, on the committed script: a possessive
+#      query about caching returned its two real answers and then THREE
+#      memories with nothing to do with the question, matched on nothing
+#      but the `s` their own apostrophes had manufactured. That is the
+#      scenario-22 lie arriving through the ASCII door instead of the
+#      accented one.
+#
+#      WHAT THE FIX MUST NOT COST is everything 22c pins: `c++`, `C`,
+#      `R`, `C#` are single-run words and are still searched for. Both
+#      halves are asserted below, against the same store.
+# ==========================================================================
+home22e=$(new_home)
+make_memory "$home22e" "global" "20260101T000001Z-a22e" "reference" "3" "cache,proxy" \
+  "20991231T000000Z" "0" "active" "guide to caching in the proxy"
+make_memory "$home22e" "global" "20260101T000002Z-b22e" "reference" "3" "cache,docs" \
+  "20991231T000000Z" "0" "active" "user guide for the caching layer"
+make_memory "$home22e" "global" "20260101T000003Z-c22e" "episode" "3" "dns" \
+  "20991231T000000Z" "0" "active" "it's the DNS, it always was"
+make_memory "$home22e" "global" "20260101T000004Z-d22e" "reference" "3" "oncall" \
+  "20991231T000000Z" "0" "active" "the team's on-call rotation rules"
+make_memory "$home22e" "global" "20260101T000005Z-e22e" "reference" "3" "perf" \
+  "20991231T000000Z" "0" "active" "O(n) complexity in the ranking pass"
+make_memory "$home22e" "global" "20260101T000006Z-f22e" "feedback" "3" "sort,awk" \
+  "20991231T000000Z" "0" "active" "sort -n reads inf above every negative"
+make_memory "$home22e" "global" "20260101T000007Z-g22e" "episode" "3" "cpp,parser" \
+  "20991231T000000Z" "0" "active" "c++ move semantics bit us in the parser"
+make_memory "$home22e" "global" "20260101T000008Z-h22e" "reference" "2" "r,reports" \
+  "20991231T000000Z" "0" "active" "R is only used in the reporting job"
+
+# BOTH SIDES ARE TOKENISED THE SAME WAY, which is why an apostrophe in a
+# TITLE is what the apostrophe in the query finds. relevance() runs the
+# same `gsub(/[^a-z0-9]+/, " ", ...)` over title and tags that the
+# tokeniser runs over the query, so a title carrying a possessive holds a
+# lone `s` in its haystack exactly as the query holds one in its terms,
+# and the two meet. The three titles above are ordinary English; nothing
+# about them is a fixture trick.
+out22e=$(run_search "$home22e" -k 7 -- "user's guide to caching")
+assert_contains "$out22e" "guide to caching in the proxy" "the memory the possessive query is actually about must still come back"
+assert_contains "$out22e" "user guide for the caching layer" "and the other one"
+assert_not_contains "$out22e" "it's the DNS" "a memory with nothing to do with caching must NOT be returned because the query carried an apostrophe - the lone \`s\` is a fragment this tokeniser manufactured, not a term anyone typed"
+assert_not_contains "$out22e" "on-call rotation rules" "nor this one, for the same non-reason"
+lines22e=$(printf '%s\n' "$out22e" | grep -c . 2>/dev/null) || true
+assert_eq "2" "$lines22e" "and the answer must be exactly the two memories about caching - a count, so that a fix which merely re-ranked the strangers instead of dropping them could not pass the two assertions above"
+
+out22e_on=$(run_search "$home22e" -k 7 -- "O(n) complexity")
+assert_contains "$out22e_on" "O(n) complexity in the ranking pass" "\`O(n) complexity\` must return the memory it names"
+assert_not_contains "$out22e_on" "sort -n reads inf above every negative" "and must NOT return a memory whose only connection to it is a lone \`n\` - \`O(n)\` comes apart into \`o\` and \`n\`, \`o\` is a stopword, and what was left was literally a search for a stray letter"
+
+out22e_io=$(run_search "$home22e" -k 7 -- "I/O latency")
+assert_eq "" "$out22e_io" "\`I/O latency\` matches nothing in this store and must return nothing: \`i\` and \`o\` are fragments, \`latency\` is a real term, and no memory here carries it"
+err22e_io=$(HOME="$home22e" "$hoard_search_script" -- "I/O latency" 2>&1 >/dev/null) || true
+assert_eq "" "$err22e_io" "and it must NOT carry the discarded-terms line: \`latency\` survived and was searched for, so this is an honest miss and not a query this reader could not read"
+
+# THE OTHER HALF, ON THE SAME STORE: a one-character word the user typed
+# whole is still a term. Without these, the fix above could be a blanket
+# length rule wearing a new name - which is exactly the defect 22c pins.
+for kept22e in "c++" "C++" "C" "c" "C#"; do
+  out22e_k=$(run_search "$home22e" -- "$kept22e")
+  assert_contains "$out22e_k" "c++ move semantics bit us in the parser" "'$kept22e' is one ASCII word that leaves exactly one alphanumeric run, so it is a term and must still find the memory that carries it"
+done
+out22e_r=$(run_search "$home22e" -- "R")
+assert_contains "$out22e_r" "R is only used in the reporting job" "and a bare 'R' - one letter, one word, one run - must find the memory about R. It has its own assertion because it is the one-character term with no punctuation attached at all, which is the shape a run-count test could most easily break"
+
+# A WORD WHOSE RUNS ARE ALL ONE CHARACTER LONG loses all of them, and
+# that is the declared cost of drawing the line here. It is asserted
+# rather than only written down, because a limit nobody exercises is a
+# sentence rather than a boundary.
+out22e_rd=$(run_search "$home22e" -- "R&D")
+err22e_rd=$(HOME="$home22e" "$hoard_search_script" -- "R&D" 2>&1 >/dev/null) || true
+assert_eq "" "$out22e_rd" "DECLARED LIMIT (22e): \`R&D\` comes apart into two one-character runs and neither survives, so it returns nothing"
+assert_contains "$err22e_rd" "hoard-search: no usable search term" "DECLARED LIMIT (22e): and the user is TOLD the terms were unusable rather than being left to read an empty result as an empty hoard. That is the trade this rule makes - \`R&D\` is unsearchable and says so, where the other arm would have searched for a lone \`r\` and a lone \`d\` and answered with whatever carried them"
+
+# 22e-b. FAILURE PROOF: the rule as it stood, drawn on the alphabet of
+#        the word alone. This is the committed line, restored.
+mutant22e=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut22e_n=$(mutate_literal "$hoard_search_script" "$mutant22e" \
+  '        if (length(t) < 2 && (shredded || nparts > 1)) continue' \
+  '        if (shredded && length(t) < 2) continue')
+assert_eq "1" "$mut22e_n" "FAILURE PROOF (22e), control: the run-count half of the test must be found and removed exactly once"
+if cmp -s "$hoard_search_script" "$mutant22e"; then mut22e_differs=no; else mut22e_differs=yes; fi
+assert_eq "yes" "$mut22e_differs" "FAILURE PROOF (22e), control: the copy must genuinely differ from scripts/hoard-search.sh"
+mut22e_out=$(HOME="$home22e" "$mutant22e" -k 7 -- "user's guide to caching" 2>/dev/null) || true
+assert_contains "$mut22e_out" "it's the DNS" "FAILURE PROOF (22e): with the run count gone, a possessive query pulls in a memory about DNS - matched on the \`s\` the apostrophe manufactured, scored, ranked and indistinguishable from an answer. The defect, reproduced"
+assert_contains "$mut22e_out" "on-call rotation rules" "FAILURE PROOF (22e): and a memory about a rota, for the same non-reason"
+mut22e_on=$(HOME="$home22e" "$mutant22e" -k 7 -- "O(n) complexity" 2>/dev/null) || true
+assert_contains "$mut22e_on" "sort -n reads inf above every negative" "FAILURE PROOF (22e): and \`O(n) complexity\` becomes a search for a lone \`n\` - which is what the memory it returns is about, and what the rule was written to stop"
+mut22e_keep=$(HOME="$home22e" "$mutant22e" -- "c++" 2>/dev/null) || true
+assert_contains "$mut22e_keep" "c++ move semantics" "FAILURE PROOF (22e), control: the mutant still finds \`c++\` - so the assertions above measure the fragments this fix drops and not a copy that stopped searching altogether"
+
+# ==========================================================================
+# 22f. THE `a`/`e`/`o` STOPWORDS, AND THE MEASUREMENT THE COMMENT
+#      PUBLISHES.
+#
+#      scripts/hoard-search.sh states a number beside those three
+#      letters: `a race in the parser` went from two memories tied at
+#      0.4000 to seven, five of them matching nothing but a lone `a` at
+#      0.1500, and the top two swapped places. Nothing asserted any of
+#      it. Removing the stopword line from the committed script left the
+#      suite green but for the diagnostic lines, so the whole gain that
+#      paragraph claims was unpinned - and a published number nothing
+#      measures is the kind of claim this repository exists to stop
+#      shipping.
+#
+#      THE STORE BELOW IS THAT MEASUREMENT'S FIXTURE. Both numbers, the
+#      count and the swap, are asserted against the real script and again
+#      against a copy with the line deleted.
+# ==========================================================================
+home22f=$(new_home)
+make_memory "$home22f" "global" "20260101T000001Z-b22f" "episode" "3" "misc" \
+  "20991231T000000Z" "0" "active" "parser bugs in production"
+make_memory "$home22f" "global" "20260101T000002Z-c22f" "episode" "3" "misc" \
+  "20991231T000000Z" "0" "active" "a race in the scheduler"
+for i22f in 3 4 5 6 7; do
+  make_memory "$home22f" "global" "20260101T00000${i22f}Z-d22f" "feedback" "3" "misc" \
+    "20991231T000000Z" "0" "active" "a note number $i22f about nothing"
+done
+
+out22f=$(run_search "$home22f" -k 7 -- "a race in the parser")
+count22f=$(printf '%s\n' "$out22f" | grep -c . 2>/dev/null) || true
+assert_eq "2" "$count22f" "with \`a\` stopped, \`a race in the parser\` must return exactly TWO memories - the five that carry a lone \`a\` and nothing else the query asked for match no surviving term at all"
+assert_eq '20260101T000001Z-b22f · 0.4000 · episode · parser bugs in production' "$(printf '%s\n' "$out22f" | sed -n 1p)" "and the first line must be exactly this, at exactly 0.4000 - the number the comment beside the stopword list publishes, now measured rather than remembered"
+assert_eq '20260101T000002Z-c22f · 0.4000 · episode · a race in the scheduler' "$(printf '%s\n' "$out22f" | sed -n 2p)" "and the second, tied at the same 0.4000, ordered by id because the printed scores are equal - which is what 'tied' in that comment means"
+
+# 22f-b. FAILURE PROOF: the stopword line, deleted. This is the state the
+#        comment describes and nothing measured.
+mutant22f=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut22f_n=$(mutate_literal "$hoard_search_script" "$mutant22f" \
+  '        if (t == "a" || t == "e" || t == "o") continue
+' \
+  '')
+assert_eq "1" "$mut22f_n" "FAILURE PROOF (22f), control: the article stopword line must be found and deleted exactly once"
+if cmp -s "$hoard_search_script" "$mutant22f"; then mut22f_differs=no; else mut22f_differs=yes; fi
+assert_eq "yes" "$mut22f_differs" "FAILURE PROOF (22f), control: the copy must genuinely differ from scripts/hoard-search.sh"
+mut22f_out=$(HOME="$home22f" "$mutant22f" -k 7 -- "a race in the parser" 2>/dev/null) || true
+mut22f_count=$(printf '%s\n' "$mut22f_out" | grep -c . 2>/dev/null) || true
+assert_eq "7" "$mut22f_count" "FAILURE PROOF (22f): without the three articles the same query returns SEVEN memories instead of two - the number the comment publishes, reproduced"
+mut22f_a=$(printf '%s\n' "$mut22f_out" | grep -c '0\.1500' 2>/dev/null) || true
+assert_eq "5" "$mut22f_a" "FAILURE PROOF (22f): five of them at exactly 0.1500, matching nothing in the query but a lone \`a\` - the other published number"
+assert_eq '20260101T000002Z-c22f · 0.4500 · episode · a race in the scheduler' "$(printf '%s\n' "$mut22f_out" | sed -n 1p)" "FAILURE PROOF (22f): and the top two swap - the memory that was SECOND on the real script is first here, because its title happens to start with the article. 'The top two swapped places' is the third thing that comment claims and this is it"
 
 # ==========================================================================
 # 23. A COUNTER THAT IS NEGATIVE, AND A FIELD THAT IS ABSENT.
@@ -2690,6 +3026,41 @@ assert_eq "1" "$mut29b_n" "FAILURE PROOF (29b), control: the corrected sentence 
 mutant29b_body=$(cat "$mutant29b" 2>/dev/null || printf '')
 assert_contains "$mutant29b_body" "silence, exactly as before" "FAILURE PROOF (29b): the reverted copy must carry the claim the assertion above forbids. NEEDLE CHOICE: the words wrap across a comment line break in the source, so a needle reading \"in silence, exactly as before\" is not a contiguous string in ANY version of this file - including the one the defect was found in. It would have passed on the broken text and on the fixed text alike"
 assert_contains "$mutant29b_body" "IT IS NOT SILENT, THOUGH" "FAILURE PROOF (29b, independence): the two are separate paragraphs and separate assertions - reverting one must not delete the other, which is what makes each needle bind to its own sentence"
+
+# (iii) is_finite() states an UNCONDITIONAL fact that is only true under
+#       LC_ALL=C. The comment read "`%.1f` of a finite double is always
+#       `-?<digits>.<digit>`" with no condition on it, in the same file
+#       that spends a paragraph warning that `printf "%.4f"` writes the
+#       locale's separator. Measured here under LC_ALL=pt_BR.UTF-8:
+#       `sprintf("%.1f", 0.5)` is "0,5" on awk 20200816 and on mawk
+#       1.3.4, and with the LC_ALL=C dropped from the invocation every
+#       memory came back at `0,2000` - importance forced to 1, uses
+#       forced to 0, five lines ranked by nothing. It is not a shipped
+#       defect, because the one caller does pass LC_ALL=C; it is an
+#       unwritten precondition on a new function, which is the class of
+#       claim scenario 29 exists for.
+assert_contains "$hoard_search_body" "IS A PRECONDITION, NOT A DECORATION" "is_finite() must state that its formatted-value test depends on LC_ALL=C rather than asserting the format unconditionally - the guarantee belongs to the invocation, and a function whose correctness rests on a caller it does not name is one edit away from being wrong"
+# THE NEEDLE CARRIES THE WORDS BEFORE THE CLAIM, not the claim alone.
+# `%.1f` of a finite double is always ...` is a SUBSTRING of the
+# corrected sentence too - the correction inserts a condition in front of
+# it rather than rewriting it - so a needle on the claim alone would be
+# red against the fixed file and could never be satisfied at all. What
+# distinguishes the two is what sits between "with digits." and the
+# format: nothing in the old sentence, the condition in the new one.
+# shellcheck disable=SC2016 # literal source text of the file under test.
+assert_not_contains "$hoard_search_body" 'with digits. `%.1f` of a finite double' "and the unconditional form must be GONE rather than joined by the qualified one: two sentences about the same format, one of them true only sometimes, is how the false one survives an edit"
+
+# 29c. FAILURE PROOF: the unconditional sentence, restored.
+mutant29c=$(new_mutant)
+# shellcheck disable=SC2016 # exact source text of the file under mutation.
+mut29c_n=$(mutate_literal "$hoard_search_script" "$mutant29c" \
+  '  # with digits. UNDER LC_ALL=C, `%.1f` of a finite double is always' \
+  '  # with digits. `%.1f` of a finite double is always')
+assert_eq "1" "$mut29c_n" "FAILURE PROOF (29c), control: the qualified sentence must be found and stripped of its condition exactly once"
+mutant29c_body=$(cat "$mutant29c" 2>/dev/null || printf '')
+# shellcheck disable=SC2016 # literal source text of the file under mutation.
+assert_contains "$mutant29c_body" 'with digits. `%.1f` of a finite double' "FAILURE PROOF (29c): the reverted copy must carry the unconditional claim the negative pin above forbids, proving that pin fires on the regression"
+assert_contains "$mutant29c_body" "IS A PRECONDITION, NOT A DECORATION" "FAILURE PROOF (29c, independence): and the paragraph that WRITES the precondition must survive the revert - the two are separate sentences, so each needle has to bind to its own or one is covering for the other"
 
 # ==========================================================================
 # 30. THE awk PROGRAM CARRIES NO SINGLE QUOTE.

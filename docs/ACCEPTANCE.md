@@ -876,9 +876,17 @@ probe reached and which it did not.
 - `tests/test_hooks.sh`'s `allow-checkpoint.sh` scenarios (roughly 14–21, plus the symlink defenses
   at 19, 25, 29–32, and the DoS-cap scenario 33 — each now mirrored for `Read`, not only `Write`/
   `Edit`, per S10-1 below) prove the hook returns `allow` for a `Write`, `Edit`, **or `Read`** whose
-  path names an ordinary, singly-linked file inside `$HOME/.squirrel/checkpoints/`, and `defer` for every
+  path lies inside `$HOME/.squirrel/checkpoints/` and is not shown to be a second name for a file
+  living elsewhere, and `defer` for every
   boundary case tried (traversal, prefix-escape, a symlink at or below the directory, an oversized
-  path) — this is what removes the permission prompt specifically for legitimate checkpoint reads
+  path). **That is broader than "an ordinary, singly-linked file", which is what this sentence used
+  to say and is not the condition the code applies.** The link count is read only when the leaf
+  already exists **and is a regular file**: a leaf that does not exist yet is auto-approved, which is
+  the shape of every first write of every memory and every checkpoint, and so is a leaf that is a
+  directory, because a directory always carries at least two links and testing one would defer a
+  legitimate `Read` of the checkpoint folder itself. Both are pinned in `tests/test_hooks.sh`
+  (HOARD-14 for the absent leaf) and both are stated at the `[ -f ]` test in
+  `scripts/allow-checkpoint.sh` — this is what removes the permission prompt specifically for legitimate checkpoint reads
   and writes, with the symlink and traversal cases proving it cannot be tricked into auto-approving
   somewhere else. **"Resolves inside the directory" was the wrong test, and a hard link is what showed
   it.** A second name created inside `checkpoints/` for a file that lives somewhere else — `ln

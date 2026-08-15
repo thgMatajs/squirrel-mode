@@ -2218,15 +2218,64 @@ assert_eq "5" "$(port_unported_command_count "$port_row_mutant")" "FAILURE PROOF
 #     "NAMING WHAT THAT EXEMPTION LETS THROUGH" in this scenario's header
 #     for what this does and does not cover.
 port_reason_false_cost_hits() {
-  # port_reason_false_cost_hits <file> - prints every SENTENCE of <file> that
-  # names `stash` and also claims zero or no permission prompts. "Sentence" =
-  # newlines flattened to spaces, then split on `.`, the same construction
-  # tests/test_repo_invariants.sh's same-sentence scan uses and for the same
-  # reason: grep never sees across its own line boundaries, so a hit needs
-  # both anchors inside one chunk. That is what keeps docs/OTHER-TOOLS.md's
-  # TRUE sentence - the memory *write* costs no permission prompt, the
-  # command still costs one - out of this: it does not contain the word
-  # `stash`, which sits in the row's first cell, one chunk earlier.
+  # port_reason_false_cost_hits <file> - prints the Reason cell of every
+  # port-table row of <file> that claims zero or no permission prompts
+  # without also stating what the command does cost.
+  #
+  # THE UNIT IS THE CELL, AND IT USED TO BE THE SENTENCE. The sentence
+  # version flattened the file to one line, split it on `.`, and required
+  # the word `stash` and the cost claim inside one chunk. `tr` knows
+  # nothing about table cells, so what actually bounded that scan was the
+  # FULL STOP, and it was wrong in both directions - measured, both:
+  #
+  #   - FALSE POSITIVE on true prose. docs/OTHER-TOOLS.md's stash row says
+  #     the memory *write* costs no permission prompt and that the command
+  #     still costs one, in two sentences. Join those two sentences with a
+  #     dash instead of a stop - an ordinary edit, changing no fact - and
+  #     the row name lands in the same chunk as the cost claim and this
+  #     guard goes red on a document that is telling the truth.
+  #   - FALSE NEGATIVE on the lie it exists for. Write the false claim as
+  #     two sentences - `A stash is instant on Claude Code. It costs zero
+  #     permission prompts.` - and neither chunk holds both anchors, so it
+  #     passes untouched.
+  #
+  # A guard that fails on true prose and passes the false claim is worse
+  # than no guard, so the boundary is now the thing the claim actually
+  # lives in: the Reason cell of one table row, whole, however many
+  # sentences it is written in and wherever the stops fall. The first five
+  # `|`-separated fields are stripped off and everything after them is the
+  # cell; the cell is NOT split on `|` because it legitimately contains
+  # one (`Write|Edit|Read`), which is the same truncation the four-column
+  # comparison above performs and the reason that comparison cannot see
+  # this column at all.
+  #
+  # WHAT EXCULPATES A CELL is saying what the command costs: `costs one`.
+  # That is what makes the true sentence true, and a cell claiming a zero
+  # cost without it is claiming it unqualified.
+  #
+  # RESIDUE, NAMED, because this is a grep and not a reader:
+  #   - a false claim written OUTSIDE the port table is not scanned here.
+  #     This column is scanned because it is free text no other check
+  #     reads; ordinary prose elsewhere in these files is subject to the
+  #     scans in tests/test_repo_invariants.sh.
+  #   - a cell that lies AND happens to contain the words `costs one`
+  #     passes. No pattern can tell which clause those two words belong
+  #     to; the exculpation is a marker, not a proof.
+  awk -F '|' '
+    /^\| `[^`]*` \| / {
+      cell = $0
+      n = 0
+      while (n < 5) { sub(/^[^|]*\|/, "", cell); n++ }
+      low = tolower(cell)
+      if (low ~ /(zero|no) permission prompts?/ && low !~ /costs one/) print cell
+    }
+  ' "$1" 2>/dev/null
+}
+
+port_reason_retired_sentence_hits() {
+  # The scan this replaced, kept for the two failure proofs below and used
+  # nowhere else. Both of its directions are asserted against the same
+  # inputs the new one is, so the repair is measured rather than asserted.
   tr '\n' ' ' <"$1" 2>/dev/null | tr '.' '\n' \
     | grep -i 'stash' | grep -iE '(zero|no) permission prompts?'
 }
@@ -2259,6 +2308,49 @@ else
 fi
 assert_eq "yes" "$port_reason_table_still_matches" "FAILURE PROOF (scenario 33b, prompt cost), the gap itself: the four-column equality check must STILL PASS on that mutant. This is why the assertion above had to be added - the Reason column is truncated before comparison, so every other check in this scenario is green while the file publishes a false cost"
 assert_eq "$other_tools_port_word" "$(port_heading_word "$port_reason_mutant")" "FAILURE PROOF (scenario 33b, prompt cost), the gap itself: and the heading checks stay green on it too - the mutant touches nothing they read"
+
+# --- Failure proof (e): the FALSE POSITIVE the retired scan produced on ---
+#     TRUE prose. One edit, no fact changed: docs/OTHER-TOOLS.md's stash
+#     row says the same two things in one sentence instead of two.
+port_reason_joined="$port_mutant_dir/OTHER-TOOLS-joined.md"
+sed 's/porting it is a rewrite rather than a copy\. It writes a memory/porting it is a rewrite rather than a copy - it writes a memory/' \
+  "$other_tools_doc" >"$port_reason_joined"
+if cmp -s "$other_tools_doc" "$port_reason_joined"; then port_joined_differs=no; else port_joined_differs=yes; fi
+assert_eq "yes" "$port_joined_differs" "FAILURE PROOF (scenario 33b, false positive), control: joining the stash row's first two sentences must genuinely change docs/OTHER-TOOLS.md, or the two assertions below pass against the file that was already there"
+if [ -n "$(port_reason_retired_sentence_hits "$port_reason_joined")" ]; then port_joined_old=yes; else port_joined_old=no; fi
+assert_eq "yes" "$port_joined_old" "FAILURE PROOF (scenario 33b, false positive): the RETIRED sentence scan goes red on that file - a document stating the cost correctly, failed by a guard because of where a full stop sits. That is the defect this repair is about, reproduced"
+assert_eq "" "$(port_reason_false_cost_hits "$port_reason_joined")" "FAILURE PROOF (scenario 33b, false positive), the repair: the cell-scoped scan is silent on the same file. The claim never changed, so neither may the verdict - a guard that reprimands correct prose is a guard that gets edited out"
+
+# --- Failure proof (f): the FALSE NEGATIVE. The same lie as (d), split ---
+#     across two sentences inside the one cell.
+port_reason_split="$port_mutant_dir/PLAN-zero-cost-split.md"
+awk 'BEGIN { FS = "|"; OFS = "|" }
+  /^\| `stash` \| / {
+    print "| `stash` | ✅ | ❌ | ❌ | A stash is instant on Claude Code. It costs zero permission prompts. |"
+    next
+  }
+  { print }
+' "$plan_doc" >"$port_reason_split"
+if cmp -s "$plan_doc" "$port_reason_split"; then port_split_differs=no; else port_split_differs=yes; fi
+assert_eq "yes" "$port_split_differs" "FAILURE PROOF (scenario 33b, two sentences), control: the split-sentence mutation must genuinely change PLAN.md"
+if [ -n "$(port_reason_retired_sentence_hits "$port_reason_split")" ]; then port_split_old=yes; else port_split_old=no; fi
+assert_eq "no" "$port_split_old" "FAILURE PROOF (scenario 33b, two sentences): the RETIRED sentence scan does NOT catch it - the row name and the cost claim land in different chunks, so the exact claim the guard was written for walks straight through by being punctuated differently"
+if [ -n "$(port_reason_false_cost_hits "$port_reason_split")" ]; then port_split_new=yes; else port_split_new=no; fi
+assert_eq "yes" "$port_split_new" "FAILURE PROOF (scenario 33b, two sentences), the repair: the cell-scoped scan catches it, because the cell is the boundary and both sentences are inside it"
+
+# --- And the residue, asserted rather than only written down: a cell ---
+#     that lies and also carries the exculpating words is not caught.
+port_reason_hedged="$port_mutant_dir/PLAN-zero-cost-hedged.md"
+awk 'BEGIN { FS = "|"; OFS = "|" }
+  /^\| `stash` \| / {
+    print "| `stash` | ✅ | ❌ | ❌ | A stash costs zero permission prompts. Reading one back costs one. |"
+    next
+  }
+  { print }
+' "$plan_doc" >"$port_reason_hedged"
+if cmp -s "$plan_doc" "$port_reason_hedged"; then port_hedged_differs=no; else port_hedged_differs=yes; fi
+assert_eq "yes" "$port_hedged_differs" "DECLARED LIMIT (scenario 33b), control: the hedged mutation must genuinely change PLAN.md"
+assert_eq "" "$(port_reason_false_cost_hits "$port_reason_hedged")" "DECLARED LIMIT (scenario 33b): a cell that makes the false claim AND contains the words \`costs one\` about something else is NOT caught. The exculpation is a marker and cannot be a proof - no pattern can tell which clause two words belong to. This assertion exists so the limit is a measured boundary rather than a sentence in a comment, and it is the reason the four-column equality check and the two heading checks are not the only things standing behind this table"
 
 # ==========================================================================
 # 34. [S9, PLAN.md Section 5: "Installs user-scoped; zero files written
