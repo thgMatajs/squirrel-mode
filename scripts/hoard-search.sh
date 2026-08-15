@@ -24,14 +24,24 @@
 # WHICH MAKES EVERY SILENT DROP A DEFECT, not a tolerance. If a store
 # that holds memories can answer like a store that holds none, the user
 # cannot tell the two apart, and this file is the only thing that could
-# have told them. Four ways it did exactly that have been fixed rather
-# than accepted - a regular file awk cannot open, a CRLF or BOM in the
-# frontmatter, whitespace around a `status` value, and a query whose
-# terms were all discarded - each one reproduced first and pinned by a
-# scenario in tests/test_hoard.sh. What silence still covers is a file
-# with no frontmatter delimiters at all and a file with no `title`:
-# neither can be ranked or displayed, and both are states nothing in
-# squirrel-mode writes.
+# have told them. Six ways it did exactly that have been fixed rather
+# than accepted - a regular file awk cannot open, a CRLF or a BOM
+# anywhere in the frontmatter, whitespace on either side of a key or a
+# value, a one-character search term thrown away for being one character
+# long, and a query whose terms really were all discarded - each one
+# reproduced first and pinned by a scenario in tests/test_hoard.sh.
+#
+# THE LAST OF THOSE IS ANSWERED WITH A SENTENCE, NOT WITH SILENCE. A
+# query nothing survives is the one case where an empty stdout is
+# correct and still misleading, because the user asked a real question: a
+# single accented letter on its own leaves this tokeniser nothing to look
+# for. So stdout stays empty and the exit stays 0, and ONE line goes to
+# stderr saying the terms were unusable. skills/dig/SKILL.md relays that
+# line instead of telling the user there is nothing in the hoard about it.
+#
+# What silence still covers is a file with no frontmatter delimiters at
+# all and a file with no `title`: neither can be ranked or displayed,
+# and both are states nothing in squirrel-mode writes.
 set -eu
 unset CDPATH
 
@@ -101,11 +111,29 @@ done
 # THE LENGTH TEST COMES FIRST, and it is not decoration: `[ "$topk" -gt
 # 1000 ]` on a twenty-digit string is the shell's own integer overflow,
 # not a comparison - dash reports "value too great for base" and `set -e`
-# would end the search there. Anything longer than four digits is out of
-# range by construction, so it never reaches an arithmetic test.
+# would end the search there. Any VALUE of more than four digits is out
+# of range by construction, so it never reaches an arithmetic test.
+#
+# WHICH IS WHY THE LEADING ZEROS COME OFF FIRST. `${#topk}` counts
+# CHARACTERS, and `00005` is five characters carrying one digit of
+# value, so the length test read it as out of range and clamped it to
+# 1000. Measured on the committed script against a twelve-memory store:
+# `-k 5` and `-k 0005` each returned 5 results, `-k 00005` and
+# `-k 000000000000000005` each returned all 12 - the whole store, from a
+# request for five. The boundary was exactly five characters, and the
+# sentence above used to say no such value could exist. Stripping the
+# zeros makes the length test measure the value, which is what it was
+# always meant to measure; `0`, and any run of zeros, still reduces to
+# `0` and falls through to the `-lt 1` arm below.
 case "$topk" in
   '' | *[!0-9]*) topk=5 ;;
   *)
+    while :; do
+      case "$topk" in
+        0?*) topk=${topk#0} ;;
+        *) break ;;
+      esac
+    done
     if [ "${#topk}" -gt 4 ]; then
       topk=1000
     elif [ "$topk" -lt 1 ]; then
@@ -132,10 +160,17 @@ hoard_dir="$home_dir/.squirrel/hoard"
 # it, and a guard that its own subject's comment satisfies is a guard
 # that cannot fail.)
 # Measured on the author's machine at 2000 memories: 12.05 s in that loop
-# against 110 ms for the whole awk pass it was feeding. Assigning each
-# layer's expansion in a single `set --` makes that one copy per layer
-# instead of one per file. tests/test_hoard.sh scenario 14 pins the
-# shape so the per-file form cannot come back unnoticed.
+# against about 84 ms for the whole awk pass it was feeding. That second
+# figure used to read 110 ms here, and 110 ms was published wrong:
+# docs/specs/2026-08-13-hoard-design.md §5.1 and README.md both now say
+# so in as many words, having re-measured the phases inside one run at
+# about 41 ms expanding the globs, 29 ms in the prescan, 84 ms in awk and
+# 2 ms in the trailing pipeline. Only the awk figure moved; the ratio
+# this paragraph is about did not, because 12.05 s against either number
+# is the same two orders of magnitude. Assigning each layer's expansion
+# in a single `set --` makes that one copy per layer instead of one per
+# file. tests/test_hoard.sh scenario 14 pins the shape so the per-file
+# form cannot come back unnoticed.
 #
 # An unmatched glob stays literal in POSIX sh, and the literal names no
 # file, so it is dropped by testing "$1" and shifting it off. The test
@@ -238,9 +273,21 @@ fi
 # read would be permitted for this user now; a file whose mode changes
 # between this walk and awk's open, or one on a filesystem that fails
 # the open for a reason permissions cannot express, still reaches awk.
-# That residue costs the record before it and everything after it, in
-# silence, exactly as before - it is narrower than the class this test
-# closes, not different in kind.
+# That residue costs the record before it and everything after it,
+# exactly as before - it is narrower than the class this test closes,
+# not different in kind.
+#
+# IT IS NOT SILENT, THOUGH, AND THAT DIFFERENCE IS THE ONLY WAY TO TELL
+# THE TWO APART. The class this test CLOSES is filtered before awk ever
+# sees it: stdout is complete and stderr is empty, which is what
+# scenario 16d asserts. The residue is awk failing on an open it was
+# handed, and awk says so - measured here, one unreadable file among
+# three: exit 2, stdout short, and 409 bytes of `awk: can't open file
+# ...` on stderr, its length following the length of the path. So a
+# short answer with an empty stderr is this script dropping something,
+# and a short answer with an awk diagnostic on stderr is the race. The
+# word "silence" was in this paragraph and was wrong about the case it
+# describes.
 #
 # So the list is prescanned, and rebuilt only if the prescan finds
 # something. The prescan is O(n) with NO `set --` at all, so the common
@@ -358,14 +405,24 @@ function relevance(   hay, i, hits) {
   # Two ways a query arrives here with nothing left of it: a stopword on
   # its own, and a short accented word - the tokeniser above replaces
   # every byte that is not an ASCII letter or digit with a space, so
-  # "n" plus "o" is all it can make of the Portuguese for "no", and both
-  # pieces are then dropped for being one character long.
+  # "n" plus "o" is all it can make of the Portuguese for "no", and those
+  # two pieces are dropped as fragments of a word this tokeniser cannot
+  # spell rather than as terms that were merely short. A one-character
+  # term the user actually typed is kept - see the comment on the
+  # tokeniser itself for the difference, and for why it is drawn on the
+  # word rather than on the fragment.
   #
   # Measured on the committed script, against a two-memory hoard: `nao`
   # spelled with its tilde, and `que`, each returned EVERY memory with
   # the scores of a search that had no terms in it at all. The same holds
   # for the Portuguese for "action", "are" and "only", and for any single
   # accented letter.
+  #
+  # RETURNING 0 HERE IS HALF THE ANSWER. It stops the store being handed
+  # back as though it answered the question; it does not tell the user
+  # their question was never asked, and an empty result reads as "nothing
+  # in the hoard about that". The tokeniser puts one line on stderr for
+  # exactly that, and skills/dig/SKILL.md relays it.
   if (q_n == 0) {
     if (q_dropped) return 0
     return 1
@@ -378,6 +435,33 @@ function relevance(   hay, i, hits) {
     if (index(hay, " " q_tok[i] " ") > 0) hits++
   }
   return hits / q_n
+}
+function is_finite(v,   t) {
+  # Is v an ordinary number, as opposed to an infinity or a nan?
+  #
+  # THE TWO IDIOMS THAT ANSWER THIS EVERYWHERE ELSE BOTH FAIL ON THE awk
+  # macOS SHIPS, which is the awk most users of this plugin will run.
+  # Measured on version 20200816, gawk 5 and mawk 1.3, same expressions,
+  # same values:
+  #
+  #     v = "nan" + 0      v >= 1     v != v     sprintf("%.1f", v)
+  #     macOS awk              1          0      "nan"
+  #     gawk                   0          0      "0.0"   (reads "nan" as 0)
+  #     mawk                   0          0      "0.0"   (reads "nan" as 0)
+  #
+  # So on the one awk that produces a nan at all, a nan compares as
+  # GREATER THAN OR EQUAL TO 1 and is EQUAL TO ITSELF. Negating the range
+  # test does not catch it and neither does the textbook `v != v`.
+  #
+  # WHAT DOES WORK IS THE FORMATTED VALUE, because printf is the C
+  # library on all three and neither an infinity nor a nan can be spelled
+  # with digits. `%.1f` of a finite double is always `-?<digits>.<digit>`;
+  # of the others it is "nan", "inf", "+inf" or "-inf", all of which fail
+  # this pattern on all three awks. Checked, all three, both directions -
+  # including 1e300, which formats as three hundred digits and correctly
+  # reads as finite.
+  t = sprintf("%.1f", v)
+  return (t ~ /^-?[0-9]+\.[0-9]$/)
 }
 function untab(s) {
   # A tab in a value would manufacture a field. Every value printed below
@@ -395,18 +479,45 @@ function emit(   imp, lambda, days, score, rel, uses, sortkey) {
   rel = relevance()
   if (rel == 0) return
 
+  # FINITENESS IS DECIDED FIRST, AND THE CLAMPS ONLY THEN. `imp < 1` and
+  # `imp > 5` are both false for a nan, so `importance: nan` walked
+  # straight through a clamp that reads as though nothing could, and
+  # carried the nan into the score and into the ordering key. The two
+  # obvious repairs do not work here - see is_finite() for the
+  # measurement - so the range tests below run only on a value already
+  # known to be an ordinary number, and everything else takes the same
+  # arm a value below the range takes.
   imp = m_importance + 0
-  if (imp < 1) imp = 1
-  if (imp > 5) imp = 5
+  if (!is_finite(imp) || imp < 1) imp = 1
+  else if (imp > 5) imp = 5
 
-  # `uses` gets the FLOOR importance has had all along. Without it
-  # `uses: -1` printed `-inf` and `uses: -5` printed `nan`: log(0) and
-  # log(a negative), straight into a field this script promises is a
-  # number with four decimal places - and `-inf` sorts ABOVE a legitimate
-  # 0.0000, so a hand-edited counter could put a memory at the top by
-  # being wrong. Measured, both of them, on the committed script.
+  # `uses` IS BOUNDED AT BOTH ENDS, AND OUT OF RANGE BUYS NO BOOST RATHER
+  # THAN THE LARGEST ONE. A floor alone was the previous fix, and it
+  # closed one direction of a defect that has two:
+  #
+  #   - BELOW: `uses: -1` printed `-inf` and `uses: -5` printed `nan`,
+  #     from log(0) and log of a negative, straight into a field this
+  #     script promises is a number with four decimal places. Measured on
+  #     the script that had no floor.
+  #   - ABOVE: `uses: 1e999`, or an integer of 400 digits, is +inf the
+  #     moment it is read as a number, and a floor does not look up
+  #     there. Measured on the floored script, one fixture, both sides:
+  #     the +inf memory printed `inf` where its score belongs and stood
+  #     at the TOP of the ranking, above a memory scoring 0.6286. That is
+  #     the same failure the floor was added to stop, arriving from the
+  #     other end - and it got WORSE when the order moved to the key
+  #     below, because every sane ordering key is the log of a score
+  #     under 1 and is therefore negative, while `sort -n` reads `inf`
+  #     and `nan` as values above every negative one.
+  #
+  # ZERO, NOT THE CEILING, for a counter outside 0..1000000.
+  # Reinforcement is earned by a memory actually being read, so a number
+  # no reader could have produced must not buy the top of every search;
+  # clamping it to the ceiling would hand it exactly that. The upper end
+  # is deliberately a cliff and not a clamp for that reason, and 1000000
+  # is far above anything a one-per-read increment reaches.
   uses = m_uses + 0
-  if (uses < 0) uses = 0
+  if (!is_finite(uses) || uses < 0 || uses > 1000000) uses = 0
 
   # Important memories decay more slowly. These weights are a design
   # decision, not a finding: they are specified in
@@ -439,9 +550,21 @@ function emit(   imp, lambda, days, score, rel, uses, sortkey) {
   # which log() could not recover. The sum never underflows at all - that
   # pair comes out at -326.59 against -77.00 (computed for 2026-08-15;
   # both drift with the calendar, the ORDER does not), on a scale that
-  # stays readable for centuries of staleness. Every term is finite by
-  # construction here: rel is non-zero (returned above), imp is clamped
-  # into 1..5, and uses is floored at 0.
+  # stays readable for centuries of staleness.
+  #
+  # EVERY TERM IS FINITE BECAUSE BOTH ENDS OF BOTH FIELDS ARE BOUNDED,
+  # which is a stronger statement than the one that stood here and had to
+  # be. This sentence used to read "uses is floored at 0" and offer that
+  # as the reason nothing could be infinite. A floor bounds one end. With
+  # `uses: 1e999` the key came out at +inf, and `sort -n` puts +inf above
+  # every SANE key - all of which are negative, because a sane score is
+  # below 1 and this is its logarithm. So the very change that made the
+  # ranking survive decay also made a corrupted counter win the top,
+  # where before it had sorted below a positive score. What holds now:
+  # rel is in (0, 1] and non-zero (returned above), imp is clamped into
+  # 1..5 by a test a nan cannot pass, and uses is zeroed unless it lies
+  # in 0..1000000 - see the two clamps above and why each is written the
+  # way it is.
   #
   # It is printed as an EXTRA FIRST FIELD and dropped by the formatter at
   # the end of the pipeline, so nothing about the published contract -
@@ -469,27 +592,96 @@ BEGIN {
 
   query = ENVIRON["SQUIRREL_HS_QUERY"]
 
-  # Query tokens: lowercased, split on anything that is not a letter or
-  # digit, with one-character tokens and a small stopword set dropped.
-  # The stopword list is deliberately tiny - it exists to stop "the" and
-  # "a" from making every memory look half-relevant, not to be a
-  # linguistics project.
+  # Query tokens: lowercased, split on anything that is not an ASCII
+  # letter or digit, with a small stopword set dropped. The stopword list
+  # is deliberately tiny - it exists to stop "the" and "a" from making
+  # every memory look half-relevant, not to be a linguistics project.
+  #
+  # A ONE-CHARACTER TOKEN IS KEPT WHEN THE USER TYPED ONE AND DROPPED
+  # WHEN THIS TOKENISER MANUFACTURED IT. Those are two different things
+  # and one rule on the LENGTH of the token answered them the same way,
+  # which
+  # lost the first of them outright:
+  #
+  #   - `c`, `r`, `x`, and so `c++`, `C++`, `C`, `R`, `C#`, `F#`, are
+  #     real search terms that people really type. Measured on the
+  #     committed script against a store holding
+  #     `c++ move semantics bit us in the parser`: `c++`, `C++`, `C` and
+  #     `R` each returned zero lines, exit 0, nothing on stderr - a store
+  #     with a matching memory in it answering exactly like an empty one,
+  #     which the header of this file calls the worst thing it can do.
+  #   - the Portuguese for "no", "only" and "action" - each carrying a
+  #     tilde, an acute or a cedilla, which this comment is kept ASCII
+  #     and so cannot spell - are not one-character terms at all. The
+  #     tokeniser replaces every byte that is not an ASCII letter or
+  #     digit with a space, so each byte of a multi-byte character
+  #     becomes a SEPARATOR, and the word for "no" arrives here as the
+  #     two fragments `n` and `o`. Keeping those searches for whatever
+  #     memory happens to carry a lone `n` or a lone `o`: measured on a
+  #     twelve-memory
+  #     bilingual store, accepting them made that word return three
+  #     unrelated memories and the word for "action" six - ranked, scored
+  #     and looking exactly like an answer. That is the lie scenario 22 of
+  #     tests/test_hoard.sh exists to stop, re-arriving by a new route.
+  #
+  # SO THE TEST IS ON THE WORD, NOT ON THE FRAGMENT. A word carrying any
+  # byte outside printable ASCII cannot be spelled in the alphabet this
+  # tokeniser indexes, so it contributes only its runs of two characters
+  # or more; a word spelled entirely in ASCII contributes all of its
+  # runs, one character included. `c++` searches for `c`; `naive` written
+  # with a diaeresis over the i searches for `na` and `ve`; the word for
+  # "no" contributes nothing and is answered by the stderr line below.
+  # `[^ -~]` is a BYTE range - space through tilde - which is well defined
+  # because this awk runs under LC_ALL=C.
+  #
+  # `a`, `e` AND `o` JOIN THE STOPWORD LIST FOR THAT SAME CHANGE, and the
+  # measurement is why. They are the English and Portuguese articles, and
+  # they stand alone in ordinary titles constantly, so accepting
+  # one-character tokens without them re-ranked queries that have nothing
+  # to do with any of this: on the same fixture, `a race in the parser`
+  # went from two memories tied at 0.4000 to seven, five of them matching
+  # nothing but a lone `a` at 0.1500, and the top two swapped places.
+  # With the three letters stopped, that query returns byte-identically
+  # what it returned before. What a real one-character term gains is
+  # unaffected - `c` and `r` are not articles.
   q_n = 0
   q_dropped = 0
   if (query != "") {
-    tmp = tolower(query)
-    gsub(/[^a-z0-9]+/, " ", tmp)
-    c = split(tmp, qparts, " ")
-    for (i = 1; i <= c; i++) {
-      t = qparts[i]
-      if (length(t) < 2) continue
-      if (t == "the" || t == "and" || t == "for" || t == "que" || t == "com" || t == "para") continue
-      q_n++
-      q_tok[q_n] = t
+    nw = split(query, qwords, " ")
+    for (w = 1; w <= nw; w++) {
+      word = tolower(qwords[w])
+      shredded = (word ~ /[^ -~]/)
+      gsub(/[^a-z0-9]+/, " ", word)
+      c = split(word, qparts, " ")
+      for (i = 1; i <= c; i++) {
+        t = qparts[i]
+        if (shredded && length(t) < 2) continue
+        if (t == "a" || t == "e" || t == "o") continue
+        if (t == "the" || t == "and" || t == "for" || t == "que" || t == "com" || t == "para") continue
+        q_n++
+        q_tok[q_n] = t
+      }
     }
     # The user gave terms and nothing usable survived. relevance() reads
-    # this to tell that apart from a search with no terms at all.
-    if (q_n == 0) q_dropped = 1
+    # this to tell that apart from a search with no terms at all - and
+    # the caller is TOLD, because an empty stdout on its own says "the
+    # hoard holds nothing about that", which is a different statement and
+    # may well be false. One line, on stderr, so stdout stays exactly the
+    # four-field format callers parse and the exit status stays 0.
+    #
+    # THE QUERY IS NOT ECHOED INTO IT. It is text the user typed and may
+    # carry a newline, which would make this two lines instead of one.
+    #
+    # LIMIT, WRITTEN DOWN: this runs inside the awk pass, so a hoard that
+    # is missing or holds no readable file exits above without printing
+    # it. That state is the one where an empty answer is honest anyway -
+    # the store really does hold nothing - and buying the line there
+    # would mean a second copy of this tokeniser in the shell, which is
+    # the drift this file spends its length avoiding.
+    if (q_n == 0) {
+      q_dropped = 1
+      print "hoard-search: no usable search term - every term given was a stopword or held no letter or digit this reader can look for, so the hoard was not searched." > "/dev/stderr"
+    }
   }
 }
 {
@@ -503,12 +695,26 @@ BEGIN {
   if (length($0) > 0 && substr($0, length($0), 1) == cr) {
     $0 = substr($0, 1, length($0) - 1)
   }
-}
-FNR == 1 {
   # A UTF-8 BOM sits in front of the first "---" and makes the same line
   # fail the same test, and the memory is lost to every search the same
   # way. Editors write one without being asked; a user cannot see it.
+  #
+  # ON EVERY LINE, NOT ONLY THE FIRST. This test used to sit in the
+  # FNR == 1 rule below, where it caught the case an editor really
+  # produces and nothing else. The same three bytes on line 9 instead of
+  # line 1 made the key on that line "<BOM>title" rather than "title", so
+  # memory had no title, and emit() drops a memory with no title without
+  # a word - the store answering like an empty one again, from an input
+  # no one can see. Reproduced. It is a LOW-REALISM input and it is
+  # closed anyway, because closing it is one substr on a line this rule
+  # already touches, which is cheaper than the paragraph that would have
+  # had to explain why it was left open. (A BOM and CRLF together, which
+  # is what a Windows editor actually writes, worked before this change
+  # and works after it: the two strips are independent and the CR comes
+  # off first.)
   if (substr($0, 1, 3) == bom) { $0 = substr($0, 4) }
+}
+FNR == 1 {
   emit()
   reset()
   n = split(FILENAME, parts, "/")
@@ -523,11 +729,24 @@ fm_done { next }
   next
 }
 in_fm == 1 {
-  # BOTH SIDES ARE TRIMMED, and both trims are load-bearing:
+  # EVERY SIDE IS TRIMMED - both ends of the key and the tail of the
+  # value - and each trim is load-bearing:
   #
-  #   - the KEY keeps whatever sits before its colon, so `status : active`
-  #     parses as the key "status " and matches nothing. The memory keeps
-  #     every default instead: no title, and so no result at all.
+  #   - the KEY kept whatever sat AFTER it, so `status : active` parses
+  #     as the key "status " and matches nothing. The memory keeps every
+  #     default instead: no title, and so no result at all.
+  #   - the KEY kept whatever sat BEFORE it too, which is the same
+  #     keystroke arriving from the other side of the word and cost the
+  #     same memory. `  title: indented title` parses as the key
+  #     "  title", matches nothing, the memory has no title, and emit()
+  #     drops a memory with no title: zero bytes of stdout with `--all`
+  #     and without, exit 0, nothing on stderr. Reproduced. This comment
+  #     used to say that leading space was kept DELIBERATELY, because an
+  #     indented key belongs to a nested YAML mapping. That described a
+  #     parser this is not - there is no notion of nesting anywhere in
+  #     this program - and what the reasoning actually bought was not
+  #     "this key belongs to something else" but "this memory does not
+  #     exist".
   #   - the VALUE kept whatever sat after it. `status: active ` - one
   #     trailing space, which no editor shows - is not "active", so
   #     the memory was excluded from every default search and returned
@@ -535,11 +754,17 @@ in_fm == 1 {
   #     can see, and skills/stash/SKILL.md tells the model to WRITE this
   #     field and skills/dig/SKILL.md to EDIT it on every read.
   #
-  # Leading whitespace on the key is deliberately NOT trimmed: a line
-  # that starts with a space is an indented key, which in YAML belongs to
-  # a nested mapping and is not the `status` of this memory at all.
+  # WHAT THE LEADING TRIM COSTS, said rather than implied: in a file that
+  # really did carry a nested mapping, an indented `title:` under some
+  # other key is now read as the title of this memory, last one winning.
+  # Nothing in squirrel-mode writes such a file - the frontmatter stash
+  # writes is nine flat keys and dig edits two of them - and a memory
+  # read slightly
+  # wrong is recoverable where a memory that silently does not exist is
+  # not.
   key = $0
   sub(/:.*$/, "", key)
+  sub(/^[ \t]+/, "", key)
   sub(/[ \t]+$/, "", key)
   val = $0
   sub(/^[^:]*:[ \t]*/, "", val)

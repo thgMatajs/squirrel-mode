@@ -63,6 +63,28 @@ make_memory() {
   } >"$mm_home/.squirrel/hoard/$mm_layer/$mm_id.md"
 }
 
+mutate_literal() {
+  # mutate_literal <src> <dest> <old> <new> -> prints the occurrence count
+  ML_SRC=$1 ML_DEST=$2 ML_OLD=$3 ML_NEW=$4 python3 -c '
+import io
+import os
+src = io.open(os.environ["ML_SRC"], encoding="utf-8").read()
+old = os.environ["ML_OLD"]
+new = os.environ["ML_NEW"]
+io.open(os.environ["ML_DEST"], "w", encoding="utf-8").write(src.replace(old, new))
+print(src.count(old))
+'
+}
+
+new_mutant() {
+  # new_mutant -> path to a fresh executable scratch file, registered for
+  # cleanup.
+  nm_path=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
+  cleanup_paths="$cleanup_paths $nm_path"
+  chmod +x "$nm_path"
+  printf '%s' "$nm_path"
+}
+
 run_search() {
   # run_search <home> [args...] - stdout only; a non-zero exit never
   # aborts this helper, and stdout is asserted on regardless.
@@ -580,6 +602,26 @@ assert_not_contains "$dig_body" "and never again" "dig must NOT claim these line
 assert_contains "$dig_body" "wrapped in single quotes, as one argument" "dig must make the path safe by QUOTING it, not by banning the characters a real path may contain - a charset allowlist refused a genuine install under a directory with a space in its name, and inside single quotes every one of those characters is inert anyway"
 assert_contains "$dig_body" "no single-quote character and no newline" "dig's shape test must be exactly the two characters that can break out of single quoting - that is the whole test once the value is quoted, and anything more bars correct work"
 assert_contains "$dig_body" "a space in a directory name included" "dig must state that a space is PERMITTED: the rule this replaced turned away a real /Users/ana maria/... install, and a reader who trims this sentence would reintroduce that"
+# THE APOSTROPHE BAN IS SCOPED TO THE LINES THAT REACH A SHELL, and the
+# scoping is the correction. Round 1 wrote it as a rule for "all three
+# lines" - including the `Hoard directory:` line, about which this same
+# file says, four paragraphs down, that nothing is ever executed with it.
+# Measured: a $HOME like /tmp/x/ana's tools makes the hook emit that line
+# correctly and scripts/hoard-search.sh run correctly under it, and the
+# merged rule rejected the line anyway - at which point dig and stash
+# both say "the hoard is unavailable" and stop. The whole feature, off,
+# for a user whose remedy would be renaming their home directory.
+assert_contains "$dig_body" "The two lines that reach a shell" "dig must scope the apostrophe ban to the two values it quotes into a command line. Merged across all three it disabled both hoard commands for any user with an apostrophe in their home directory, and this file already says in its own words that the third line reaches a tool and not a shell"
+assert_contains "$dig_body" "An apostrophe in this value is accepted" "and dig must say so POSITIVELY on the \`Hoard directory:\` line itself, not merely omit the ban: a rule that is silent about a character is a rule the next editor re-adds it to"
+assert_not_contains "$dig_body" "All three lines.** The value must contain no single-quote character" "and the merged form must be gone rather than joined by the scoped one - two rules disagreeing about the same character is worse than either"
+assert_contains "$dig_body" "Do not tell the user to rename the directory unless it is one they can rename" "dig must not offer a remedy the user cannot act on: the paragraph this replaced told the model to point at 'a directory they could rename', and a home directory is not one"
+assert_contains "$dig_body" "the apostrophe on the other two lines and not on this one" "and the paragraph that explains WHY this line is bounded differently must connect itself to rule 3, or the two sit in the same file contradicting each other exactly as they did"
+# The other half of the blocker: the reader now says on stderr when a
+# query left nothing to search for, and dig must relay that instead of
+# reporting an empty hoard.
+assert_contains "$dig_body" "hoard-search:" "dig must recognise the reader's stderr line by its prefix - that line is the difference between 'the hoard holds nothing about that' and 'nothing was searched for'"
+assert_contains "$dig_body" "Never report that as an empty hoard" "dig must be told not to turn that line into 'Nothing in the hoard about that.': the store may hold exactly what was asked for, the model has no evidence either way, and the very next sentence of this file forbids trying again"
+assert_contains "$dig_body" "invite them to try the same search with a longer word" "and it must offer the recovery, because the terms were the problem: the surrounding instruction otherwise forbids offering another search, which would leave the user stuck on a question that was never asked"
 assert_contains "$dig_body" "Single quotes, never double" "dig must say WHICH quotes: inside double quotes command substitution and backticks still expand, so a path carrying \$(...) would execute. Verified by execution - double quotes ran it, single quotes did not"
 assert_contains "$dig_body" '/x; curl e|sh #/scripts/hoard-search.sh' "dig must keep the worked example - quoted, it is one argument naming a file that does not exist rather than a command, which is the point quoting makes and a character ban only approximated"
 assert_contains "$dig_body" "type that digit yourself, directly on the command line" "dig must state that the -k number is TYPED, never interpolated from the profile field's text - that, not the 3-to-7 bound alone, is what leaves no route from profile text to a shell"
@@ -827,7 +869,18 @@ assert_contains "$research_body" "scripts/hoard-search.sh" "and must name the fi
 assert_not_contains "$research_body" "importance exponent" "docs/RESEARCH.md must not name a constant the code does not have - importance enters the score as imp/5 and lambda as a factor of 0.8; there is no exponent anywhere in scripts/hoard-search.sh"
 assert_contains "$hoard_search_body" "lambda = 0.16 * (1 - imp * 0.8 / 5)" "the decay constant and the importance factor, read from the code"
 assert_contains "$hoard_search_body" "(1 + 0.2 * log(1 + uses))" "and the reinforcement coefficient, read from the code - written against \`uses\`, the floored local scenario 24 pins, rather than the raw field it replaced"
-for weight13g in "0.16" "0.8" "0.2"; do
+# THE NEEDLES ARE BACKTICKED, AND THAT IS THE WHOLE FIX HERE. The bare
+# string "0.16" was PROVED vacuous: replacing both occurrences in the
+# weights paragraph with 0.99 in a copy of docs/RESEARCH.md left the
+# suite at 373 pass / 0 fail, because the file also carries the DOI
+# 10.16993 four hundred lines away and "0.16" is a substring of it. A
+# needle that a citation satisfies is not checking the register. The
+# file writes every one of these constants inside backticks, so the
+# backticks are what bind the needle to the register rather than to any
+# number that happens to contain the same digits.
+# shellcheck disable=SC2016 # the backticks are literal Markdown characters in
+# docs/RESEARCH.md's own text, being searched for, not command substitution.
+for weight13g in '`0.16`' '`0.8`' '`0.2`'; do
   assert_contains "$research_body" "$weight13g" "docs/RESEARCH.md must name the constant $weight13g, which scripts/hoard-search.sh really carries - a register that names no numbers registers nothing"
 done
 
@@ -895,6 +948,37 @@ assert_eq "yes" "$mut_research_differs" "FAILURE PROOF (13g), control: the mutat
 mut_research_body=$(cat "$mut_research" 2>/dev/null || printf '')
 assert_not_contains "$mut_research_body" "The hoard's scoring weights" "FAILURE PROOF (13g): a copy with the register deleted must lose that needle"
 assert_contains "$mut_research_body" "Rule 13 (Safety override)" "FAILURE PROOF (13g, independence): and must keep the six base-rule design decisions the same section carries - the register is an addition to that section, not a replacement of it"
+
+# (vii) THE CONSTANTS THEMSELVES, and the proof that the needle above
+#       them is not vacuous. This is the mutation that was run by hand
+#       during review and came back 373 pass / 0 fail against the bare
+#       "0.16" needle: both weight occurrences changed, the DOI left
+#       alone. The assertions below say in the suite what that run said
+#       by hand - the decay constant can be wrong in this file and the
+#       bare-string needle cannot tell.
+mut_weights="$doc_mutant_dir/research-wrongweight.md"
+# shellcheck disable=SC2016 # literal Markdown backticks in docs/RESEARCH.md.
+mut_w1=$(mutate_literal "$repo_root/docs/RESEARCH.md" "$mut_weights" \
+  'the decay base `0.16` and' \
+  'the decay base `0.99` and')
+assert_eq "1" "$mut_w1" "FAILURE PROOF (13g-weights), control: the standalone constant must be found and changed exactly once"
+mut_weights2="$doc_mutant_dir/research-wrongweight2.md"
+# shellcheck disable=SC2016 # literal Markdown backticks in docs/RESEARCH.md.
+mut_w2=$(mutate_literal "$mut_weights" "$mut_weights2" \
+  '`lambda = 0.16 * (1 - imp * 0.8 / 5)`' \
+  '`lambda = 0.99 * (1 - imp * 0.8 / 5)`')
+assert_eq "1" "$mut_w2" "FAILURE PROOF (13g-weights), control: and the constant inside the quoted expression too - two occurrences, both of them the register's claim about the code"
+if cmp -s "$repo_root/docs/RESEARCH.md" "$mut_weights2"; then mut_w_differs=no; else mut_w_differs=yes; fi
+assert_eq "yes" "$mut_w_differs" "FAILURE PROOF (13g-weights), control: the copy must genuinely differ from docs/RESEARCH.md"
+mut_weights_body=$(cat "$mut_weights2" 2>/dev/null || printf '')
+# shellcheck disable=SC2016 # literal Markdown backticks in docs/RESEARCH.md.
+assert_not_contains "$mut_weights_body" '`0.16`' "FAILURE PROOF (13g-weights): the mutant must lose the backticked constant, proving the needle above binds to the register"
+assert_contains "$mut_weights_body" "10.16993" "FAILURE PROOF (13g-weights), control: and must keep the DOI untouched - a mutation that also rewrote the citation would prove nothing about which of the two the needle was matching"
+assert_contains "$mut_weights_body" "0.16" "FAILURE PROOF (13g-weights), THE POINT: the mutant still contains the bare string '0.16', because it is inside that DOI. So the needle this one replaced passed on a file whose registered decay constant had been changed to 0.99 - a guard satisfied by a citation four hundred lines from the thing it claims to guard"
+# shellcheck disable=SC2016 # literal Markdown backticks in docs/RESEARCH.md.
+assert_contains "$mut_weights_body" '`0.8`' "FAILURE PROOF (13g-weights, independence): and the other two constants must survive - three needles, three constants, none standing in for another"
+# shellcheck disable=SC2016 # literal Markdown backticks in docs/RESEARCH.md.
+assert_contains "$mut_weights_body" '`0.2`' "FAILURE PROOF (13g-weights, independence): both of them"
 
 # (vi) The README's five-kinds claim, reverted.
 mut_readme="$doc_mutant_dir/README-four.md"
@@ -1351,28 +1435,6 @@ assert_eq "3" "$real16_count" "FAILURE PROOF (16), the other half: the real scri
 # and `/` in combinations that no two of sed, awk and the shell agree
 # about quoting.
 # ==========================================================================
-mutate_literal() {
-  # mutate_literal <src> <dest> <old> <new> -> prints the occurrence count
-  ML_SRC=$1 ML_DEST=$2 ML_OLD=$3 ML_NEW=$4 python3 -c '
-import io
-import os
-src = io.open(os.environ["ML_SRC"], encoding="utf-8").read()
-old = os.environ["ML_OLD"]
-new = os.environ["ML_NEW"]
-io.open(os.environ["ML_DEST"], "w", encoding="utf-8").write(src.replace(old, new))
-print(src.count(old))
-'
-}
-
-new_mutant() {
-  # new_mutant -> path to a fresh executable scratch file, registered for
-  # cleanup.
-  nm_path=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
-  cleanup_paths="$cleanup_paths $nm_path"
-  chmod +x "$nm_path"
-  printf '%s' "$nm_path"
-}
-
 # ==========================================================================
 # 16d. FAILURE PROOF for scenario 16's fourth victim: a prescan testing
 #      only `[ -f ]` must lose a memory beside an unreadable one.
@@ -1497,13 +1559,38 @@ g18="$home18/.squirrel/hoard/global"
 printf -- '---\r\ntype: feedback\r\ntitle: a memory with crlf endings\r\nimportance: 3\r\ntags: builds\r\ncreated: 20991231T000000Z\r\nlast_used: 20991231T000000Z\r\nuses: 0\r\nstatus: active\r\nsuperseded_by:\r\n---\r\n\r\nbody text\r\n' >"$g18/20260101T000000Z-crlf.md"
 printf -- '\357\273\277---\ntype: feedback\ntitle: a memory behind a byte order mark\nimportance: 3\ntags: builds\ncreated: 20991231T000000Z\nlast_used: 20991231T000000Z\nuses: 0\nstatus: active\nsuperseded_by:\n---\n\nbody text\n' >"$g18/20260101T000000Z-bom.md"
 printf -- '---\ntype : feedback\ntitle : a memory with spaces before its colons\nimportance : 3\ntags : builds\ncreated : 20991231T000000Z\nlast_used : 20991231T000000Z\nuses : 0\nstatus : active\nsuperseded_by :\n---\n\nbody text\n' >"$g18/20260101T000000Z-spaced.md"
+# Two more of the same kind, both reproduced on the committed script:
+#
+#   - a key with a leading space. `key : value` was fixed by trimming the
+#     key's TAIL; `  key: value` is the same keystroke on the other side
+#     of the word and cost the same whole memory - zero bytes of stdout,
+#     with --all and without, exit 0, nothing on stderr. The comment at
+#     that trim said the leading space was kept deliberately, because an
+#     indented key belongs to a nested YAML mapping; this parser has no
+#     notion of nesting, and what the reasoning bought was not "this key
+#     belongs to something else" but "this memory does not exist".
+#   - a BOM that is not on line 1. The strip was written inside the
+#     FNR == 1 rule, so the same three bytes on any other line made that
+#     line's key "<BOM>title" instead of "title" and the memory lost its
+#     title, which emit() drops without a word.
+printf -- '---\ntype: feedback\nimportance: 3\ntags: builds\ncreated: 20991231T000000Z\nlast_used: 20991231T000000Z\nuses: 0\nstatus: active\nsuperseded_by:\n  title: a memory whose title line is indented\n---\n\nbody text\n' >"$g18/20260101T000000Z-indent.md"
+printf -- '---\ntype: feedback\nimportance: 3\ntags: builds\ncreated: 20991231T000000Z\nlast_used: 20991231T000000Z\nuses: 0\nstatus: active\nsuperseded_by:\n\357\273\277title: a memory behind a mark that is not on line one\n---\n\nbody text\n' >"$g18/20260101T000000Z-midbom.md"
 
-out18=$(run_search "$home18")
-err18=$(HOME="$home18" "$hoard_search_script" 2>&1 >/dev/null) || true
+out18=$(run_search "$home18" -k 20)
+err18=$(HOME="$home18" "$hoard_search_script" -k 20 2>&1 >/dev/null) || true
 assert_contains "$out18" "a memory with crlf endings" "a memory written with CRLF line endings must be found - the delimiter test sees \`---\` followed by a carriage return, and a store that holds this memory must not answer like an empty one"
 assert_contains "$out18" "a memory behind a byte order mark" "and a memory whose first line carries a UTF-8 BOM - an editor writes one without being asked and a user cannot see it"
 assert_contains "$out18" "a memory with spaces before its colons" "and a memory written \`key : value\`, which is legal YAML and was parsed as the key \"type \""
-assert_eq "" "$err18" "and none of the three may put anything on stderr while being read"
+assert_contains "$out18" "20260101T000000Z-indent · 0.6000 · feedback · a memory whose title line is indented" "and a memory whose \`title\` line begins with two spaces - one keystroke, and the whole memory was gone from every search including --all"
+assert_contains "$out18" "20260101T000000Z-midbom · 0.6000 · feedback · a memory behind a mark that is not on line one" "and a memory carrying a UTF-8 BOM somewhere other than line 1 - the same three bytes the line-1 case is about, in a place the FNR == 1 rule never looked"
+assert_eq "" "$err18" "and none of the five may put anything on stderr while being read"
+
+# BOM AND CRLF TOGETHER, which is what a Windows editor actually writes.
+# It worked before this round of fixes and must go on working: the two
+# strips are independent and the carriage return comes off first.
+printf -- '\357\273\277---\r\ntype: feedback\r\nimportance: 3\r\ntags: builds\r\ncreated: 20991231T000000Z\r\nlast_used: 20991231T000000Z\r\nuses: 0\r\nstatus: active\r\nsuperseded_by:\r\ntitle: a memory written by a windows editor\r\n---\r\n\r\nbody text\r\n' >"$g18/20260101T000000Z-both.md"
+out18both=$(run_search "$home18" -k 20)
+assert_contains "$out18both" "20260101T000000Z-both · 0.6000 · feedback · a memory written by a windows editor" "a BOM and CRLF in the same file must still be read - moving the BOM strip out of the FNR == 1 rule must not disturb the interaction between the two"
 
 # The TITLES must survive intact, not merely the memories: a CR left on
 # the end of a value is displayed to the user and would break the
@@ -1524,7 +1611,7 @@ mut18a_n=$(mutate_literal "$hoard_search_script" "$mutant18a" \
   }' \
   '  cr = cr')
 assert_eq "1" "$mut18a_n" "FAILURE PROOF (18), control: the CRLF strip must be found and neutralised exactly once"
-mut18a_out=$(HOME="$home18" "$mutant18a" 2>/dev/null) || true
+mut18a_out=$(HOME="$home18" "$mutant18a" -k 20 2>/dev/null) || true
 assert_not_contains "$mut18a_out" "a memory with crlf endings" "FAILURE PROOF (18): without the CRLF strip the memory is invisible"
 assert_contains "$mut18a_out" "a memory behind a byte order mark" "FAILURE PROOF (18, independence): while the BOM memory is still found - three separate fixes, none standing in for another"
 
@@ -1538,7 +1625,7 @@ mut18b_n=$(mutate_literal "$hoard_search_script" "$mutant18b" \
   '  if (substr($0, 1, 3) == bom) { $0 = substr($0, 4) }' \
   '  bom = bom')
 assert_eq "1" "$mut18b_n" "FAILURE PROOF (18), control: the BOM strip must be found and neutralised exactly once"
-mut18b_out=$(HOME="$home18" "$mutant18b" 2>/dev/null) || true
+mut18b_out=$(HOME="$home18" "$mutant18b" -k 20 2>/dev/null) || true
 assert_not_contains "$mut18b_out" "a memory behind a byte order mark" "FAILURE PROOF (18): without the BOM strip that memory is invisible"
 assert_contains "$mut18b_out" "a memory with crlf endings" "FAILURE PROOF (18, independence): while the CRLF memory is still found"
 
@@ -1552,9 +1639,53 @@ mut18c_n=$(mutate_literal "$hoard_search_script" "$mutant18c" \
   '  sub(/[ \t]+$/, "", key)' \
   '  key = key')
 assert_eq "1" "$mut18c_n" "FAILURE PROOF (18), control: the key trim must be found and neutralised exactly once"
-mut18c_out=$(HOME="$home18" "$mutant18c" 2>/dev/null) || true
+mut18c_out=$(HOME="$home18" "$mutant18c" -k 20 2>/dev/null) || true
 assert_not_contains "$mut18c_out" "a memory with spaces before its colons" "FAILURE PROOF (18): without the key trim that memory is invisible"
 assert_contains "$mut18c_out" "a memory with crlf endings" "FAILURE PROOF (18, independence): while the CRLF memory is still found"
+assert_contains "$mut18c_out" "a memory whose title line is indented" "FAILURE PROOF (18, independence): and so is the INDENTED memory - the two key trims are separate lines and separate fixes, and neither may stand in for the other"
+
+# 18d. FAILURE PROOF: the LEADING key trim, removed. This is the
+#      committed script's own parser, and the memory it loses is the one
+#      the committed comment said it was losing on purpose.
+mutant18d=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut18d_n=$(mutate_literal "$hoard_search_script" "$mutant18d" \
+  '  sub(/^[ \t]+/, "", key)
+' \
+  '')
+assert_eq "1" "$mut18d_n" "FAILURE PROOF (18d), control: the leading key trim must be found and removed exactly once"
+if cmp -s "$hoard_search_script" "$mutant18d"; then mut18d_differs=no; else mut18d_differs=yes; fi
+assert_eq "yes" "$mut18d_differs" "FAILURE PROOF (18d), control: the copy must genuinely differ from scripts/hoard-search.sh"
+mut18d_out=$(HOME="$home18" "$mutant18d" -k 20 2>/dev/null) || true
+mut18d_all=$(HOME="$home18" "$mutant18d" -k 20 --all 2>/dev/null) || true
+mut18d_err=$(HOME="$home18" "$mutant18d" -k 20 2>&1 >/dev/null) || true
+assert_not_contains "$mut18d_out" "a memory whose title line is indented" "FAILURE PROOF (18d): without the leading trim, two spaces before \`title\` remove the whole memory from every search - the defect, reproduced"
+assert_not_contains "$mut18d_all" "a memory whose title line is indented" "FAILURE PROOF (18d): and --all does not reach it either, which is what separates this from the \`status\` whitespace defect - there is no flag that gets it back"
+assert_eq "" "$mut18d_err" "FAILURE PROOF (18d): and nothing is said on stderr, so the only evidence a memory existed is that the user remembers writing it"
+assert_contains "$mut18d_out" "a memory with spaces before its colons" "FAILURE PROOF (18d, independence): while the trailing key trim still works - one line removed, one memory lost"
+
+# 18e. FAILURE PROOF: the BOM strip, put back inside FNR == 1. That is
+#      exactly where it used to live, so this mutant IS the committed
+#      script on this point, and it must lose the mid-file BOM while
+#      keeping the line-1 one.
+mutant18e=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut18e_n=$(mutate_literal "$hoard_search_script" "$mutant18e" \
+  '  if (substr($0, 1, 3) == bom) { $0 = substr($0, 4) }' \
+  '  if (FNR == 1 && substr($0, 1, 3) == bom) { $0 = substr($0, 4) }')
+assert_eq "1" "$mut18e_n" "FAILURE PROOF (18e), control: the BOM strip must be found and re-scoped to the first line exactly once"
+mut18e_out=$(HOME="$home18" "$mutant18e" -k 20 2>/dev/null) || true
+assert_not_contains "$mut18e_out" "a memory behind a mark that is not on line one" "FAILURE PROOF (18e): scoped to line 1, a BOM anywhere else takes the key it sits in front of with it and the memory loses its title - the defect, reproduced"
+assert_contains "$mut18e_out" "a memory behind a byte order mark" "FAILURE PROOF (18e, independence): while the line-1 BOM memory is still found, which is why nothing here caught this before - the realistic case was covered and the scope was not"
+assert_contains "$mut18e_out" "a memory written by a windows editor" "FAILURE PROOF (18e, independence): and so is the BOM-plus-CRLF memory, for the same reason"
 
 # ==========================================================================
 # 19. THE PUBLISHED RANKING SURVIVES REAL DECAY.
@@ -1648,7 +1779,7 @@ count_lines20() {
   if [ -z "$1" ]; then printf '0'; else printf '%s\n' "$1" | wc -l | tr -d ' '; fi
 }
 
-for k20 in 0 99999999999999999999 abc -3; do
+for k20 in 0 0005 00005 000000000000000005 0000 99999999999999999999 abc -3; do
   out20=$(run_search "$home20" -k "$k20")
   err20=$(HOME="$home20" "$hoard_search_script" -k "$k20" 2>&1 >/dev/null) || true
   assert_eq "" "$err20" "-k '$k20' must put NOTHING on stderr: this script's header promises silence for what it cannot do, and an out-of-range number is not an error the user can act on"
@@ -1661,6 +1792,22 @@ assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k abc)")" "-k abc must f
 assert_eq "7" "$(count_lines20 "$(run_search "$home20" -k 99999999999999999999)")" "a -k larger than the store must return everything the store holds - clamped, not refused, and not turned into the default either"
 assert_eq "3" "$(count_lines20 "$(run_search "$home20" -k 3)")" "and a number inside the range must be obeyed exactly, or the clamp is doing more than clamping"
 assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k)")" "-k with no value at all must fall back to the default rather than consuming the next argument or failing"
+
+# LEADING ZEROS, WHICH DEFEATED THE BOUND ENTIRELY. `${#topk}` counts
+# CHARACTERS and `00005` carries five of them and one digit of value, so
+# the length test read it as out of range and clamped it to 1000 - the
+# whole store, from a request for five. Measured on the committed script
+# against a twelve-memory store: `-k 5` -> 5, `-k 0005` -> 5,
+# `-k 00005` -> 12, `-k 000000000000000005` -> 12. The boundary was
+# exactly five characters, and the comment at that bound asserted the
+# opposite in as many words: "Anything longer than four digits is out of
+# range by construction". None of the six values scenario 20 already
+# exercised carried a leading zero, so nothing here could see it.
+assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 0005)")" "-k 0005 is five, and must return five - four characters, so the old bound happened to get this one right"
+assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 00005)")" "-k 00005 is ALSO five and must return five, not the whole store: this is where the character count and the value part company, and where the committed script silently returned everything it had"
+assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 000000000000000005)")" "and at any number of leading zeros - a bound whose boundary nobody chose is a bound that will move again"
+assert_eq "5" "$(count_lines20 "$(run_search "$home20" -k 0000)")" "a value that is all zeros must reduce to 0 and take the -k 0 arm, not become the empty string and take the not-a-number arm - both land on 5, and this pins that the reduction stops at one digit rather than running the string out"
+assert_eq "7" "$(count_lines20 "$(run_search "$home20" -k 0001000)")" "and a padded value INSIDE the range must be obeyed as the value it is - stripping the zeros must not turn a legitimate request into a clamp"
 
 # The rest of the flag surface, behaviourally, for the first time.
 out20_slug=$(run_search "$home20" --slug)
@@ -1679,6 +1826,12 @@ mutant20=$(new_mutant)
 # happens to hold in a variable of that name, which is nothing.
 mut20_n=$(mutate_literal "$hoard_search_script" "$mutant20" \
   '  *)
+    while :; do
+      case "$topk" in
+        0?*) topk=${topk#0} ;;
+        *) break ;;
+      esac
+    done
     if [ "${#topk}" -gt 4 ]; then
       topk=1000
     elif [ "$topk" -lt 1 ]; then
@@ -1696,6 +1849,33 @@ assert_contains "$mut20_err" "illegal line count" "FAILURE PROOF (20): without t
 assert_eq "" "$mut20_out" "FAILURE PROOF (20): and returns nothing at all, which is indistinguishable from an empty hoard"
 mut20_err_big=$(HOME="$home20" "$mutant20" -k 99999999999999999999 2>&1 >/dev/null) || true
 assert_contains "$mut20_err_big" "illegal line count" "FAILURE PROOF (20): and the same at the other end of the range"
+
+# 20c. FAILURE PROOF for the leading-zero assertions specifically: the
+#      zero-strip removed and NOTHING ELSE, which is the committed
+#      script's own arm. If the five assertions above bound to the bound
+#      rather than to the strip, this mutant would still satisfy them.
+mutant20c=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut20c_n=$(mutate_literal "$hoard_search_script" "$mutant20c" \
+  '    while :; do
+      case "$topk" in
+        0?*) topk=${topk#0} ;;
+        *) break ;;
+      esac
+    done
+' \
+  '')
+assert_eq "1" "$mut20c_n" "FAILURE PROOF (20c), control: the zero-strip must be found and removed exactly once"
+if cmp -s "$hoard_search_script" "$mutant20c"; then mut20c_differs=no; else mut20c_differs=yes; fi
+assert_eq "yes" "$mut20c_differs" "FAILURE PROOF (20c), control: the copy must genuinely differ from scripts/hoard-search.sh"
+assert_eq "7" "$(count_lines20 "$(HOME="$home20" "$mutant20c" -k 00005 2>/dev/null || true)")" "FAILURE PROOF (20c): without the strip, -k 00005 returns the WHOLE seven-memory store instead of five - the defect, reproduced, and it is silent: no error, no warning, just more than was asked for"
+assert_eq "5" "$(count_lines20 "$(HOME="$home20" "$mutant20c" -k 0005 2>/dev/null || true)")" "FAILURE PROOF (20c, boundary): and four characters still works on the mutant, which is exactly why the committed tests could not see this - every -k they exercised was four characters or fewer, or not a number at all"
+mut20c_err=$(HOME="$home20" "$mutant20c" -k 00005 2>&1 >/dev/null) || true
+assert_eq "" "$mut20c_err" "FAILURE PROOF (20c): and the mutant says nothing on stderr while doing it, so no existing assertion about stderr could have caught it either"
 
 # ==========================================================================
 # 21. THE QUERY REACHES awk THROUGH THE ENVIRONMENT.
@@ -1771,27 +1951,86 @@ make_memory "$home22" "global" "20260101T000000Z-a22" "feedback" "3" "builds" \
   "20991231T000000Z" "0" "active" "the first memory"
 make_memory "$home22" "global" "20260101T000001Z-b22" "feedback" "3" "tests" \
   "20991231T000000Z" "0" "active" "the second memory"
+# THE FIXTURE NOW HOLDS A MEMORY THE DISCARDED TERM WOULD HAVE MATCHED,
+# and that is the whole repair to this scenario. As written before, every
+# term in the dropped list below matched nothing in this store even when
+# it was searched for properly - so the assertion "the answer is nothing"
+# was satisfied by a store that had nothing to say, and could never have
+# seen a FULL store answering like an empty one. That is the state the
+# header of scripts/hoard-search.sh calls the worst outcome in the file,
+# and it was being asserted here as correct.
+make_memory "$home22" "global" "20260101T000002Z-c22" "episode" "3" "cpp,parser" \
+  "20991231T000000Z" "0" "active" "c++ move semantics bit us in the parser"
 
-# THE TERMS ARE CHOSEN SO THAT NOTHING SURVIVES TOKENISING, which is not
-# the same as choosing terms that do not match. A term that survives and
-# matches nothing is scenario 9, and it was already covered; these are
-# terms the tokeniser DISCARDS, so the query arrives at the ranking empty
-# and the reader has to decide what an empty query means. The accented
-# ones are the reason this matters in practice - the tokeniser replaces
-# every byte that is not an ASCII letter or digit with a space, so a
-# short Portuguese word comes apart into one-character pieces and the
-# user has typed a real question that cannot be looked for.
-for dropped22 in "x" "que" "the and for" "não" "ação" "só" "é"; do
-  out22=$(run_search "$home22" -- "$dropped22")
-  assert_eq "" "$out22" "a query of '$dropped22' leaves no usable token, and the honest answer is nothing - not the top of the store dressed as an answer to a question that was never searched for"
+# A ONE-CHARACTER TERM THE USER TYPED IS A TERM, NOT A DISCARD. The
+# committed reader dropped every token shorter than two characters, so
+# `c++`, `C++`, `C`, `R`, `C#` and `F#` were all thrown away by LENGTH
+# before any file was opened. Measured against this exact store: each of
+# them returned zero lines, exit 0, empty stderr - while the memory whose
+# title begins `c++` sat right there. skills/dig/SKILL.md then tells the
+# model to say "Nothing in the hoard about that." and forbids trying
+# again, so the model asserts something false and cannot recover from it.
+for found22 in "c++" "C++" "C" "c" "C#"; do
+  out22c=$(run_search "$home22" -- "$found22")
+  err22c=$(HOME="$home22" "$hoard_search_script" -- "$found22" 2>&1 >/dev/null) || true
+  assert_contains "$out22c" "c++ move semantics bit us in the parser" "a search for '$found22' must return the memory whose title carries it - one character is a real search term and this store really holds a match for it"
+  assert_not_contains "$out22c" "the second memory" "and must not return what it does not match, or the assertion above is passing against a search that returned everything"
+  assert_eq "" "$err22c" "and a term that WAS searched for must say nothing on stderr, whatever it found"
 done
 
+# THE TERMS BELOW ARE CHOSEN SO THAT NOTHING SURVIVES TOKENISING, which
+# is not the same as choosing terms that do not match. A term that
+# survives and matches nothing is scenario 9, and it was already covered;
+# these are terms the tokeniser DISCARDS, so the query arrives at the
+# ranking empty and the reader has to decide what an empty query means.
+# The accented ones are the reason this matters in practice - the
+# tokeniser replaces every byte that is not an ASCII letter or digit with
+# a space, so a short Portuguese word comes apart into pieces of one
+# character each and the user has typed a real question that cannot be
+# looked for. `a`, `e` and `o` are here because they joined the stopword
+# list when one-character terms started being kept: they are the English
+# and Portuguese articles and they stand alone in ordinary titles
+# constantly.
+#
+# `x` IS NO LONGER IN THIS LIST, and moving it out is part of the repair.
+# It is an ASCII one-character term, so it is now searched for; it simply
+# matches nothing here, which is scenario 9's answer and not this one's.
+for dropped22 in "que" "the and for" "não" "ação" "só" "é" "a" "o"; do
+  out22=$(run_search "$home22" -- "$dropped22")
+  err22=$(HOME="$home22" "$hoard_search_script" -- "$dropped22" 2>&1 >/dev/null) || true
+  assert_eq "" "$out22" "a query of '$dropped22' leaves no usable token, and the honest answer is nothing on stdout - not the top of the store dressed as an answer to a question that was never searched for"
+  assert_contains "$err22" "hoard-search: no usable search term" "and the user must be TOLD, in one line on stderr, that '$dropped22' left nothing to look for - an empty stdout on its own reads as 'the hoard holds nothing about that', which is a different statement and may well be false"
+  assert_eq "1" "$(printf '%s\n' "$err22" | grep -c . || true)" "exactly ONE line for '$dropped22': stdout carries the four-field contract callers parse, and stderr carries one sentence a model can relay verbatim"
+  assert_exit_code 0 env HOME="$home22" "$hoard_search_script" -- "$dropped22"
+done
+
+# `x` searched for, and the two answers kept apart. A term this reader
+# LOOKED FOR and did not find must not carry the line that says it could
+# not look.
+out22x=$(run_search "$home22" -- "x")
+err22x=$(HOME="$home22" "$hoard_search_script" -- "x" 2>&1 >/dev/null) || true
+assert_eq "" "$out22x" "no memory here carries a lone 'x', so a search for it is an honest miss"
+assert_eq "" "$err22x" "and it must NOT print the discarded-terms line: 'x' is a term this reader looked for and did not find, which is a different answer from one it could not look for, and running them together would put the message on ordinary empty results"
+
 out22_none=$(run_search "$home22")
+err22_none=$(HOME="$home22" "$hoard_search_script" 2>&1 >/dev/null) || true
 assert_contains "$out22_none" "the first memory" "and a search with NO terms must still return the store's top - that is the case the behaviour above must not be confused with"
 assert_contains "$out22_none" "the second memory" "both of them"
+assert_eq "" "$err22_none" "and a search with no terms at all must say nothing on stderr either - nothing was discarded, because nothing was given"
 out22_real=$(run_search "$home22" -- "builds")
 assert_contains "$out22_real" "the first memory" "control: a query whose token DOES survive must still filter normally"
 assert_not_contains "$out22_real" "the second memory" "control: and exclude what it does not match"
+
+# THE TWO STATES, SIDE BY SIDE, ON THE REAL SCRIPT. This is the claim the
+# whole scenario exists for: a store that HOLDS memories must not answer
+# a discarded query the way an empty store does.
+empty22=$(new_home)
+mkdir -p "$empty22/.squirrel/hoard/global"
+full22_err=$(HOME="$home22" "$hoard_search_script" -- "é" 2>&1 >/dev/null) || true
+empty22_err=$(HOME="$empty22" "$hoard_search_script" -- "é" 2>&1 >/dev/null) || true
+if [ "$full22_err" = "$empty22_err" ]; then same22=yes; else same22=no; fi
+assert_eq "no" "$same22" "a FULL store and an EMPTY one must not answer the same discarded query identically - that is exactly the state the header of scripts/hoard-search.sh calls the worst thing it can do, and stdout alone cannot tell them apart because both are empty"
+assert_eq "" "$empty22_err" "DECLARED LIMIT (22): with no readable file in the hoard at all, this script exits before the awk pass that prints that line, so a discarded query against an EMPTY store is silent. That is the one state where an empty answer is honest anyway - the store really does hold nothing - and buying the line there would mean a second copy of the tokeniser living in the shell. The limit is written beside the message in scripts/hoard-search.sh; if this assertion ever fails, that comment must change with it"
 
 # 22b. FAILURE PROOF: treat a discarded query as no query.
 mutant22=$(new_mutant)
@@ -1807,6 +2046,53 @@ assert_eq "1" "$mut22_n" "FAILURE PROOF (22), control: the distinction must be f
 mut22_out=$(HOME="$home22" "$mutant22" -- "não" 2>/dev/null) || true
 assert_contains "$mut22_out" "the first memory" "FAILURE PROOF (22): with the distinction removed, a query whose tokens were all discarded returns the whole store - the defect, reproduced"
 assert_contains "$mut22_out" "the second memory" "FAILURE PROOF (22): all of it, at the scores of a search with no terms in it"
+
+# 22c. FAILURE PROOF for the one-character terms: the blanket length
+#      rule, restored. This is the committed script's own line, and it is
+#      what made a full store answer like an empty one.
+mutant22c=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut22c_n=$(mutate_literal "$hoard_search_script" "$mutant22c" \
+  '        if (shredded && length(t) < 2) continue' \
+  '        if (length(t) < 2) continue')
+assert_eq "1" "$mut22c_n" "FAILURE PROOF (22c), control: the word-level test must be found and reverted to the blanket length rule exactly once"
+if cmp -s "$hoard_search_script" "$mutant22c"; then mut22c_differs=no; else mut22c_differs=yes; fi
+assert_eq "yes" "$mut22c_differs" "FAILURE PROOF (22c), control: the copy must genuinely differ from scripts/hoard-search.sh"
+for lost22c in "c++" "C++" "C" "c" "C#"; do
+  mut22c_out=$(HOME="$home22" "$mutant22c" -- "$lost22c" 2>/dev/null) || true
+  mut22c_err=$(HOME="$home22" "$mutant22c" -- "$lost22c" 2>&1 >/dev/null) || true
+  assert_eq "" "$mut22c_out" "FAILURE PROOF (22c): with the blanket rule back, '$lost22c' returns NOTHING while the matching memory sits in the store - the defect, reproduced"
+  assert_contains "$mut22c_err" "hoard-search: no usable search term" "FAILURE PROOF (22c): and the mutant reaches that state through the discarded-query path, which is what makes the store look empty rather than unmatched"
+done
+mut22c_control=$(HOME="$home22" "$mutant22c" 2>/dev/null) || true
+assert_contains "$mut22c_control" "c++ move semantics bit us in the parser" "FAILURE PROOF (22c), control: the memory IS in the mutant's store and the mutant CAN return it - so the empty answers above are the tokeniser throwing the term away, not a fixture that has nothing in it"
+
+# 22d. FAILURE PROOF for the stderr line: removed, and then the full
+#      store and the empty one compared byte for byte. Without the line
+#      there is no signal at all, which is the state this scenario is
+#      named after.
+mutant22d=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut22d_n=$(mutate_literal "$hoard_search_script" "$mutant22d" \
+  '      print "hoard-search: no usable search term - every term given was a stopword or held no letter or digit this reader can look for, so the hoard was not searched." > "/dev/stderr"' \
+  '      q_dropped = q_dropped')
+assert_eq "1" "$mut22d_n" "FAILURE PROOF (22d), control: the stderr line must be found and removed exactly once"
+if cmp -s "$hoard_search_script" "$mutant22d"; then mut22d_differs=no; else mut22d_differs=yes; fi
+assert_eq "yes" "$mut22d_differs" "FAILURE PROOF (22d), control: the copy must genuinely differ from scripts/hoard-search.sh"
+mut22d_full=$(HOME="$home22" "$mutant22d" -- "é" 2>/dev/null) || true
+mut22d_full_err=$(HOME="$home22" "$mutant22d" -- "é" 2>&1 >/dev/null) || true
+mut22d_empty=$(HOME="$empty22" "$mutant22d" -- "é" 2>/dev/null) || true
+mut22d_empty_err=$(HOME="$empty22" "$mutant22d" -- "é" 2>&1 >/dev/null) || true
+assert_eq "$mut22d_empty|$mut22d_empty_err" "$mut22d_full|$mut22d_full_err" "FAILURE PROOF (22d): without that line a store holding three memories answers a discarded query BYTE FOR BYTE the way a store holding none does - same empty stdout, same empty stderr, same exit 0. The caller has nothing whatever to tell the two apart with, and skills/dig/SKILL.md turns that into 'Nothing in the hoard about that.' with no route back"
+assert_contains "$full22_err" "hoard-search:" "FAILURE PROOF (22d), the other half: the real script on the SAME fixture puts the line there - one file, one query, one line of difference"
 
 # ==========================================================================
 # 23. A COUNTER THAT IS NEGATIVE, AND A FIELD THAT IS ABSENT.
@@ -1835,7 +2121,34 @@ make_memory "$home23" "global" "20260101T000000Z-neg5" "feedback" "3" "builds" \
 # writes.
 printf -- '---\nimportance: 3\ntags: builds\ncreated: 20991231T000000Z\nlast_used: 20991231T000000Z\nuses: 0\nstatus: active\nsuperseded_by:\ntitle: a memory with no type at all\n---\n\nbody text\n' >"$home23/.squirrel/hoard/global/20260101T000000Z-notype.md"
 
-out23=$(run_search "$home23")
+# THE FIXTURE CAN NOW PRODUCE AN OVERFLOW, which is the repair to this
+# scenario. `bad_scores23` below asserts that every score this script
+# prints is a plain number with four decimal places - a true and
+# load-bearing claim - but with only negative counters in the store there
+# was no input here that could produce `inf`, so it passed for a reason
+# nobody chose. A floor bounds one end of `uses`; these four fixtures are
+# the other end and the same question asked of `importance`.
+#
+# `-used` IS THE CONTROL AND THE POINT AT ONCE. Its counter is a real 3,
+# so it legitimately outranks everything else here - which is what makes
+# "the corrupted memory is not on top" a statement with a top to be off.
+make_memory "$home23" "global" "20260101T000000Z-used" "feedback" "3" "builds" \
+  "20991231T000000Z" "3" "active" "a memory with a counter that was really earned"
+make_memory "$home23" "global" "20260101T000000Z-over" "feedback" "3" "builds" \
+  "20991231T000000Z" "1e999" "active" "a memory with a counter beyond every number"
+big23=$(awk 'BEGIN { s = ""; while (length(s) < 400) s = s "1"; print s }')
+assert_eq "400" "${#big23}" "control: the four-hundred-digit counter must really be four hundred digits, or the overflow fixture is just a large number"
+make_memory "$home23" "global" "20260101T000000Z-digits" "feedback" "3" "builds" \
+  "20991231T000000Z" "$big23" "active" "a memory with a counter of four hundred digits"
+make_memory "$home23" "global" "20260101T000000Z-badimp" "feedback" "nan" "builds" \
+  "20991231T000000Z" "0" "active" "a memory whose importance is not a real number"
+make_memory "$home23" "global" "20260101T000000Z-impover" "feedback" "1e999" "builds" \
+  "20991231T000000Z" "0" "active" "a memory whose importance is beyond every number"
+
+# -k 20 rather than the default: this fixture is now eight memories and
+# the default of five would truncate the very lines these assertions are
+# about, silently.
+out23=$(run_search "$home23" -k 20)
 assert_contains "$out23" "20260101T000000Z-neg1 · 0.6000 · feedback · a memory with a negative counter" "a negative \`uses\` must be floored at zero and score exactly as an unused memory does - the same clamp \`importance\` has always had"
 assert_contains "$out23" "20260101T000000Z-neg5 · 0.6000 · feedback · a memory with a very negative counter" "and a more negative one, which printed \`nan\` rather than \`-inf\`"
 assert_not_contains "$out23" "inf" "no line may carry an infinity where the score belongs"
@@ -1845,6 +2158,33 @@ assert_contains "$out23" "20260101T000000Z-notype · 0.6000 ·  · a memory with
 field_count23=$(printf '%s\n' "$out23" | grep "no type at all" | awk -F ' · ' '{ print NF }')
 assert_eq "4" "$field_count23" "and the line must still carry four fields, the third of them empty"
 
+# THE OTHER END OF THE SAME DEFECT, AND THE DIRECTION IT FAILS IN.
+# `uses: 1e999` and a four-hundred-digit integer are both +inf the moment
+# they are read as a number, and a floor does not look up there. Measured
+# on the floored script, one fixture, both sides: the +inf memory printed
+# `inf` where its score belongs and stood at the TOP, above a memory
+# scoring 0.6286. It got worse rather than better when the ordering moved
+# to the logarithm, because every sane ordering key is negative and
+# `sort -n` reads `inf` as larger than all of them.
+first23=$(printf '%s\n' "$out23" | head -n 1)
+assert_contains "$first23" "a memory with a counter that was really earned" "the memory whose counter is a real 3 must stand at the TOP - a counter no reader could have produced must not outrank one that was earned, which is the whole reason the floor was added and the direction it left open"
+assert_contains "$out23" "20260101T000000Z-over · 0.6000 · feedback · a memory with a counter beyond every number" "a counter too large to represent must buy NO boost rather than the largest one: it scores exactly as an unused memory does, which is what a counter carrying no information is worth"
+assert_contains "$out23" "20260101T000000Z-digits · 0.6000 · feedback · a memory with a counter of four hundred digits" "and the same for an integer with more digits than a double can hold - the two reach +inf by different routes and must land in the same place"
+assert_contains "$out23" "20260101T000000Z-badimp · 0.2000 · feedback · a memory whose importance is not a real number" "an \`importance\` that is not a number must land at the BOTTOM of the published 1..5 range. \`imp < 1\` and \`imp > 5\` are both false for a nan on the awk macOS ships, so it walked straight through a clamp that reads as though nothing could"
+assert_contains "$out23" "20260101T000000Z-impover · 0.2000 · feedback · a memory whose importance is beyond every number" "and an \`importance\` too large to represent must land there too rather than at 5: clamping nonsense to the ceiling hands it the top of every search, which is the same defect wearing the other field"
+
+# The clamp is a CLIFF above 1000000, deliberately, and a real counter
+# just under it is untouched. Asserted so that the cliff is a decision
+# rather than an accident of where a comparison was written.
+home23e=$(new_home)
+make_memory "$home23e" "global" "20260101T000000Z-e1" "feedback" "3" "builds" \
+  "20991231T000000Z" "1000000" "active" "a counter at the very top of the range"
+make_memory "$home23e" "global" "20260101T000000Z-e2" "feedback" "3" "builds" \
+  "20991231T000000Z" "1000001" "active" "a counter one past the top of the range"
+out23e=$(run_search "$home23e" -k 20)
+assert_contains "$out23e" "20260101T000000Z-e1 · 2.2579 · feedback · a counter at the very top of the range" "a counter of exactly 1000000 is inside the range and keeps its full boost - the bound is not a rounding of the reinforcement curve"
+assert_contains "$out23e" "20260101T000000Z-e2 · 0.6000 · feedback · a counter one past the top of the range" "and one past it drops to no boost at all. DECLARED LIMIT: this is a cliff and not a taper, because a value above the range carries no information about how often a memory was read and a taper would still let a wrong number outrank a right one. Nothing in squirrel-mode increments past 1 per read"
+
 # 23b. FAILURE PROOF: the floor, removed.
 mutant23a=$(new_mutant)
 # shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
@@ -1853,14 +2193,43 @@ mutant23a=$(new_mutant)
 # evaluate. Expanding any of them would search for whatever this test
 # happens to hold in a variable of that name, which is nothing.
 mut23a_n=$(mutate_literal "$hoard_search_script" "$mutant23a" \
-  '  if (uses < 0) uses = 0' \
+  '  if (!is_finite(uses) || uses < 0 || uses > 1000000) uses = 0' \
   '  uses = uses')
-assert_eq "1" "$mut23a_n" "FAILURE PROOF (23), control: the floor must be found and neutralised exactly once"
-mut23a_out=$(HOME="$home23" "$mutant23a" 2>/dev/null) || true
-assert_contains "$mut23a_out" "-inf" "FAILURE PROOF (23): without the floor, \`uses: -1\` prints -inf where the score belongs"
+assert_eq "1" "$mut23a_n" "FAILURE PROOF (23), control: the counter bound must be found and neutralised exactly once"
+mut23a_out=$(HOME="$home23" "$mutant23a" -k 20 2>/dev/null) || true
+assert_contains "$mut23a_out" "-inf" "FAILURE PROOF (23): without the bound, \`uses: -1\` prints -inf where the score belongs"
 assert_contains "$mut23a_out" "nan" "FAILURE PROOF (23): and \`uses: -5\` prints nan"
+assert_contains "$mut23a_out" "· inf ·" "FAILURE PROOF (23): and \`uses: 1e999\` prints inf, which is the direction a floor alone never looked in"
 mut23a_first=$(printf '%s\n' "$mut23a_out" | head -n 1)
-assert_contains "$mut23a_first" "-inf" "FAILURE PROOF (23): and the memory carrying that non-number stands at the TOP of the ranking, which is the part that matters - a counter that is wrong is not merely displayed wrongly, it wins"
+assert_contains "$mut23a_first" "· inf ·" "FAILURE PROOF (23): and the memory carrying that non-number stands at the TOP of the ranking, which is the part that matters - a counter that is wrong is not merely displayed wrongly, it wins"
+assert_not_contains "$mut23a_first" "really earned" "FAILURE PROOF (23), the direction: and the memory whose counter is a real 3 is NOT on top, where the real script puts it. One fixture, one line of difference, opposite orders"
+mut23a_bad=$(printf '%s\n' "$mut23a_out" | awk -F ' · ' '{ print $2 }' | grep -vE '^[0-9]+\.[0-9][0-9][0-9][0-9]$' || true)
+if [ -n "$mut23a_bad" ]; then mut23a_bad_seen=yes; else mut23a_bad_seen=no; fi
+assert_eq "yes" "$mut23a_bad_seen" "FAILURE PROOF (23): and the four-decimal-places assertion below FIRES on this mutant. That is what makes it a real assertion: with the old fixture, which held only negative counters, no input to it could ever have produced a positive overflow, so it passed for a reason nobody chose"
+
+# 23d. FAILURE PROOF for the importance clamp, mutated to the committed
+#      form. Deliberately proved with `importance: 1e999` rather than
+#      with `nan`: only the awk macOS ships reads the string "nan" AS a
+#      nan (gawk and mawk both read it as 0), so a nan-based proof would
+#      pass on one machine and be vacuous on another. Every awk turns
+#      1e999 into +inf, so this proof is the same everywhere.
+mutant23d=$(new_mutant)
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut23d_n=$(mutate_literal "$hoard_search_script" "$mutant23d" \
+  '  if (!is_finite(imp) || imp < 1) imp = 1' \
+  '  if (imp < 1) imp = 1')
+assert_eq "1" "$mut23d_n" "FAILURE PROOF (23d), control: the importance clamp must be found and reverted exactly once"
+if cmp -s "$hoard_search_script" "$mutant23d"; then mut23d_differs=no; else mut23d_differs=yes; fi
+assert_eq "yes" "$mut23d_differs" "FAILURE PROOF (23d), control: the copy must genuinely differ from scripts/hoard-search.sh"
+mut23d_out=$(HOME="$home23" "$mutant23d" -k 20 2>/dev/null) || true
+assert_contains "$mut23d_out" "20260101T000000Z-impover · 1.0000 · feedback · a memory whose importance is beyond every number" "FAILURE PROOF (23d): without the finiteness test, an \`importance\` of 1e999 takes the upper clamp and becomes 5 - the maximum - so the memory scores 1.0000 instead of 0.2000"
+mut23d_first=$(printf '%s\n' "$mut23d_out" | head -n 1)
+assert_contains "$mut23d_first" "whose importance is" "FAILURE PROOF (23d): and a memory whose importance is nonsense takes the TOP of the ranking, above the one whose counter was really earned. Clamping nonsense to the ceiling is not a safe default - it is the defect. The needle is the phrase both nonsense titles share, because WHICH of the two wins depends on the awk: only the awk macOS ships turns the string \"nan\" into a nan at all"
+assert_not_contains "$mut23d_first" "really earned" "FAILURE PROOF (23d), the direction: and the memory the real script puts on top is not on top here"
 
 # The real script's side of the same claim, stated over EVERY line rather
 # than over the two fixtures: the score column is always a number with
@@ -1882,7 +2251,7 @@ mut23b_n=$(mutate_literal "$hoard_search_script" "$mutant23b" \
     printf '%s · %s · %s · %s\\n' \"\$r_id\" \"\$r_score\" \"\$r_type\" \"\$r_title\"
   done")
 assert_eq "1" "$mut23b_n" "FAILURE PROOF (23), control: the awk formatter must be found and reverted to the shell read loop exactly once"
-mut23b_out=$(HOME="$home23" "$mutant23b" 2>/dev/null) || true
+mut23b_out=$(HOME="$home23" "$mutant23b" -k 20 2>/dev/null) || true
 assert_contains "$mut23b_out" "20260101T000000Z-notype · 0.6000 · a memory with no type at all · " "FAILURE PROOF (23): the \`read\` loop merges the two tabs around the empty type and prints the TITLE in the type's column - the defect, reproduced, on a line that still looks like an ordinary result"
 assert_contains "$mut23b_out" "a memory with a negative counter" "FAILURE PROOF (23, isolation): the reverted formatter must still print the other memories normally - it mangles the record with an empty field, which is why nothing else in this suite had caught it"
 
@@ -2186,5 +2555,138 @@ assert_contains "$mutant27_body" "It is also exactly what this script cost befor
 assert_contains "$mutant27_body" "8.1 s" "FAILURE PROOF (27): and the number it was built on"
 assert_not_contains "$mutant27_body" "within 2% of it" "FAILURE PROOF (27): and must lose the ratio, which is the part that is true"
 assert_contains "$mutant27_body" "24.08 s" "FAILURE PROOF (27, independence): while the path-length measurement stays - three separate claims, three separate assertions"
+
+# ==========================================================================
+# 28. THE PREMISE BEHIND THE SCOPED APOSTROPHE RULE, RUN RATHER THAN
+#     ASSERTED.
+#
+#     skills/dig/SKILL.md now accepts an apostrophe in the
+#     `Hoard directory:` value. That is only correct if a hoard really
+#     does live and work under such a path - so this runs one. If this
+#     scenario ever fails, the rule in dig has to go back to rejecting
+#     the line, and the paragraph explaining why has to change with it.
+# ==========================================================================
+home28=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hoard-apos.XXXXXX")
+cleanup_paths="$cleanup_paths $home28"
+home28="$home28/ana's tools"
+mkdir -p "$home28"
+make_memory "$home28" "global" "20260101T000000Z-apos" "reference" "3" "paths" \
+  "20991231T000000Z" "0" "active" "a memory under a home with an apostrophe"
+case "$home28" in
+  *"'"*) shape28=has-apostrophe ;;
+  *) shape28="no apostrophe: $home28" ;;
+esac
+assert_eq "has-apostrophe" "$shape28" "control: the fixture HOME must really carry an apostrophe, or this scenario proves nothing about the rule it exists for"
+out28=$(run_search "$home28")
+err28=$(HOME="$home28" "$hoard_search_script" 2>&1 >/dev/null) || true
+assert_contains "$out28" "a memory under a home with an apostrophe" "the reader must return memories from a hoard under a path carrying an apostrophe - the character is legal in a filename on every filesystem this ships to, and the rule that rejected the injected line naming it was barring correct work rather than preventing anything"
+assert_eq "" "$err28" "and must say nothing on stderr while doing it"
+assert_exit_code 0 env HOME="$home28" "$hoard_search_script"
+out28q=$(run_search "$home28" -- "paths")
+assert_contains "$out28q" "a memory under a home with an apostrophe" "and a real query must work there too, so the acceptance covers the ordinary path and not just the empty one"
+
+# ==========================================================================
+# 29. FOUR CLAIMS scripts/hoard-search.sh MADE ABOUT ITSELF THAT WERE NOT
+#     TRUE, each replaced by what was measured.
+#
+#     Two of them are the kind that outlive their fixture and get copied
+#     into a document; two describe behaviour a reader would rely on and
+#     be wrong about. All four are pinned as SENTENCES rather than as
+#     numbers or words, for the reason scenario 27 gives.
+# ==========================================================================
+# (i) The awk pass at 2000 memories. docs/specs/2026-08-13-hoard-design.md
+#     §5.1 and README.md both now say the "110 of 155" split was published
+#     wrong and the awk pass is about 84 ms of about 159. The comment here
+#     went on stating 110 ms as current fact.
+assert_not_contains "$hoard_search_body" "against 110 ms for the whole awk pass" "the comment must not go on quoting the awk figure that this repository has already published a correction for - the spec and README both say in as many words that the 110-of-155 split was wrong"
+assert_contains "$hoard_search_body" "110 ms was published wrong" "and must name the retired figure rather than quietly swapping it, so a reader who met the old number somewhere else can tell it is the same measurement"
+assert_contains "$hoard_search_body" "84 ms in awk" "and must carry the figure that replaced it, read from the same re-measurement the spec publishes"
+
+# (ii) The TOCTOU residue. The comment said the record was lost "in
+#      silence". It is not: awk writes a diagnostic to stderr, and
+#      scenario 16d asserts an EMPTY stderr as the mark of the class that
+#      IS closed - so "silence" named the wrong marker for the wrong case.
+assert_not_contains "$hoard_search_body" "silence, exactly as before" "the comment must not call the race silent: awk writes \`awk: can't open file ...\` to stderr when an open it was handed fails, measured at 409 bytes on this machine for one victim among three"
+assert_contains "$hoard_search_body" "IT IS NOT SILENT, THOUGH" "and must say what the difference IS, because it is the only way to tell the two apart: the class the prescan closes leaves stderr empty, which is what scenario 16d asserts, and the residue does not"
+
+# 29b. FAILURE PROOFS: each claim restored, one at a time.
+mutant29a=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-claim.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant29a"
+# shellcheck disable=SC2016 # every literal below is the exact SOURCE TEXT of
+# the file under mutation - '$f', '$@', '$0' and the backticks included -
+# being searched for and replaced, never an expression for this shell to
+# evaluate. Expanding any of them would search for whatever this test
+# happens to hold in a variable of that name, which is nothing.
+mut29a_n=$(mutate_literal "$hoard_search_script" "$mutant29a" \
+  '# against about 84 ms for the whole awk pass it was feeding. That second
+# figure used to read 110 ms here, and 110 ms was published wrong:' \
+  '# against 110 ms for the whole awk pass it was feeding. Nothing else:')
+assert_eq "1" "$mut29a_n" "FAILURE PROOF (29a), control: the corrected figure must be found and reverted exactly once"
+mutant29a_body=$(cat "$mutant29a" 2>/dev/null || printf '')
+assert_contains "$mutant29a_body" "against 110 ms for the whole awk pass" "FAILURE PROOF (29a): the reverted copy must carry the retired figure the assertion above forbids"
+assert_not_contains "$mutant29a_body" "110 ms was published wrong" "FAILURE PROOF (29a): and must lose the correction"
+assert_contains "$mutant29a_body" "24.08 s" "FAILURE PROOF (29a, independence): while the path-length measurement stays - separate claims, separate assertions"
+
+mutant29b=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-claim.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant29b"
+# shellcheck disable=SC2016 # exact source text of the file under mutation.
+mut29b_n=$(mutate_literal "$hoard_search_script" "$mutant29b" \
+  '# That residue costs the record before it and everything after it,
+# exactly as before - it is narrower than the class this test closes,
+# not different in kind.' \
+  '# That residue costs the record before it and everything after it, in
+# silence, exactly as before - it is narrower than the class this test
+# closes, not different in kind.')
+assert_eq "1" "$mut29b_n" "FAILURE PROOF (29b), control: the corrected sentence must be found and reverted exactly once"
+mutant29b_body=$(cat "$mutant29b" 2>/dev/null || printf '')
+assert_contains "$mutant29b_body" "silence, exactly as before" "FAILURE PROOF (29b): the reverted copy must carry the claim the assertion above forbids. NEEDLE CHOICE: the words wrap across a comment line break in the source, so a needle reading \"in silence, exactly as before\" is not a contiguous string in ANY version of this file - including the one the defect was found in. It would have passed on the broken text and on the fixed text alike"
+assert_contains "$mutant29b_body" "IT IS NOT SILENT, THOUGH" "FAILURE PROOF (29b, independence): the two are separate paragraphs and separate assertions - reverting one must not delete the other, which is what makes each needle bind to its own sentence"
+
+# ==========================================================================
+# 30. THE awk PROGRAM CARRIES NO SINGLE QUOTE.
+#
+#     It is handed to the shell inside single quotes, so ONE apostrophe
+#     anywhere in it - in a COMMENT included - ends the quoting, and the
+#     rest of the program becomes shell words. awk then fails to parse
+#     what it is given and every search on the machine returns nothing
+#     with a syntax error on stderr. Found the hard way while writing
+#     this round of fixes: an apostrophe typed into an explanatory
+#     comment took the whole reader down, and no scenario named the
+#     class, only the symptom.
+#
+#     This is a SHAPE GUARD like scenario 14's, and for the same reason:
+#     the regression is one character in prose, it is invisible to
+#     review, and the failure it causes looks like a hundred unrelated
+#     failures rather than one cause.
+# ==========================================================================
+awk_program_quotes() {
+  # awk_program_quotes <script> - how many lines of the embedded awk
+  # program carry a single quote. The program runs from the line opening
+  # the quoting to the line closing it, and neither of those two counts:
+  # the quotes ON them are the delimiters themselves.
+  APQ_SRC=$1 python3 -c '
+import io
+import os
+lines = io.open(os.environ["APQ_SRC"], encoding="utf-8").read().split("\n")
+q = chr(39)
+start = next(i for i, l in enumerate(lines) if l.startswith("  LC_ALL=C awk -v want_all="))
+end = next(i for i, l in enumerate(lines) if l.startswith(q + " \"$@\" |"))
+print(sum(1 for l in lines[start + 1:end] if q in l))
+'
+}
+assert_eq "0" "$(awk_program_quotes "$hoard_search_script")" "no line of the embedded awk program may carry a single quote - it is delimited by single quotes, so one of them inside ends the program early and the shell reads the remainder as words. The cost is not one input behaving oddly: it is every search on the machine returning nothing, with an awk syntax error the user has no way to connect to a comment someone reworded"
+
+# 30b. FAILURE PROOF: one apostrophe, in a comment, nowhere near any code.
+mutant30=$(new_mutant)
+# shellcheck disable=SC2016 # exact source text of the file under mutation.
+mut30_n=$(mutate_literal "$hoard_search_script" "$mutant30" \
+  '  # A tab in a value would manufacture a field.' \
+  "  # A tab in a value would manufacture a field of this record's own.")
+assert_eq "1" "$mut30_n" "FAILURE PROOF (30), control: the comment must be found and reworded exactly once"
+assert_eq "1" "$(awk_program_quotes "$mutant30")" "FAILURE PROOF (30), control: and the mutant must carry exactly one such line, so the count above is measuring what it claims to"
+mut30_out=$(HOME="$home2" "$mutant30" 2>/dev/null) || true
+mut30_err=$(HOME="$home2" "$mutant30" 2>&1 >/dev/null) || true
+assert_eq "" "$mut30_out" "FAILURE PROOF (30): one apostrophe in one comment and the reader returns NOTHING, on a store holding a memory - the store answering like an empty one, from a rewording"
+assert_contains "$mut30_err" "awk" "FAILURE PROOF (30): and what the user gets instead is an awk diagnostic naming a source line of a program they never wrote"
 
 assert_report
