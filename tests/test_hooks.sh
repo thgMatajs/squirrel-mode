@@ -8402,6 +8402,25 @@ assert_not_contains "$outH13_mut" "checkpoints or hoard" "FAILURE PROOF (HOARD-1
 #     checkpoint root as the only one, and the sharpest of them is the
 #     file's own headline statement of what it guarantees. Pinned by the
 #     corrected text, and mutation-proved by restoring the stale one.
+#
+#     WHAT THIS SCENARIO PROVES, AND WHAT IT CANNOT (corrected, audit
+#     item 9). Every assertion here is an assert_contains or
+#     assert_not_contains over the TEXT of scripts/allow-checkpoint.sh.
+#     What that establishes is that a sentence is PRESENT (or gone) -
+#     never that it is TRUE. A wrong guarantee written and pinned in the
+#     same commit passes this scenario and its failure proof alike, and
+#     the file's own header used to cite "HOARD-13c pins the corrected
+#     wording and HOARD-13d proves the pin fires on the stale one" as
+#     though it were evidence for the guarantee itself. It is evidence
+#     against DRIFT, which is a different and smaller thing.
+#
+#     The behaviour behind the sentence is proved by running the hook,
+#     elsewhere: HOARD-1/2/3 for the two roots and every layer, HOARD-3f
+#     through HOARD-3n for the rest of the attack matrix against the
+#     hoard shape, and HOARD-14 for the sub-clause that turned out to be
+#     false - "resolves inside", which a hard link satisfies while
+#     pointing at bytes outside the root. The header now says what this
+#     scenario actually establishes and points at those for the rest.
 # shellcheck disable=SC2016 # the needles here and below are single-quoted deliberately: they are
 # the LITERAL comment text of scripts/allow-checkpoint.sh, in which '$HOME' is two words of prose,
 # not a variable this test wants expanded.
@@ -8436,7 +8455,7 @@ assert_contains "$mutantH13c_body" 'checkpoints_dir or hoard_dir, never a fixed 
 mutantH13d=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
 cleanup_paths="$cleanup_paths $mutantH13d"
 # shellcheck disable=SC2016 # single-quoted deliberately: literal sed programs, not substitution.
-sed -e 's|\$HOME/\.squirrel/checkpoints/ or \$HOME/\.squirrel/hoard/\. A gate and two|$HOME/.squirrel/checkpoints/. A gate and two layers|' \
+sed -e 's|\$HOME/\.squirrel/checkpoints/ or \$HOME/\.squirrel/hoard/\. A gate and three|$HOME/.squirrel/checkpoints/. A gate and two layers|' \
   -e 's|checkpoints_dir or hoard_dir, never a fixed one|checkpoints_dir at the one call site|' \
   -e 's|the first of the TWO places the two roots diverge|the ONE place the two roots diverge|' \
   -e 's|Two rules differ between|Only the direct-child rule differs between|' \
@@ -8464,8 +8483,16 @@ done
 #   in either direction - if a later change closes this gap, this scenario
 #   fails and the ADR gets corrected with it.
 #
-#   The shim PATH holds ONLY jq and cat, which is everything this hook
-#   needs on the allow path (every other tool it uses is a shell builtin).
+#   The shim PATH holds ONLY jq and cat. That used to come with the
+#   parenthetical "which is everything this hook needs on the allow path
+#   (every other tool it uses is a shell builtin)", and the hard-link fix
+#   made it false: Layer 2b calls `find`, so the allow path now has two
+#   external tools it can want and only one it cannot do without. The
+#   claim is corrected rather than deleted, because what this scenario
+#   needs from the shim is unchanged - an ordinary memory (whose leaf
+#   does not exist, so Layer 2b never runs) still reaches `allow` here,
+#   which is what the control below asserts. HOARD-14e is the scenario
+#   that measures what `find`'s absence costs.
 #   The control assertion below is what makes that claim visible rather
 #   than assumed: an ordinary memory must still ALLOW on this PATH, or a
 #   defer proved by a broken hook would look like a defer proved by the
@@ -8523,5 +8550,750 @@ done
 stdinH13f_clean=$(jq -n --arg p "$homeH13/.squirrel/hoard/global/20260101T000000Z-x.md" \
   '{tool_name:"Write", tool_input:{file_path:$p, content:"never commit without running the test suite; two releases went out broken"}}')
 assert_eq "allow" "$(hoard_decision "$homeH13" "$stdinH13f_clean")" "HOARD-13f, the other half: ordinary prose must still be auto-approved, or the breadth ADR-0008 admits to would be a guard that bars correct work rather than one that occasionally costs a prompt"
+
+
+# ==========================================================================
+# HOARD-3f .. HOARD-3n. THE REST OF THE ATTACK MATRIX, AGAINST THE HOARD
+#     ROOT.
+#
+#     scripts/allow-checkpoint.sh's header claimed "the whole attack
+#     matrix was re-run against the hoard shape rather than assumed to
+#     transfer - see tests/test_hooks.sh's HOARD-* scenarios". HOARD-3
+#     above held four assertions: a `..` component, a prefix escape, a
+#     symlink below the root, a symlink at the root. The matrix the
+#     CHECKPOINT root is held to contains eight more shapes, and not one
+#     of them had ever been run with a hoard path - so the claim named
+#     work that had not happened.
+#
+#     Running them shows the behaviour DOES transfer: every one defers.
+#     That is exactly why the fix is these scenarios rather than a
+#     narrower sentence - the claim becomes true by being made true. Each
+#     block below names the checkpoint-root scenario it mirrors, so a
+#     future change to either side can be traced to the other.
+# ==========================================================================
+homeH3f=$(new_home)
+mkdir -p "$homeH3f/.squirrel/hoard/global"
+nojq_pathH3f=$(make_tool_path "jq")
+hoardH3f_legit="$homeH3f/.squirrel/hoard/global/20260101T000000Z-ok.md"
+
+# Control first: the "legitimate" path these scenarios use as their decoy
+# must genuinely be one this hook auto-approves. Without this, every
+# defer below could be a defer for the boring reason that the decoy was
+# never allowable in the first place.
+stdinH3f_ctrl=$(jq -n --arg p "$hoardH3f_legit" '{tool_name:"Write", tool_input:{file_path:$p, content:"an ordinary memory"}}')
+assert_eq "allow" "$(hoard_decision "$homeH3f" "$stdinH3f_ctrl")" "HOARD-3f, control: the benign hoard path used as the decoy in the shadowing scenarios below must itself be auto-approved - otherwise those scenarios prove nothing about which field was read"
+
+# --- HOARD-3f. FIELD SHADOWING (AB1), hoard shape. Mirrors scenario 59a:
+#     a benign TOP-LEVEL file_path naming a real hoard memory, beside a
+#     malicious tool_input.file_path. The top-level field is not a
+#     parameter the tool reads and must never satisfy the check on the
+#     one it does.
+for toolH3f in Read Write Edit; do
+  stdinH3f=$(printf '{"tool_name":"%s","file_path":"%s","tool_input":{"file_path":"%s/.squirrel/hoard/../../../../etc/passwd"}}' "$toolH3f" "$hoardH3f_legit" "$homeH3f")
+
+  outH3f=$(capture_stdout "$allow_checkpoint_script" "$homeH3f" "$stdinH3f")
+  exitH3f=$(capture_exit "$allow_checkpoint_script" "$homeH3f" "$stdinH3f")
+  assert_no_opinion "$outH3f" "$exitH3f" "HOARD-3f (jq present, $toolH3f): a benign top-level file_path naming a real hoard memory must not buy an allow for a malicious tool_input.file_path - the identical AB1 shape scenario 59a pins for checkpoints/"
+
+  outH3fr=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3f")
+  exitH3fr=$(capture_exit_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3f")
+  assert_no_opinion "$outH3fr" "$exitH3fr" "HOARD-3f (jq absent, $toolH3f): the same, with jq stripped from PATH"
+done
+
+# --- HOARD-3g. The DISCRIMINATING variant (mirrors scenario 59b):
+#     tool_input carries no file_path at all and the legitimate hoard
+#     path lives only at top level. Nothing legitimate is being asked
+#     for, so nothing may be allowed.
+for toolH3g in Read Write Edit; do
+  stdinH3g=$(printf '{"tool_name":"%s","file_path":"%s","tool_input":{"other":"x"}}' "$toolH3g" "$hoardH3f_legit")
+
+  outH3g=$(capture_stdout "$allow_checkpoint_script" "$homeH3f" "$stdinH3g")
+  exitH3g=$(capture_exit "$allow_checkpoint_script" "$homeH3f" "$stdinH3g")
+  assert_no_opinion "$outH3g" "$exitH3g" "HOARD-3g (jq present, $toolH3g): tool_input without a file_path, beside a legitimate top-level one, must defer for the hoard root too"
+
+  outH3gr=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3g")
+  exitH3gr=$(capture_exit_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3g")
+  assert_no_opinion "$outH3gr" "$exitH3gr" "HOARD-3g (jq absent, $toolH3g): the same, with jq stripped from PATH"
+done
+
+# --- HOARD-3h. THE NESTED DECOY (AC1), hoard shape. Mirrors scenario 60:
+#     the real tool_input.file_path is dangerous and a NESTED object
+#     inside tool_input carries a legitimate-looking hoard path. A regex
+#     cannot tell the decoy's closing brace from tool_input's; a parser
+#     can, and with no parser there must be no answer.
+stdinH3h=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/etc/passwd","decoy":{"file_path":"%s"}}}' "$hoardH3f_legit")
+outH3h=$(capture_stdout "$allow_checkpoint_script" "$homeH3f" "$stdinH3h")
+exitH3h=$(capture_exit "$allow_checkpoint_script" "$homeH3f" "$stdinH3h")
+assert_no_opinion "$outH3h" "$exitH3h" "HOARD-3h (jq present): a nested decoy carrying a legitimate hoard path must not shadow the real tool_input.file_path - the AC1 shape scenario 60 pins for checkpoints/"
+outH3hr=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3h")
+exitH3hr=$(capture_exit_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3h")
+assert_no_opinion "$outH3hr" "$exitH3hr" "HOARD-3h (jq absent): the same, with jq stripped from PATH - no parser, no answer"
+
+# --- HOARD-3i. jq ABSENT on a perfectly legitimate hoard write. The
+#     documented cost of requiring a real parser: no jq, no allow, for
+#     either root.
+outH3i=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3f_ctrl")
+exitH3i=$(capture_exit_with_path "$allow_checkpoint_script" "$homeH3f" "$nojq_pathH3f" "$stdinH3f_ctrl")
+assert_no_opinion "$outH3i" "$exitH3i" "HOARD-3i: with jq stripped from PATH even a legitimate hoard write must defer - the same deliberate narrowing the header states for checkpoints/, asserted for the second root"
+
+# --- HOARD-3j. A jq that is PRESENT but useless: one that prints the
+#     literal `null`, and one that prints nothing at all. Mirrors
+#     scenarios 64/65's shims, pointed at this hook instead.
+for shimkindH3j in null empty; do
+  pathH3j=$(make_tool_path "jq")
+  if [ "$shimkindH3j" = "null" ]; then
+    printf '%s\n' '#!/bin/sh' 'echo null' >"$pathH3j/jq"
+  else
+    printf '%s\n' '#!/bin/sh' 'exit 0' >"$pathH3j/jq"
+  fi
+  chmod +x "$pathH3j/jq"
+  outH3j=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH3f" "$pathH3j" "$stdinH3f_ctrl")
+  exitH3j=$(capture_exit_with_path "$allow_checkpoint_script" "$homeH3f" "$pathH3j" "$stdinH3f_ctrl")
+  assert_no_opinion "$outH3j" "$exitH3j" "HOARD-3j: a jq that exits 0 and yields '$shimkindH3j' must make a hoard decision defer, never allow - a hook that cannot read its input has no opinion to give"
+done
+
+# --- HOARD-3k. MALFORMED PAYLOADS (mirrors scenarios 8/13/35's control
+#     byte): empty stdin, text that is not JSON, a truncated document,
+#     and a raw 0x01 byte inside an otherwise-legitimate hoard filename
+#     (which makes the whole document invalid JSON per RFC 8259).
+ctrlH3k=$(printf '\001')
+for badH3k in "" "this is not json at all" '{"tool_name":"Write","tool_input":{' "$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/hoard/global/evil%sname.md"}}' "$homeH3f" "$ctrlH3k")"; do
+  outH3k=$(capture_stdout "$allow_checkpoint_script" "$homeH3f" "$badH3k")
+  exitH3k=$(capture_exit "$allow_checkpoint_script" "$homeH3f" "$badH3k")
+  assert_no_opinion "$outH3k" "$exitH3k" "HOARD-3k: a malformed payload must defer and exit 0 with a hoard path in play too (input begins: $(printf '%s' "$badH3k" | cut -c1-40))"
+done
+
+# --- HOARD-3l. A file_path OVER MAX_FILE_PATH_LEN that starts inside
+#     hoard/ (mirrors scenario 33). The cap fires before Layer 1 ever
+#     compares the prefix, so a legitimate-looking prefix buys nothing.
+padH3l=$(awk 'BEGIN { printf "%5000s", "" }' | tr ' ' 'a')
+stdinH3l=$(jq -n --arg p "$homeH3f/.squirrel/hoard/global/$padH3l.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+outH3l=$(capture_stdout "$allow_checkpoint_script" "$homeH3f" "$stdinH3l")
+exitH3l=$(capture_exit "$allow_checkpoint_script" "$homeH3f" "$stdinH3l")
+assert_no_opinion "$outH3l" "$exitH3l" "HOARD-3l: a file_path past MAX_FILE_PATH_LEN must defer even when it begins inside hoard/ - the DoS cap is shared by both roots"
+
+# --- HOARD-3m. $HOME unset, empty, "/" and trailing-slash (mirrors
+#     scenario 36). Unset and empty must defer; the other two must still
+#     allow a genuine hoard write, because a hook that deferred there
+#     would be barring correct work on an ordinary machine.
+stdinH3m=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s","content":"x"}}' "$hoardH3f_legit")
+outH3m_unset=$(printf '%s' "$stdinH3m" | env -u HOME "$allow_checkpoint_script" 2>/dev/null) && exitH3m_unset=0 || exitH3m_unset=$?
+assert_no_opinion "$outH3m_unset" "$exitH3m_unset" "HOARD-3m: \$HOME entirely unset must defer for a hoard path, never allow"
+outH3m_empty=$(printf '%s' "$stdinH3m" | HOME="" "$allow_checkpoint_script" 2>/dev/null) && exitH3m_empty=0 || exitH3m_empty=$?
+assert_no_opinion "$outH3m_empty" "$exitH3m_empty" "HOARD-3m: \$HOME set to an empty string must defer for a hoard path, never allow"
+
+stdinH3m_root=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/.squirrel/hoard/global/m3m.md","content":"x"}}')
+outH3m_root=$(printf '%s' "$stdinH3m_root" | HOME="/" "$allow_checkpoint_script" 2>/dev/null) || true
+decisionH3m_root=$(printf '%s' "$outH3m_root" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decisionH3m_root="<jq error>"
+assert_eq "allow" "$decisionH3m_root" "HOARD-3m: \$HOME=/ must still allow a genuine hoard write under it"
+
+homeH3m_trail=$(new_home)
+mkdir -p "$homeH3m_trail/.squirrel/hoard/global"
+stdinH3m_trail=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/.squirrel/hoard/global/m3m.md","content":"x"}}' "$homeH3m_trail")
+outH3m_trail=$(printf '%s' "$stdinH3m_trail" | HOME="$homeH3m_trail/" "$allow_checkpoint_script" 2>/dev/null) || true
+decisionH3m_trail=$(printf '%s' "$outH3m_trail" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null) || decisionH3m_trail="<jq error>"
+assert_eq "allow" "$decisionH3m_trail" "HOARD-3m: \$HOME carrying a trailing slash must still allow a genuine hoard write under it"
+
+# --- HOARD-3n. A tool_name this hook does not govern, with a hoard path.
+#     The matcher is broad on purpose and the decision is made here, so a
+#     Bash call naming a hoard file must reach no opinion.
+stdinH3n=$(jq -n --arg p "$hoardH3f_legit" '{tool_name:"Bash", tool_input:{file_path:$p, command:"cat"}}')
+outH3n=$(capture_stdout "$allow_checkpoint_script" "$homeH3f" "$stdinH3n")
+exitH3n=$(capture_exit "$allow_checkpoint_script" "$homeH3f" "$stdinH3n")
+assert_no_opinion "$outH3n" "$exitH3n" "HOARD-3n: a tool this hook does not govern must defer even for a legitimate hoard path - skills/dig/SKILL.md tells the model to use Read and not a shell command, and this is what makes that instruction more than advice"
+
+# ==========================================================================
+# HOARD-14. THE HARD-LINK REFUSAL (Layer 2b).
+#
+#     THE BUG THIS PINS, reproduced against the shipped hook: a hard link
+#     planted inside a governed root was auto-approved for Read AND for
+#     Write, in BOTH roots.
+#
+#       printf 'CHAVE\n' > "$HOME/.ssh/id_rsa"
+#       ln "$HOME/.ssh/id_rsa" "$HOME/.squirrel/hoard/global/notes.md"
+#
+#     Both came back `allow`: the hook read the user's private key and
+#     let it be overwritten with the permission prompt suppressed. The
+#     SYMLINK spelling of the same attack deferred at Layer 2, which is
+#     what made this easy to miss - every layer reasons about the path,
+#     and a hard link leaves the path completely ordinary.
+#
+#     The fix refuses auto-approval when an EXISTING REGULAR FILE at the
+#     leaf has a link count above one. It never denies; the operation
+#     falls back to the ordinary permission prompt. A legitimate
+#     checkpoint or memory has exactly one name, so this is a guard with
+#     no correct traffic behind it - and the three "must still allow"
+#     assertions below are what hold that claim to account.
+# ==========================================================================
+homeH14=$(new_home)
+mkdir -p "$homeH14/.squirrel/hoard/global" "$homeH14/.squirrel/checkpoints/repo-h14" "$homeH14/.ssh"
+printf 'CHAVE\n' >"$homeH14/.ssh/id_rsa"
+hoardH14_link="$homeH14/.squirrel/hoard/global/notes.md"
+ckptH14_link="$homeH14/.squirrel/checkpoints/repo-h14/sess.md"
+ln "$homeH14/.ssh/id_rsa" "$hoardH14_link"
+ln "$homeH14/.ssh/id_rsa" "$ckptH14_link"
+
+# CONTROL. Not every filesystem supports hard links, and a fixture that
+# quietly became a copy would make every assertion below pass for the
+# wrong reason - the file would simply be an ordinary one-link file that
+# is allowed, and the suite would report a guard it never exercised.
+h14_hard_hoard=no
+h14_hard_ckpt=no
+if [ -n "$(find "$hoardH14_link" -links +1 2>/dev/null)" ]; then h14_hard_hoard=yes; fi
+if [ -n "$(find "$ckptH14_link" -links +1 2>/dev/null)" ]; then h14_hard_ckpt=yes; fi
+assert_eq "yes" "$h14_hard_hoard" "HOARD-14, control: the hoard fixture must genuinely have a link count above one - on a filesystem where \`ln\` silently produced a copy, every defer below would be measuring nothing"
+assert_eq "yes" "$h14_hard_ckpt" "HOARD-14, control: and the checkpoint fixture too"
+
+for toolH14 in Read Write Edit; do
+  stdinH14_hoard=$(jq -n --arg p "$hoardH14_link" --arg t "$toolH14" \
+    '{tool_name:$t, tool_input:{file_path:$p, content:"x", old_string:"a", new_string:"b"}}')
+  assert_eq "defer" "$(hoard_decision "$homeH14" "$stdinH14_hoard")" "HOARD-14 ($toolH14, hoard): a second name for a file that already lives outside the root must NOT be auto-approved - the path is inside hoard/, the bytes are the user's private key"
+
+  stdinH14_ckpt=$(jq -n --arg p "$ckptH14_link" --arg t "$toolH14" \
+    '{tool_name:$t, tool_input:{file_path:$p, content:"x", old_string:"a", new_string:"b"}}')
+  assert_eq "defer" "$(hoard_decision "$homeH14" "$stdinH14_ckpt")" "HOARD-14 ($toolH14, checkpoints): the identical refusal in the other root - one layer, both roots, exactly like the symlink walk it sits beside"
+done
+
+# THE OTHER HALF: the guard must not bar correct work. Three shapes, all
+# of which a real session produces constantly.
+printf 'an ordinary memory\n' >"$homeH14/.squirrel/hoard/global/plain.md"
+printf 'an ordinary checkpoint\n' >"$homeH14/.squirrel/checkpoints/repo-h14/plain.md"
+for existingH14 in "$homeH14/.squirrel/hoard/global/plain.md" "$homeH14/.squirrel/checkpoints/repo-h14/plain.md"; do
+  stdinH14_ok=$(jq -n --arg p "$existingH14" '{tool_name:"Write", tool_input:{file_path:$p, content:"rewritten"}}')
+  assert_eq "allow" "$(hoard_decision "$homeH14" "$stdinH14_ok")" "HOARD-14: an EXISTING file with one link must still be auto-approved ($existingH14) - rewriting a memory or a checkpoint in place is the ordinary case, not the attack"
+  stdinH14_okr=$(jq -n --arg p "$existingH14" '{tool_name:"Read", tool_input:{file_path:$p}}')
+  assert_eq "allow" "$(hoard_decision "$homeH14" "$stdinH14_okr")" "HOARD-14: and reading it must still be auto-approved ($existingH14)"
+done
+
+stdinH14_new=$(jq -n --arg p "$homeH14/.squirrel/hoard/global/does-not-exist-yet.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"a brand new memory"}}')
+assert_eq "allow" "$(hoard_decision "$homeH14" "$stdinH14_new")" "HOARD-14: a leaf that does not exist yet has no link count to read and must still be auto-approved - every first write of every memory and every checkpoint has this shape"
+
+stdinH14_dir=$(jq -n --arg p "$homeH14/.squirrel/checkpoints/repo-h14" \
+  '{tool_name:"Read", tool_input:{file_path:$p}}')
+assert_eq "allow" "$(hoard_decision "$homeH14" "$stdinH14_dir")" "HOARD-14: a DIRECTORY leaf must be left alone by this layer - directories always carry at least two links, so a guard that tested them would defer this legitimate shape for a reason that has nothing to do with hard links"
+
+# --- HOARD-14b. FAILURE PROOF: disable the guard and the hard link must
+#     come back `allow`. Mutating the CONDITION rather than deleting the
+#     block keeps the mutant a working script, so an allow it produces is
+#     the guard's absence and not a broken file.
+mutantH14b=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016 # single-quoted deliberately: the literal source text of scripts/allow-checkpoint.sh to match, not shell expansion.
+fpH14b_want='  if [ -f "$leaf" ] && command -v find >/dev/null 2>&1; then'
+fpH14b_line=$(line_of "$mutantH14b" "$fpH14b_want")
+[ -n "$fpH14b_line" ] || fpH14b_line=0
+assert_eq "yes" "$([ "$fpH14b_line" -gt 0 ] && echo yes || echo no)" "FAILURE PROOF (HOARD-14), control: the guard's own source line must be FOUND - a line_of that matched nothing would rewrite line 0, leave the copy byte-identical, and turn this proof into a second copy of the passing test"
+replace_line "$mutantH14b" "$fpH14b_line" '  if false; then'
+if cmp -s "$allow_checkpoint_script" "$mutantH14b"; then mutantH14b_differs=no; else mutantH14b_differs=yes; fi
+assert_eq "yes" "$mutantH14b_differs" "FAILURE PROOF (HOARD-14), control: the mutation must genuinely change the script"
+
+fpH14b_stdin=$(jq -n --arg p "$hoardH14_link" '{tool_name:"Read", tool_input:{file_path:$p}}')
+fpH14b_out=$(capture_stdout "$mutantH14b" "$homeH14" "$fpH14b_stdin")
+if printf '%s' "$fpH14b_out" | grep -qF '"allow"'; then fpH14b_allows=yes; else fpH14b_allows=no; fi
+assert_eq "yes" "$fpH14b_allows" "FAILURE PROOF (HOARD-14): with the hard-link condition disabled, reading the private key through its hoard name must come back allow - this is the shipped bug, reproduced, and it is what HOARD-14 above measures"
+
+fpH14b_stdin_w=$(jq -n --arg p "$ckptH14_link" '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+fpH14b_out_w=$(capture_stdout "$mutantH14b" "$homeH14" "$fpH14b_stdin_w")
+if printf '%s' "$fpH14b_out_w" | grep -qF '"allow"'; then fpH14b_allows_w=yes; else fpH14b_allows_w=no; fi
+assert_eq "yes" "$fpH14b_allows_w" "FAILURE PROOF (HOARD-14): and OVERWRITING it through its checkpoint name must come back allow in the same mutant - both roots, both directions, one missing guard"
+
+fpH14b_ok=$(capture_stdout "$mutantH14b" "$homeH14" "$stdinH14_new")
+if printf '%s' "$fpH14b_ok" | grep -qF '"allow"'; then fpH14b_ok_allows=yes; else fpH14b_ok_allows=no; fi
+assert_eq "yes" "$fpH14b_ok_allows" "FAILURE PROOF (HOARD-14), isolation: the mutant must still allow an ordinary new memory - a mutant that merely broke the script would satisfy the two assertions above for the wrong reason"
+assert_eq "0" "$(capture_exit "$mutantH14b" "$homeH14" "$fpH14b_stdin")" "FAILURE PROOF (HOARD-14), isolation: and must still exit 0"
+
+# --- HOARD-14e. THE LIMIT, PINNED RATHER THAN DESCRIBED. Layer 2b is the
+#     only test in allow-checkpoint.sh that needs an external command
+#     (`find`); there is no way to read a link count from POSIX sh
+#     without one. With `find` off PATH the layer cannot run and the hard
+#     link is auto-approved again. That is the same shape of degradation
+#     `grep` already has for the secret scan (HOARD-13e), it is the
+#     deliberate choice - deferring instead would put a permission prompt
+#     on every checkpoint write on such a machine - and it is asserted
+#     here so the limit written in the script's header and in
+#     docs/adr/0008-hoard-auto-allow.md cannot drift away from what the
+#     code does.
+shimH14e=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-nofind.XXXXXX")
+cleanup_paths="$cleanup_paths $shimH14e"
+for toolH14e in jq cat grep; do
+  realH14e=$(command -v "$toolH14e" 2>/dev/null) || realH14e=""
+  [ -n "$realH14e" ] && ln -sf "$realH14e" "$shimH14e/$toolH14e" || :
+done
+if PATH="$shimH14e" command -v find >/dev/null 2>&1; then find_gone_H14e=no; else find_gone_H14e=yes; fi
+assert_eq "yes" "$find_gone_H14e" "HOARD-14e, control: find must genuinely be off the shim PATH, or the allow below is about a PATH that still has it"
+
+nofind_decision_H14e() {
+  nf_out=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH14" "$shimH14e" "$1")
+  if [ -z "$nf_out" ]; then printf 'defer'; else printf 'allow'; fi
+}
+assert_eq "allow" "$(nofind_decision_H14e "$stdinH14_new")" "HOARD-14e, control: an ordinary new memory must still be auto-approved on the shim PATH - without this, an outcome below could be a hook that simply could not run"
+assert_eq "defer" "$(hoard_decision "$homeH14" "$fpH14b_stdin")" "HOARD-14e, baseline: with find PRESENT the hard link defers - the behaviour that is about to be shown dropping out"
+assert_eq "allow" "$(nofind_decision_H14e "$fpH14b_stdin")" "HOARD-14e: and with find ABSENT the identical payload is AUTO-APPROVED. This is the limit the header and ADR-0008 state, asserted rather than described: the layer degrades to exactly the behaviour that existed before it, never to a crash and never to a denial"
+stdinH14e_secret=$(jq -n --arg p "$hoardH14_link" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"api_key = 0123456789abcdefghijklmnop"}}')
+assert_eq "defer" "$(nofind_decision_H14e "$stdinH14e_secret")" "HOARD-14e, isolation: with find absent the OTHER refusals still work - a credential-bearing write to the same hard-linked path still defers, so the allow above is Layer 2b dropping out and not the whole decision collapsing"
+
+# ==========================================================================
+# HOARD-15. THE WHOLE-PAYLOAD CAP (MAX_PAYLOAD_LEN).
+#
+#     WHAT WAS WRONG. The comment beside the secret scan said "Both
+#     length caps are applied BEFORE either scan, so no oversized string
+#     is walked by `case` or handed to `grep` on any path." True of the
+#     scan; false of everything before it. `${#written}` cannot exist
+#     until `written` does, and producing it runs `jq` over the entire
+#     payload - as does reading `tool_name` and `file_path`, on EVERY
+#     call this hook sees, before any cap in the file is consulted.
+#     Measured on one 32 MB payload, before the cap: 8.22s / 407 MB for a
+#     hoard write and 2.91s / 237 MB for a checkpoint write, which does
+#     not scan at all. After it: 0.71s / 273 MB and 0.70s / 273 MB - the
+#     two converge because neither parses anything, and what is left is
+#     `input=$(cat)` reading stdin, which no number in the script bounds.
+#
+#     The pair below is deliberately DISCRIMINATING: both payloads carry
+#     an oversized `old_string`, a field no scan reads and no other cap
+#     covers, so the only thing separating them is the whole-payload cap.
+# ==========================================================================
+homeH15=$(new_home)
+mkdir -p "$homeH15/.squirrel/hoard/global" "$homeH15/.squirrel/checkpoints/repo-h15"
+
+# Built with awk printf-padding + tr, linear, for the reason HOARD-5's
+# oversized fixture states: appending a byte at a time in an awk loop is
+# quadratic in the implementations that do not over-allocate.
+underH15=$(awk 'BEGIN { printf "%900000s", "" }' | tr ' ' 'a')
+overH15=$(awk 'BEGIN { printf "%1200000s", "" }' | tr ' ' 'a')
+assert_eq "900000" "${#underH15}" "HOARD-15 fixture sanity: the under-cap filler must really be 900000 characters"
+assert_eq "1200000" "${#overH15}" "HOARD-15 fixture sanity: the over-cap filler must really be 1200000 characters, comfortably past MAX_PAYLOAD_LEN"
+
+# BUILT WITH `printf`, NOT `jq -n --arg`, and that is not a style
+# preference. `jq` is an EXTERNAL command, so a 1.2 MB `--arg` value is
+# 1.2 MB of argv and dies with "Argument list too long" (E2BIG) on any
+# machine whose ARG_MAX is around a megabyte - macOS's is exactly
+# 1048576, so the over-cap fixture is guaranteed to hit it. `printf` is a
+# shell builtin in every `sh` this suite runs under, so no argv limit
+# applies. The filler is a run of 'a' with nothing JSON-special in it, so
+# there is nothing for a real encoder to do here anyway.
+h15_json() {
+  # h15_json <file_path> <old_string> - one Edit payload, built without
+  # an external command.
+  printf '{"tool_name":"Edit","tool_input":{"file_path":"%s","old_string":"%s","new_string":"uses: 1"}}' "$1" "$2"
+}
+
+for rootH15 in "$homeH15/.squirrel/hoard/global/m15.md" "$homeH15/.squirrel/checkpoints/repo-h15/s15.md"; do
+  stdinH15_under=$(h15_json "$rootH15" "$underH15")
+  assert_eq "allow" "$(hoard_decision "$homeH15" "$stdinH15_under")" "HOARD-15: a payload UNDER MAX_PAYLOAD_LEN must still be auto-approved ($rootH15) - the cap is orders of magnitude past any real Edit and must not become a guard that bars correct work"
+
+  stdinH15_over=$(h15_json "$rootH15" "$overH15")
+  assert_eq "defer" "$(hoard_decision "$homeH15" "$stdinH15_over")" "HOARD-15: a payload OVER MAX_PAYLOAD_LEN must defer ($rootH15) - and it must do so for a CHECKPOINT path too, because the two jq parses this bounds run before either root is even identified"
+done
+
+# --- HOARD-15b. FAILURE PROOF: disable the cap and the oversized payload
+#     is allowed again - proving the pair above measures the cap and not
+#     one of the caps that were already there. `old_string` is chosen
+#     precisely because MAX_SCAN_LEN never looks at it.
+mutantH15b=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016 # single-quoted deliberately: literal source text to match, not shell expansion.
+fpH15b_want='  if [ "${#input}" -gt "$MAX_PAYLOAD_LEN" ]; then'
+fpH15b_line=$(line_of "$mutantH15b" "$fpH15b_want")
+[ -n "$fpH15b_line" ] || fpH15b_line=0
+assert_eq "yes" "$([ "$fpH15b_line" -gt 0 ] && echo yes || echo no)" "FAILURE PROOF (HOARD-15), control: the cap's own source line must be FOUND, or the mutant is byte-identical and this proof is a copy of the passing test"
+replace_line "$mutantH15b" "$fpH15b_line" '  if false; then'
+if cmp -s "$allow_checkpoint_script" "$mutantH15b"; then mutantH15b_differs=no; else mutantH15b_differs=yes; fi
+assert_eq "yes" "$mutantH15b_differs" "FAILURE PROOF (HOARD-15), control: the mutation must genuinely change the script"
+
+fpH15b_stdin=$(h15_json "$homeH15/.squirrel/hoard/global/m15.md" "$overH15")
+fpH15b_out=$(capture_stdout "$mutantH15b" "$homeH15" "$fpH15b_stdin")
+if printf '%s' "$fpH15b_out" | grep -qF '"allow"'; then fpH15b_allows=yes; else fpH15b_allows=no; fi
+assert_eq "yes" "$fpH15b_allows" "FAILURE PROOF (HOARD-15): with the whole-payload cap disabled, the 1.2 MB payload must be allowed again - so the defer above is that cap's doing and not MAX_SCAN_LEN's or MAX_FILE_PATH_LEN's"
+
+# ==========================================================================
+# HOARD-16. THE SECRET SCAN'S TWO WIDENINGS AND ITS FIVE NEW PREFIXES.
+#
+#     Three defects, all reproduced against the shipped hook:
+#
+#       1. The assignment rule required its keyword to sit IMMEDIATELY
+#          before the `[:=]`, so every compound name escaped it - an AWS
+#          secret access key line included, which is precisely the case
+#          the rule's own comment claimed to cover.
+#       2. The value class `[A-Za-z0-9/+_-]{16,}` breaks at the first
+#          character outside it, so a password with punctuation in it
+#          escaped.
+#       3. Five whole provider families, and DSA private keys, had no arm
+#          at all.
+#
+#     Every row below came back `allow` before this change.
+# ==========================================================================
+homeH16=$(new_home)
+mkdir -p "$homeH16/.squirrel/hoard/global"
+hoardH16_path="$homeH16/.squirrel/hoard/global/20260101T000000Z-x.md"
+
+hoard_write_decision_H16() {
+  # hoard_write_decision_H16 <content> - the decision for a hoard Write
+  # carrying <content>. One helper because the list below is long and the
+  # only thing that varies is the body.
+  h16_stdin=$(jq -n --arg p "$hoardH16_path" --arg c "$1" \
+    '{tool_name:"Write", tool_input:{file_path:$p, content:$c}}')
+  hoard_decision "$homeH16" "$h16_stdin"
+}
+
+# The compound-name rows (defect 1) and the punctuation row (defect 2).
+secretsH16='aws_secret_access_key = wJalrXUtnFEMIKvvvDENGbPxRfiCYEXAMPLEKEY
+secret_key = wJalrXUtnFEMIKvvvDENGbPxRfiCYEXAMPLEKEY
+password_hash=abcdefghijklmnopqrstuvwxyz012345
+token_value: abcdefghijklmnopqrstuvwxyz012345
+password = Tr0ub4dor&3xK9!zQmW#pL2vN'
+oldifsH16=$IFS
+IFS='
+'
+for rowH16 in $secretsH16; do
+  IFS=$oldifsH16
+  assert_eq "defer" "$(hoard_write_decision_H16 "a memory body
+$rowH16
+more text")" "HOARD-16: '$rowH16' must NOT be auto-approved - a compound key name and a punctuated value are the same assignment shape the rule already claimed to cover, and both were allowed before"
+  IFS='
+'
+done
+IFS=$oldifsH16
+
+# The prefix families (defect 3).
+prefixesH16='sk-proj-EXAMPLE-NOT-A-REAL-KEY
+sk_live_EXAMPLE-NOT-A-REAL-KEY
+glpat-EXAMPLE-NOT-A-REAL-TOKEN
+GOCSPX-EXAMPLE-NOT-A-REAL-SECRET
+xapp-1-EXAMPLE-NOT-A-REAL-TOKEN
+-----BEGIN DSA PRIVATE KEY-----'
+IFS='
+'
+for rowH16p in $prefixesH16; do
+  IFS=$oldifsH16
+  assert_eq "defer" "$(hoard_write_decision_H16 "a memory body
+$rowH16p
+more text")" "HOARD-16: '$rowH16p' must NOT be auto-approved - a provider family with no arm is a false negative, and a false negative writes a credential into a store re-read in every future session"
+  IFS='
+'
+done
+IFS=$oldifsH16
+
+# THE OTHER HALF. Widening a scanner is only safe if ordinary memories
+# still pass, so the clean rows are asserted with the same helper. The
+# last two are the exact shapes skills/stash/SKILL.md produces.
+for cleanH16 in "never commit without running the test suite; two releases went out broken" \
+  "the tokens ran out halfway through the run, so the summary was truncated" \
+  "type: feedback
+title: run the suite before committing
+
+Two releases went out with a broken suite." \
+  "prefer removing a check, with its limit written down, over narrowing one that blocks legitimate work"; do
+  assert_eq "allow" "$(hoard_write_decision_H16 "$cleanH16")" "HOARD-16, the other half: an ordinary memory must still be auto-approved - the widening buys false positives on purpose, and a widening that stopped real memories would be a guard that bars correct work"
+done
+
+# AND THE BREADTH THE WIDENING BUYS, asserted rather than hand-waved, in
+# the shape HOARD-13f already uses for the prefix arms: these are prose,
+# not credentials, and each costs exactly one permission prompt.
+for proseH16 in "secretary: indistinguishable-from-a-real-one" \
+  "password: correct-horse-battery-staple"; do
+  assert_eq "defer" "$(hoard_write_decision_H16 "$proseH16")" "HOARD-16, the cost: '$proseH16' carries no credential and still defers - a keyword ANYWHERE in the name now reaches the rule and a value is any sixteen unbroken characters. ADR-0008 names both; this asserts they are real"
+done
+
+# --- HOARD-16b. FAILURE PROOF, the assignment rule: restore the old
+#     regex and the compound-name and punctuation rows must be allowed
+#     again. The isolation assertion is what stops this being a mutant
+#     that simply broke the scan.
+mutantH16b=$(make_script_scratch "$allow_checkpoint_script")
+fpH16b_want='  phs_re="(api[_-]?key|secret|token|password|passwd)[A-Za-z0-9_-]*[\" '"'"']*[[:space:]]*[:=][[:space:]]*[\" '"'"']*[^[:space:]]{16,}"'
+fpH16b_old='  phs_re="(api[_-]?key|secret|token|password|passwd)[\" '"'"']*[[:space:]]*[:=][[:space:]]*[\" '"'"']*[A-Za-z0-9/+_-]{16,}"'
+fpH16b_line=$(line_of "$mutantH16b" "$fpH16b_want")
+[ -n "$fpH16b_line" ] || fpH16b_line=0
+assert_eq "yes" "$([ "$fpH16b_line" -gt 0 ] && echo yes || echo no)" "FAILURE PROOF (HOARD-16), control: the assignment rule's own source line must be FOUND, or the mutant is byte-identical and proves nothing"
+replace_line "$mutantH16b" "$fpH16b_line" "$fpH16b_old"
+
+mutant_write_decision_H16() {
+  m16_stdin=$(jq -n --arg p "$hoardH16_path" --arg c "$2" \
+    '{tool_name:"Write", tool_input:{file_path:$p, content:$c}}')
+  m16_out=$(capture_stdout "$1" "$homeH16" "$m16_stdin")
+  if [ -z "$m16_out" ]; then printf 'defer'; else printf 'allow'; fi
+}
+
+assert_eq "allow" "$(mutant_write_decision_H16 "$mutantH16b" "aws_secret_access_key = wJalrXUtnFEMIKvvvDENGbPxRfiCYEXAMPLEKEY")" "FAILURE PROOF (HOARD-16): with the pre-fix regex restored, an AWS secret access key assignment must be AUTO-APPROVED - the shipped bug, reproduced"
+assert_eq "allow" "$(mutant_write_decision_H16 "$mutantH16b" "password = Tr0ub4dor&3xK9!zQmW#pL2vN")" "FAILURE PROOF (HOARD-16): and so must a password whose punctuation breaks the old value class"
+assert_eq "defer" "$(mutant_write_decision_H16 "$mutantH16b" "api_key = 0123456789abcdefghijklmnop")" "FAILURE PROOF (HOARD-16), isolation: the SAME mutant must still catch the bare api_key case - the mutation narrows the rule, it does not delete it, so the two allows above are the widening's doing"
+
+# --- HOARD-16c. FAILURE PROOF, the prefix arms: restore the pre-fix arm
+#     and the five new families must be allowed again.
+mutantH16c=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC1003 # the trailing backslash is a line continuation in the source text being matched, not an escaped quote.
+fpH16c_first='    *sk-ant-* | *sk-proj-* | *sk_live_* | *sk_test_* | \'
+fpH16c_line=$(line_of "$mutantH16c" "$fpH16c_first")
+[ -n "$fpH16c_line" ] || fpH16c_line=0
+assert_eq "yes" "$([ "$fpH16c_line" -gt 0 ] && echo yes || echo no)" "FAILURE PROOF (HOARD-16c), control: the prefix arm's first source line must be FOUND - it spans three lines and a miss would rewrite the wrong one"
+replace_block "$mutantH16c" "$fpH16c_line" "$((fpH16c_line + 2))" '    *sk-ant-* | *ghp_* | *gho_* | *github_pat_* | *AKIA* | *xoxb-* | *xoxp-* | *AIza*)'
+for prefixH16c in "sk-proj-EXAMPLE-NOT-A-REAL-KEY" \
+  "sk_live_EXAMPLE-NOT-A-REAL-KEY" \
+  "glpat-EXAMPLE-NOT-A-REAL-TOKEN" \
+  "GOCSPX-EXAMPLE-NOT-A-REAL-SECRET" \
+  "xapp-1-EXAMPLE-NOT-A-REAL-TOKEN"; do
+  assert_eq "allow" "$(mutant_write_decision_H16 "$mutantH16c" "$prefixH16c")" "FAILURE PROOF (HOARD-16c): with the pre-fix prefix arm restored, '$prefixH16c' must be AUTO-APPROVED - proving each new family is caught by the arm and not by some other rule"
+done
+assert_eq "defer" "$(mutant_write_decision_H16 "$mutantH16c" "ghp_EXAMPLE-NOT-A-REAL-TOKEN")" "FAILURE PROOF (HOARD-16c), isolation: the SAME mutant must still catch a family that was already there - the mutation removes five arms, it does not disable the case"
+
+# --- HOARD-16d. FAILURE PROOF, the PEM delimiter arm: neutralise it and
+#     the DSA header must be allowed again. Replacing the pattern with a
+#     sentinel that cannot occur keeps the mutant a working script.
+mutantH16d=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC1003 # trailing backslash = line continuation in the matched source text, not an escaped quote.
+fpH16d_want='    *"PRIVATE KEY-----"* | \'
+fpH16d_line=$(line_of "$mutantH16d" "$fpH16d_want")
+[ -n "$fpH16d_line" ] || fpH16d_line=0
+assert_eq "yes" "$([ "$fpH16d_line" -gt 0 ] && echo yes || echo no)" "FAILURE PROOF (HOARD-16d), control: the PEM delimiter arm's source line must be FOUND"
+# shellcheck disable=SC1003 # trailing backslash = line continuation in the replacement source line, not an escaped quote.
+replace_line "$mutantH16d" "$fpH16d_line" '    *"NO SUCH PEM DELIMITER IN ANY MEMORY"* | \'
+assert_eq "allow" "$(mutant_write_decision_H16 "$mutantH16d" "-----BEGIN DSA PRIVATE KEY-----")" "FAILURE PROOF (HOARD-16d): with the delimiter arm neutralised, a DSA private key header must be AUTO-APPROVED - proving the generic arm, not one of the five algorithm-specific ones, is what now catches it"
+assert_eq "defer" "$(mutant_write_decision_H16 "$mutantH16d" "-----BEGIN RSA PRIVATE KEY-----")" "FAILURE PROOF (HOARD-16d), isolation: the SAME mutant must still catch an RSA header through its own explicit arm - which is exactly why those five arms were kept beside the generic one instead of being folded into it"
+
+# ==========================================================================
+# RENAME-COUNT. THE THREE FIGURES IN allow-checkpoint.sh, RE-DERIVED.
+#
+#     scripts/allow-checkpoint.sh records what renaming it would cost:
+#     occurrences of its literal filename in this file, occurrences of
+#     the identifier built from it, and this file's length. The note said
+#     "103 occurrences ... plus 136 uses ... counted, not estimated,
+#     against the 8300-line file", and censured the estimate it replaced
+#     ("roughly forty") in the same sentence. At the commit that
+#     introduced it the real figures were 104, 146 and 8510; no counting
+#     method produces 136 or 8300.
+#
+#     A number nobody rechecks rots, which is how that one rotted, so the
+#     fix is not a better number - it is this scenario. The three figures
+#     are re-derived from the real file on every run and compared against
+#     what the script claims. When they differ this fails and PRINTS the
+#     recomputed values, so updating the note is mechanical.
+#
+#     IT IS EXPECTED TO FAIL WHENEVER THIS FILE GROWS. That is the
+#     design, not a maintenance accident: the note is a snapshot, and a
+#     snapshot with nothing checking it is the defect this replaces.
+# ==========================================================================
+count_occurrences_RC() {
+  # count_occurrences_RC <file> <literal> - total occurrences of
+  # <literal>, counting several on one line, via index()/substr() rather
+  # than `grep -o` (not POSIX) or a regex (the needles carry `.`, `-` and
+  # `_`, which a regex would have to escape by hand in two places).
+  NEEDLE="$2" awk '
+    {
+      s = $0
+      n = index(s, ENVIRON["NEEDLE"])
+      while (n > 0) {
+        total++
+        s = substr(s, n + length(ENVIRON["NEEDLE"]))
+        n = index(s, ENVIRON["NEEDLE"])
+      }
+    }
+    END { print total + 0 }
+  ' "$1"
+}
+
+claimed_figure_RC() {
+  # claimed_figure_RC <label> - the number scripts/allow-checkpoint.sh
+  # records for <label>, or empty when the line is missing or reshaped.
+  # Empty is caught by its own assertion below rather than silently
+  # compared against a real count, because "" != "104" would report a
+  # drift that is really a vanished line.
+  sed -n "s/^  #   rename-cost $1: \\([0-9][0-9]*\\)\$/\\1/p" "$allow_checkpoint_script"
+}
+
+hooks_file_RC="$script_dir/test_hooks.sh"
+literal_claim_RC=$(claimed_figure_RC "literal-occurrences")
+ident_claim_RC=$(claimed_figure_RC "identifier-occurrences")
+lines_claim_RC=$(claimed_figure_RC "test-file-lines")
+
+assert_eq "yes" "$([ -n "$literal_claim_RC" ] && [ -n "$ident_claim_RC" ] && [ -n "$lines_claim_RC" ] && echo yes || echo no)" "RENAME-COUNT, control: all three 'rename-cost <label>: <n>' lines must be readable out of scripts/allow-checkpoint.sh in the exact documented shape - if one is reworded or deleted, the comparisons below would silently compare a real count against nothing"
+
+literal_actual_RC=$(count_occurrences_RC "$hooks_file_RC" "allow-checkpoint.sh")
+ident_actual_RC=$(count_occurrences_RC "$hooks_file_RC" "allow_checkpoint_script")
+lines_actual_RC=$(awk 'END { print NR }' "$hooks_file_RC")
+
+assert_eq "yes" "$([ "$literal_actual_RC" -gt 0 ] && [ "$ident_actual_RC" -gt 0 ] && [ "$lines_actual_RC" -gt 0 ] && echo yes || echo no)" "RENAME-COUNT, control: the recount must find something - three zeroes would mean the counter is broken, and a broken counter that agreed with a broken note is the exact failure this scenario exists to prevent"
+
+assert_eq "$literal_actual_RC" "$literal_claim_RC" "RENAME-COUNT: scripts/allow-checkpoint.sh claims $literal_claim_RC occurrences of its literal filename in tests/test_hooks.sh; the file holds $literal_actual_RC. Update the 'rename-cost literal-occurrences:' line to $literal_actual_RC"
+assert_eq "$ident_actual_RC" "$ident_claim_RC" "RENAME-COUNT: scripts/allow-checkpoint.sh claims $ident_claim_RC occurrences of the identifier allow_checkpoint_script; the file holds $ident_actual_RC. Update the 'rename-cost identifier-occurrences:' line to $ident_actual_RC"
+assert_eq "$lines_actual_RC" "$lines_claim_RC" "RENAME-COUNT: scripts/allow-checkpoint.sh claims tests/test_hooks.sh is $lines_claim_RC lines; it is $lines_actual_RC. Update the 'rename-cost test-file-lines:' line to $lines_actual_RC"
+
+# --- RENAME-COUNT-b. The same figures must not survive anywhere else.
+#     docs/adr/0008-hoard-auto-allow.md carried its own copy of the wrong
+#     three, which is how one rotting number became two. It now points at
+#     the script instead of repeating it, and these three needles are
+#     what stop the copy coming back.
+adr8_body_RC=$(cat "$repo_root/docs/adr/0008-hoard-auto-allow.md" 2>/dev/null || printf '')
+assert_not_contains "$adr8_body_RC" "103 occurrences" "RENAME-COUNT-b: docs/adr/0008-hoard-auto-allow.md must not restate the literal-filename figure - one snapshot with a test behind it beats two without"
+assert_not_contains "$adr8_body_RC" "136 uses" "RENAME-COUNT-b: nor the identifier figure"
+assert_not_contains "$adr8_body_RC" "8300-line" "RENAME-COUNT-b: nor the file length"
+
+# The three needles above are negatives, and a negative that could never
+# match anything is the "guard that cannot fail for its own target" class
+# this repo has been bitten by repeatedly. Proved live against the exact
+# sentence the ADR used to carry.
+# shellcheck disable=SC2016 # single-quoted deliberately: the literal prose the ADR used to carry, backticks and all.
+stale_adr_RC='renaming it touches `hooks/hooks.json` and, in `tests/test_hooks.sh`, 103 occurrences
+of the literal filename plus 136 uses of the variable built from it — counted against the
+8300-line file this ADR was written beside'
+for needle_RC in "103 occurrences" "136 uses" "8300-line"; do
+  assert_contains "$stale_adr_RC" "$needle_RC" "RENAME-COUNT-b, failure proof: the needle '$needle_RC' must be findable in the sentence the ADR actually used to carry - otherwise the assertion forbidding it above could never fail, whatever the ADR said"
+done
+
+
+# ==========================================================================
+# HOARD-17. THE SCAN CAP'S UNIT IS THE LOCALE'S, AND THE DIFFERENCE IS
+#     OBSERVABLE END TO END.
+#
+#     scripts/allow-checkpoint.sh's comment beside MAX_SCAN_LEN used to
+#     state, without qualification, "THE UNIT IS CHARACTERS, NOT BYTES
+#     ... POSIX defines as the length in CHARACTERS", and conclude the
+#     cap was LOOSE - up to roughly four times 65536 bytes. That is only
+#     the multibyte half. Under LC_ALL=C the same `${#var}` counts BYTES
+#     and the cap is TIGHTER, and the two readings disagree about the
+#     same payload. docs/adr/0008-hoard-auto-allow.md had this right from
+#     the start; the script's comment was the copy that fell behind, and
+#     nothing measured either.
+#
+#     The C half is asserted unconditionally - three bytes per character
+#     is arithmetic, not a locale feature. The UTF-8 half needs a locale
+#     on this machine whose /bin/sh counts characters, which CI's dash
+#     does not provide, so it follows the loose_utf8_locale pattern used
+#     elsewhere in this file: probed, and stated when absent rather than
+#     silently skipped.
+# ==========================================================================
+homeH17=$(new_home)
+mkdir -p "$homeH17/.squirrel/hoard/global"
+pathH17="$homeH17/.squirrel/hoard/global/20260101T000000Z-x.md"
+
+# 32768 x U+20AC (3 bytes each) = 32768 characters, 98304 bytes: under
+# the 65536 cap read as characters, over it read as bytes. The whole
+# payload stays far under MAX_PAYLOAD_LEN, so that cap is not what
+# decides either run.
+#
+# Built by fifteen SHELL doublings from one character, deliberately: a
+# power of two needs no trimming, and trimming is where this fixture
+# would have quietly broken. `awk`'s substr and `${var%...}` both count
+# in whatever unit the locale gives them, which is the very thing under
+# test here - a fixture that used one of them to cut the string to
+# length would be measuring the bug with the bug. The byte count below
+# is then asserted, not assumed.
+euroH17=$(printf '\342\202\254')
+i_H17=0
+while [ "$i_H17" -lt 15 ]; do
+  euroH17="$euroH17$euroH17"
+  i_H17=$((i_H17 + 1))
+done
+bytesH17=$(printf '%s' "$euroH17" | wc -c | tr -d ' ')
+assert_eq "98304" "$bytesH17" "HOARD-17 fixture sanity: the body must really be 98304 bytes - a fixture that came out ASCII, or short, would make both halves below agree for the boring reason"
+stdinH17=$(jq -n --arg p "$pathH17" --arg c "$euroH17" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:$c}}')
+assert_eq "yes" "$([ "${#stdinH17}" -lt 1048576 ] && echo yes || echo no)" "HOARD-17 fixture sanity: the whole payload must stay under MAX_PAYLOAD_LEN, or this scenario would be measuring that cap instead of the scan cap"
+
+decision_locale_H17() {
+  dl_out=$(capture_stdout_with_locale "$allow_checkpoint_script" "$homeH17" "$1" "$stdinH17")
+  if [ -z "$dl_out" ]; then printf 'defer'; else printf 'allow'; fi
+}
+
+assert_eq "defer" "$(decision_locale_H17 "C")" "HOARD-17: under LC_ALL=C the 120000-byte body is over MAX_SCAN_LEN and must defer - the cap is TIGHTER here, which is the half the script's comment used to deny existed"
+
+charcount_locale_H17=""
+for locH17 in en_US.UTF-8 pt_BR.UTF-8 de_DE.UTF-8 fr_FR.UTF-8 C.UTF-8; do
+  nH17=$(LC_ALL="$locH17" sh -c 's=$(printf "\342\202\254\342\202\254"); printf "%s" "${#s}"' 2>/dev/null) || nH17=""
+  if [ "$nH17" = "2" ]; then
+    charcount_locale_H17=$locH17
+    break
+  fi
+done
+
+if [ -n "$charcount_locale_H17" ]; then
+  assert_eq "allow" "$(decision_locale_H17 "$charcount_locale_H17")" "HOARD-17: under $charcount_locale_H17 the IDENTICAL payload is auto-approved - same hook, same input, same machine, opposite answers. That is the range docs/adr/0008-hoard-auto-allow.md states, measured rather than described"
+  assert_eq "no" "$([ "$(decision_locale_H17 "C")" = "$(decision_locale_H17 "$charcount_locale_H17")" ] && echo yes || echo no)" "HOARD-17: stated as the property rather than as two separate outcomes - the two locales must DISAGREE about this payload, which is what makes 'between 65536 bytes and roughly four times that many' a real range and not a hedge"
+else
+  # No locale on this machine makes /bin/sh count characters (CI's
+  # /bin/sh is dash, and Apple's /bin/dash counts bytes under every
+  # locale). The C half above still holds; only the disagreement is
+  # unobservable here, and saying so is better than a green that means
+  # nothing.
+  assert_eq "defer" "$(decision_locale_H17 "C")" "HOARD-17: no locale on this machine makes /bin/sh's \${#var} count characters, so only the byte reading is exercised - the range is still the documented one, and the disagreement half of it is asserted wherever such a locale exists"
+fi
+
+
+# ==========================================================================
+# HOARD-18. THE SIX CLAIMS THIS AUDIT CORRECTED, PINNED.
+#
+#     Each of these was a sentence in scripts/allow-checkpoint.sh that
+#     said something the code did not do. None of them is checkable by
+#     running the hook - a comment has no behaviour - so what is asserted
+#     is exactly what CAN be: the stale wording is gone, and the needle
+#     that says so is a phrase real text could carry, proved by a mutant
+#     that restores all six.
+#
+#     Read HOARD-13c's own note first: an assert_not_contains over a
+#     file's text proves absence, never truth. The truth of the CORRECTED
+#     sentences is established where each is established - HOARD-14 for
+#     the hard link, HOARD-15 for the payload cap, HOARD-17 for the
+#     locale range, HOARD-3f..3n for the attack matrix, and `grep -rn
+#     mkdir` over this repo for the one about who creates the two roots.
+#     These assertions exist to stop the corrections rotting back, which
+#     is what happened to every one of them.
+#
+#     THE NEEDLES ARE ALL SINGLE-LINE. A comment wraps, so a needle
+#     spelling out a sentence that spans two lines could never match this
+#     file however stale it got - the "guard that cannot fail for its own
+#     target" this plan has hit repeatedly, and the reason HOARD-13d
+#     exists. Every needle below is taken from ONE line of the file as it
+#     stood before the correction, and the mutant proves each one.
+# ==========================================================================
+allow_src_H18=$(cat "$allow_checkpoint_script" 2>/dev/null || printf '')
+
+staleH18='after normalisation, resolves inside one of
+same shape of exposure MAX_FILE_PATH_LEN exists to close
+CHARACTERS, NOT BYTES, and the difference is stated
+is created by this plugin itself (on first checkpoint write or
+this plugin creates both directories itself
+does. The whole attack matrix was re-run'
+
+oldifsH18=$IFS
+IFS='
+'
+for needleH18 in $staleH18; do
+  IFS=$oldifsH18
+  assert_not_contains "$allow_src_H18" "$needleH18" "HOARD-18: the stale claim '$needleH18' must be gone from scripts/allow-checkpoint.sh - each of these described the file as doing something it did not do"
+  IFS='
+'
+done
+IFS=$oldifsH18
+
+# The corrected side, so a future edit cannot satisfy the six negatives
+# above by simply deleting the paragraphs they came from.
+assert_contains "$allow_src_H18" "A gate and three" "HOARD-18: the layer count in the headline statement must name the third layer - the hard-link refusal is a layer, and a headline that counted two would be understating the boundary the same way the two-roots sentence once did"
+assert_contains "$allow_src_H18" "NAMES A LOCATION" "HOARD-18: and the headline must say the allow is about the NAME - 'resolves inside' is the reading a hard link falsifies"
+
+# --- HOARD-18b. FAILURE PROOF for all six negatives. Restores each stale
+#     line in a scratch copy and asserts every needle finds its own -
+#     without this, a needle spelling a phrase this file could never
+#     contain would pass forever and guard nothing.
+mutantH18=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
+cleanup_paths="$cleanup_paths $mutantH18"
+sed -e 's|after normalisation, NAMES A LOCATION inside|after normalisation, resolves inside one of|' \
+  -e 's|text is a cost that grows with attacker input, which is the property|text is the same shape of exposure MAX_FILE_PATH_LEN exists to close,|' \
+  -e 's|COUNTS IS DECIDED BY THE LOCALE, and the cap is|IS CHARACTERS, NOT BYTES, and the difference is stated rather|' \
+  -e 's|ever creates either root is a plain file write|is created by this plugin itself (on first checkpoint write or|' \
+  -e 's|legitimate, because the only thing that ever creates either root is a|legitimate, because this plugin creates both directories itself - see|' \
+  -e 's|does. The whole attack matrix is run|does. The whole attack matrix was re-run|' \
+  "$allow_checkpoint_script" >"$mutantH18"
+if cmp -s "$allow_checkpoint_script" "$mutantH18"; then mutantH18_differs=no; else mutantH18_differs=yes; fi
+assert_eq "yes" "$mutantH18_differs" "FAILURE PROOF (HOARD-18), control: the mutation must genuinely change the script - a sed that matched nothing would leave a byte-identical copy and this proof would report clean while testing nothing"
+mutantH18_body=$(cat "$mutantH18" 2>/dev/null || printf '')
+
+IFS='
+'
+for needleH18b in $staleH18; do
+  IFS=$oldifsH18
+  assert_contains "$mutantH18_body" "$needleH18b" "FAILURE PROOF (HOARD-18): restoring the stale claim must make '$needleH18b' findable by the exact needle the assertion above forbids - proving that assertion is a live guard and not a phrase this file could never contain"
+  IFS='
+'
+done
+IFS=$oldifsH18
 
 assert_report
