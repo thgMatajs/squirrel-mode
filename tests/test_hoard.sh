@@ -85,8 +85,13 @@ assert_exit_code 0 env HOME="$home1" "$hoard_search_script"
 #    documented order: id, score, type, title.
 # ==========================================================================
 home2=$(new_home)
+# `last_used` sits far in the future ON PURPOSE, so `days` clamps to 0 and
+# the score is exactly 0.6000 on every machine on every day: importance 3
+# of 5, no uses, no query terms. A stamp in the past decays by a digit
+# overnight, which would make the exact-line assertion below fail for the
+# calendar rather than for a defect.
 make_memory "$home2" "global" "20260101T000000Z-alpha" "feedback" "3" "git,tests" \
-  "20260101T000000Z" "0" "active" "run the suite before committing"
+  "20991231T000000Z" "0" "active" "run the suite before committing"
 out2=$(run_search "$home2")
 assert_contains "$out2" "20260101T000000Z-alpha" "the memory's id must appear in the output"
 assert_contains "$out2" "feedback" "the memory's type must appear in the output"
@@ -94,6 +99,29 @@ assert_contains "$out2" "run the suite before committing" "the memory's title mu
 
 field_count2=$(printf '%s' "$out2" | awk -F ' · ' '{ print NF; exit }')
 assert_eq "4" "$field_count2" "each output line must carry exactly four ' · '-separated fields: id, score, type, title"
+
+# ORDER, not merely count. `skills/dig/SKILL.md` reads these four fields
+# POSITIONALLY, so a printf that swapped two of them still prints four
+# fields, still contains every substring asserted above, and still passes
+# scenario 12 - while dig shows the user an id where the title belongs.
+# A count cannot see that; an exact line can.
+assert_eq '20260101T000000Z-alpha · 0.6000 · feedback · run the suite before committing' "$out2" "the whole line must be exactly \`id · score · type · title\`, in that order - this is the contract between the reader and skills/dig/SKILL.md, which addresses these fields by position and by nothing else"
+
+# FAILURE PROOF (2): a copy whose printf swaps type and title. It is the
+# regression the field count accepts, so this is what makes the assertion
+# above known to fire rather than assumed to.
+mutant2=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-swap.XXXXXX")
+cleanup_paths="$cleanup_paths $mutant2"
+# shellcheck disable=SC2016 # literal source text: the printf's argument list.
+sed 's/"\$r_id" "\$r_score" "\$r_type" "\$r_title"/"$r_id" "$r_score" "$r_title" "$r_type"/' \
+  "$hoard_search_script" >"$mutant2"
+chmod +x "$mutant2"
+if cmp -s "$hoard_search_script" "$mutant2"; then mut2_differs=no; else mut2_differs=yes; fi
+assert_eq "yes" "$mut2_differs" "FAILURE PROOF (2), control: the swap must genuinely change scripts/hoard-search.sh - a sed that matched nothing would leave an identical copy, and a mutant that does not differ proves nothing"
+out2_mut=$(HOME="$home2" "$mutant2" 2>/dev/null) || true
+field_count2_mut=$(printf '%s' "$out2_mut" | awk -F ' · ' '{ print NF; exit }')
+assert_eq "4" "$field_count2_mut" "FAILURE PROOF (2), the half that matters: the swapped copy still prints FOUR fields, so the count assertion above passes on it unchanged"
+assert_eq '20260101T000000Z-alpha · 0.6000 · run the suite before committing · feedback' "$out2_mut" "FAILURE PROOF (2): and it prints them in the wrong order, which only the exact-line assertion catches"
 
 # ==========================================================================
 # 3. A superseded memory is excluded by default and returned by --all.
@@ -657,7 +685,7 @@ assert_contains "$context_body" "**Layer**" "CONTEXT.md must define the layer to
 assert_contains "$adr8_body" "With \`grep\` absent from \`PATH\`" "ADR-0008 must state the degradation: without grep the assignment rule drops out and an api_key line is auto-approved, while the PEM and prefix rules still defer through the pure-shell case"
 assert_contains "$adr8_body" "MAKIAVELIAN" "ADR-0008 must give the concrete false positives a reviewer found, not a hand-wave - the prefixes are matched as SUBSTRINGS, so an ordinary word containing AKIA defers"
 assert_contains "$adr8_body" "a memory about this guard itself would defer" "ADR-0008 must name the self-referential false positive: the ADR's own vocabulary (AKIA, AIza, sk-ant, ghp_) is exactly what the scan matches"
-assert_contains "$adr8_body" "counts characters, not bytes" "ADR-0008 must state that \${#var} is a character count, so the 65536-BYTE cap is loose by up to roughly 4x in a multibyte locale - still bounded, still never growing with attacker input"
+assert_contains "$adr8_body" "between 65536 bytes and roughly four times that many" "ADR-0008 must state the cap as a RANGE: \${#var} counts characters under a multibyte locale and bytes under C/POSIX - measured, not assumed - so the 65536 cap is loose by up to roughly 4x, still a fixed bound at either end, still never growing with attacker input"
 assert_contains "$adr8_body" "Both fields are read and both are scanned" "ADR-0008 must describe the scan as it is written: reading content and only FALLING BACK to new_string is the field-shadowing bypass, and the plan's own draft described that broken shape"
 
 # ==========================================================================
@@ -790,7 +818,7 @@ if cmp -s "$adr8_file" "$mut_adr8"; then mut_adr8_differs=no; else mut_adr8_diff
 assert_eq "yes" "$mut_adr8_differs" "FAILURE PROOF (13b), control: the mutation must genuinely change ADR-0008"
 mut_adr8_body=$(cat "$mut_adr8" 2>/dev/null || printf '')
 assert_not_contains "$mut_adr8_body" "With \`grep\` absent from \`PATH\`" "FAILURE PROOF (13b): a copy with the grep-absent limit deleted must lose that needle"
-assert_contains "$mut_adr8_body" "counts characters, not bytes" "FAILURE PROOF (13b, independence): and must keep the multibyte limit - three limits, three assertions, none of them standing in for another"
+assert_contains "$mut_adr8_body" "between 65536 bytes and roughly four times that many" "FAILURE PROOF (13b, independence): and must keep the multibyte limit - three limits, three assertions, none of them standing in for another"
 assert_contains "$mut_adr8_body" "MAKIAVELIAN" "FAILURE PROOF (13b, independence): and the false-positive examples too"
 
 # (iii) The two-layer statement. Removing it must not disturb the scan
@@ -906,7 +934,7 @@ assert_contains "$hoard_search_body" 'set -- "$hoard_dir/projects/$slug"/*.md "$
 # this guard fail exactly when the file is correct.
 # shellcheck disable=SC2016 # literal source text: '$@' is what is grepped for.
 hoard_append_count=$(grep -cF 'set -- "$@"' "$hoard_search_script" 2>/dev/null) || true
-assert_eq "1" "$hoard_append_count" "scripts/hoard-search.sh must append to its own positional list in exactly ONE place, the prescan's rebuild: \`set -- \"\$@\" ...\` in a loop rebuilds the entire list on every call, so n files cost O(n^2) - measured at 12.05 s of pure list-building at 2000 memories against 35 ms for the one-shot form"
+assert_eq "1" "$hoard_append_count" "scripts/hoard-search.sh must append to its own positional list in exactly ONE place, the prescan's rebuild: \`set -- \"\$@\" ...\` in a loop rebuilds the entire list on every call, so n files cost O(n^2) - measured at 12.05 s of pure list-building at 2000 memories against 42 ms for the one-shot form"
 # ...and that one occurrence must be the guarded rebuild, not a relapse
 # on the common path. Without these two needles the count above would be
 # satisfied by a script that went back to appending per file and simply
@@ -1114,8 +1142,15 @@ run_search_watched() {
     kill -9 "$rsw_pid" 2>/dev/null || true
     wait "$rsw_pid" 2>/dev/null || true
     rs16_verdict="hung"
+    # No exit status exists for a run this helper killed; the verdict is
+    # the only thing worth asserting on in that case.
+    rs16_status=""
   else
-    wait "$rsw_pid" 2>/dev/null || true
+    # The exit status, captured HERE and nowhere else: asserting it with
+    # `assert_exit_code` would mean a second, unwatched, foreground run
+    # against the same fixture, and against a FIFO that run never
+    # returns - a red suite would become a hung one.
+    if wait "$rsw_pid" 2>/dev/null; then rs16_status=0; else rs16_status=$?; fi
     # Quoted deliberately: bare `done` here parses as the loop keyword
     # (SC1010), which the dialect gate treats as a failure. A comment
     # explaining that must not START with the word shellcheck either -
@@ -1173,7 +1208,7 @@ run_search_watched "$home16b"
 assert_eq "done" "$rs16_verdict" "a layer whose only entry is a FIFO must not hang either - the rebuild empties the list, which is the same state as an empty directory"
 assert_eq "" "$rs16_out" "and must print nothing, exactly as an empty layer does"
 assert_eq "" "$rs16_err" "and must say nothing on stderr"
-assert_exit_code 0 env HOME="$home16b" "$hoard_search_script"
+assert_eq "0" "$rs16_status" "and must exit 0, like any other empty layer - read from the WATCHED run above, because a bare \`assert_exit_code\` here would open this FIFO a second time in the foreground and block the suite forever"
 
 # 16c. FAILURE PROOF for scenario 16: the pre-prescan construction must
 #      reproduce the silent loss. Without this, scenario 16 could be

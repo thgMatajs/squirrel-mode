@@ -7498,6 +7498,16 @@ stdinH5_decoy=$(jq -n --arg p "$hoardH5_path" \
   '{tool_name:"Edit", tool_input:{file_path:$p, content:"an ordinary memory body with nothing sensitive in it", old_string:"x", new_string:"AKIA-EXAMPLE-NOT-A-REAL-KEY"}}')
 assert_eq "defer" "$(hoard_decision "$homeH5" "$stdinH5_decoy")" "an Edit carrying a benign content decoy alongside a credential in new_string must NOT be auto-approved - a field the tool does not read must not satisfy the scan for the field it does"
 
+# The other half of reading BOTH fields, and the one regression that
+# change could have caused: an Edit carries NO `content` field at all, so
+# an absent field must not be read as a body the scan could not see and
+# deferred on. Of the three shapes, this is the only one not already
+# pinned - the credential-bearing Edit is asserted above and a
+# content-only Write below.
+stdinH5_edit_ok=$(jq -n --arg p "$hoardH5_path" \
+  '{tool_name:"Edit", tool_input:{file_path:$p, old_string:"uses: 0", new_string:"uses: 1"}}')
+assert_eq "allow" "$(hoard_decision "$homeH5" "$stdinH5_edit_ok")" "an Edit with no content field at all must still be auto-approved - that is the shape of every reinforcement Edit skills/dig/SKILL.md makes, and a missing field read as an unscannable one would put a permission prompt on each of them"
+
 # An ordinary memory is unaffected - the guard must not bar correct work.
 stdinH5_ok=$(jq -n --arg p "$hoardH5_path" \
   '{tool_name:"Write", tool_input:{file_path:$p, content:"---\ntype: feedback\ntitle: run the suite before committing\n---\n\nTwo releases went out with a broken suite."}}')
@@ -8465,7 +8475,14 @@ shimH13e=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-nogrep.XXXXXX")
 cleanup_paths="$cleanup_paths $shimH13e"
 for toolH13e in jq cat; do
   realH13e=$(command -v "$toolH13e" 2>/dev/null) || realH13e=""
-  [ -n "$realH13e" ] && ln -sf "$realH13e" "$shimH13e/$toolH13e"
+  # `|| :` guards against a FAILING `ln`, which under this file's `set -eu`
+  # is the final command of the AND-OR list and would abort the file
+  # mid-run. A tool simply MISSING was never the trigger: `[ -n ... ]` is
+  # non-final in that list and is exempt from `set -e`, as is a `for` loop
+  # returning non-zero for that reason. With the guard, a shim that failed
+  # to build is reported by the two controls below - assertion failures
+  # naming what went wrong - instead of by the suite stopping here.
+  [ -n "$realH13e" ] && ln -sf "$realH13e" "$shimH13e/$toolH13e" || :
 done
 if PATH="$shimH13e" command -v grep >/dev/null 2>&1; then grep_gone_H13e=no; else grep_gone_H13e=yes; fi
 assert_eq "yes" "$grep_gone_H13e" "HOARD-13e, control: grep must genuinely be off the shim PATH, or every assertion below is about a PATH that still has it"

@@ -175,7 +175,10 @@ fi
 #
 # The rebuild reassigns "$@" while iterating it, which is safe because a
 # `for` loop expands its word list ONCE, before the body runs - verified
-# on bash 3.2, bash 5, dash and zsh, not assumed from the wording.
+# on bash 3.2, dash and zsh, not assumed from the wording. Those three
+# are what was actually run; no bash 5 was available to run it on, and
+# naming one that was never used would make this comment the kind of
+# claim the rest of this repository exists to stop shipping.
 irregular=0
 for f in "$@"; do
   [ -f "$f" ] || { irregular=1; break; }

@@ -84,11 +84,16 @@ rule too. Ordinary prose is clean: "never commit without running the test suite"
 Each false positive costs exactly one permission prompt, never a denial. `HOARD-13f` asserts all
 five of those cases, the clean one included.
 
-**The scan cap is measured in characters, not bytes.** `${#var}` in POSIX `sh` counts characters, not bytes,
-so in a multibyte locale the 65536 cap admits up to roughly four times that many bytes. It is a
-loose bound rather than an exact one. It is still a bound, and it still never grows with attacker
-input, which is the property the cap exists for; tightening it would mean an external command on
-the hot path of every hoard write, which is the wrong trade for what it buys.
+**The scan cap bounds a range of byte counts, not a single one.** What `${#var}` counts is decided
+by the locale, and not uniformly by every `sh` either. Measured on a 6-byte, 4-character string:
+`/bin/sh`, bash 3.2.57, zsh 5.9 and dash 0.5.13.5 each return **6** under `LC_ALL=C` and **4** under
+`pt_BR.UTF-8`, while Apple's `/bin/dash` returns 6 under both. So `${#var}` counts characters under
+a multibyte locale and bytes under C/POSIX, with at least one build that counts bytes regardless.
+The hook runs under whatever locale it inherits, on whatever `/bin/sh` the machine provides, so the
+65536 cap admits **between 65536 bytes and roughly four times that many**. It is a loose bound
+rather than an exact one. It is still a fixed bound at either end, and it still never grows with
+attacker input, which is the property the cap exists for; tightening it would mean an external
+command on the hot path of every hoard write, which is the wrong trade for what it buys.
 
 ## Consequences
 

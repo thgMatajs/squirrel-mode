@@ -6,8 +6,10 @@ phases 2-4 are not started.
 What they still owe: the session-start brief with both its caps and the `memory`
 profile field (§7.2, §7.5); automatic correction capture, the inbox, `seen`, repetition and
 `/squirrel:hoard` (§6.1-§6.3, §7.1); base rule 17, the trailing-line ordering and ADR-0007 (§7.3,
-§7.4, and item 1 of §10). Anything below that describes one of those is a design, not a description
-of shipped behaviour.
+§7.4, and item 1 of §10); and the whole-file temp-then-`mv` writer §6.7 describes, with the
+torn-file test §11 pairs with it — phase 1's only writers are the harness's `Write` and `Edit`
+tools, so it guarantees nothing about a torn file. Anything below that describes one of those is a
+design, not a description of shipped behaviour.
 Date: 2026-08-13.
 Supersedes nothing. Amends: `CONTEXT.md`, `README.md`, `ADR-0002`, base rule 15.
 
@@ -73,7 +75,14 @@ context this repository uses it in. "scope" came off the layer's list for the sa
 the bare word would have made the glossary disagree with two shipped documents on its first day.
 "shared" was added in its place, because that is the drift that actually happened: `skills/dig/
 SKILL.md` shipped one sentence calling the global layer the "shared" layer, which is the exact thing
-this table exists to catch. `CONTEXT.md`'s own entries, added by task 8, match these lists.
+this table exists to catch. `CONTEXT.md`'s own entries, added by task 8, agree with this table where
+they overlap, which is not everywhere and is worth stating exactly rather than in one word. **hoard**
+and **memory** carry the same `Avoid` lists in both documents. **Layer** does not: `CONTEXT.md`
+reserves only `namespace` on its `_Avoid_` line and rules "shared" out in the entry's own prose
+instead, so the two documents agree on the substance and differ on where they put it. **candidate**
+and **brief** have no `CONTEXT.md` entry at all, and should not: they name things phases 2 and 3
+build, and a glossary entry for a term nothing on disk uses would be the same overstatement the
+status line above was corrected for.
 
 ## 4. Storage
 
@@ -283,10 +292,17 @@ losing one is bounded and the cost of a locking protocol in POSIX `sh` is not:
 3. **Two `stash`es in the same second with the same title** — they resolve to the same filename, and
    §4 already states that this collision is the correct outcome: they are the same memory.
 
-What is **not** accepted is a torn file. Every write is whole-file and atomic (write to a temporary
-file in the same directory, then `mv`), so a concurrent reader sees either the old memory or the new
-one and never half of either. It is the discipline a database would give for free, without the
-database.
+What is **not** accepted is a torn file — and phase 1 does not prevent one. Phase 1 has no writer of
+its own: every write goes through the harness's `Write` and `Edit` tools, and `skills/dig/SKILL.md`
+has the model make a **targeted `Edit`** to bump `uses` and `last_used`, which is by definition not a
+whole-file write. Whatever those tools do on an interrupted write is what happens; this phase
+neither implements that behaviour nor is in a position to guarantee it.
+
+A writer of squirrel-mode's own — whole-file and atomic, writing to a temporary file in the same
+directory and then `mv`-ing it, so that a concurrent reader sees either the old memory or the new one
+and never half of either — is the design that would close this, and it is owed by a later phase
+rather than shipped by this one. It is the discipline a database would give for free, without the
+database; phase 1 simply does not have it yet.
 
 The body of a memory is never mutated by an automatic path (§6.5), so no race can lose text a human
 wrote — only counters, and only by one.
@@ -512,10 +528,13 @@ A new `tests/test_hoard.sh`, in the style of the ten suites that already exist, 
 5. **A secret in the body defeats auto-approval** (falls back to the prompt, does not silently
    write), **a memory is never pruned**, and **a candidate expires at 30 days**.
 
-Concurrency (§6.7) is tested for the one property that is actually promised: a write interrupted
-mid-way never leaves a torn file, because every write is temp-then-`mv` in the same directory. The
-three lost-update races are **not** tested, because they are accepted rather than prevented — the
-spec states that, and a test asserting a bounded loss would only encode the acceptance twice.
+Concurrency (§6.7) gives phase 1 nothing to test. Phase 1 writes through the harness's tools and
+promises nothing about a torn file, so there is no property of its own to assert; a test would be
+asserting the harness's behaviour rather than this repository's. The torn-file test — a write
+interrupted mid-way leaving either the old memory or the new one and never half of either — is owed
+together with the temp-then-`mv` writer that would earn it. The three lost-update races are **not**
+tested in any phase, because they are accepted rather than prevented — the spec states that, and a
+test asserting a bounded loss would only encode the acceptance twice.
 
 Each guard must be proven by mutation against the current text — a test that cannot fail for its own
 target is not a test. `docs/ACCEPTANCE.md` gains a live-sweep entry for the brief actually appearing
