@@ -33,20 +33,39 @@ allow_checkpoint_script="$repo_root/scripts/allow-checkpoint.sh"
 
 # --- Cleanup ----------------------------------------------------------
 #
-# All scratch HOME directories and mutant script copies accumulate in
-# one space-joined list and are removed by a single EXIT trap - a
-# second `trap ... EXIT` later in this file would silently REPLACE this
-# one rather than add to it, so every scratch path created below is
-# appended here, never given its own trap.
+# All scratch HOME directories and mutant script copies are removed by a
+# single EXIT trap - a second `trap ... EXIT` later in this file would
+# silently REPLACE this one rather than add to it, so no scratch path
+# below is ever given its own trap.
+#
+# TWO MECHANISMS REACH THAT ONE TRAP, and the second exists because the
+# first cannot work everywhere. A path created at the TOP LEVEL of this
+# file is appended to the space-joined $cleanup_paths list directly. A
+# path created inside a helper that callers invoke as `h=$(new_home)`
+# CANNOT be: command substitution runs the helper in a SUBSHELL, so an
+# assignment to $cleanup_paths there dies with the subshell and the trap
+# never learns the path. That was live in this file for three helpers -
+# new_home, make_script_scratch, make_tool_path, plus the `ls` probe's
+# own directory - and leaked 354 scratch paths per run of this file
+# alone, measured under a private $TMPDIR.
+#
+# So those helpers register nothing. They mktemp INSIDE $scratch_root,
+# one directory registered here at the top level before any of them
+# runs; removing it removes everything they made, from whatever subshell.
+# The SCRATCH-LEAK scenario at the bottom of this file asserts that
+# nothing this run put in $TMPDIR is left unscheduled.
 cleanup_paths=""
 trap 'rm -rf $cleanup_paths' EXIT
+
+scratch_before=$(scratch_snapshot)
+scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-root.XXXXXX")
+cleanup_paths="$cleanup_paths $scratch_root"
 
 new_home() {
   # new_home - creates a fresh, empty scratch directory to use as HOME
   # for one scenario. Nothing under it exists yet, matching a genuine
   # fresh install.
-  h=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-home.XXXXXX")
-  cleanup_paths="$cleanup_paths $h"
+  h=$(mktemp -d "$scratch_root/home.XXXXXX")
   printf '%s' "$h"
 }
 
@@ -373,8 +392,11 @@ ls_splits_run_on_missing_operand() {
   # is real, deterministic and platform-specific - which means a proof
   # about it has to ASK rather than assume, or it goes red on the other
   # platform for a reason that is not a defect.
-  lsm_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-lsprobe.XXXXXX")
-  cleanup_paths="$cleanup_paths $lsm_dir"
+  # Inside $scratch_root, not registered on $cleanup_paths: this whole
+  # probe is called as `x=$(ls_splits_run_on_missing_operand)`, so an
+  # assignment here would run in a subshell and reach no trap. See the
+  # cleanup header at the top of this file.
+  lsm_dir=$(mktemp -d "$scratch_root/lsprobe.XXXXXX")
   lsm_today=$(date +%Y%m%d)
   lsm_i=1
   while [ "$lsm_i" -le 14 ]; do
@@ -450,9 +472,11 @@ count_prefix_lines() {
 # the corresponding scenario's assertion is not vacuously passing. The
 # real, shipped scripts are never touched.
 make_script_scratch() {
+  # Scratch goes inside $scratch_root rather than onto $cleanup_paths:
+  # callers write `m=$(make_script_scratch ...)`, so a registration here
+  # would never leave the subshell. See the cleanup header at the top.
   src=$1
-  scratch=$(mktemp "${TMPDIR:-/tmp}/squirrel-hook-mutant.XXXXXX")
-  cleanup_paths="$cleanup_paths $scratch"
+  scratch=$(mktemp "$scratch_root/mutant.XXXXXX")
   cp "$src" "$scratch"
   chmod +x "$scratch"
   printf '%s' "$scratch"
@@ -473,9 +497,11 @@ make_script_scratch() {
 # absence-by-omission is indistinguishable from absence-by-exclusion to
 # a script under test.
 make_tool_path() {
+  # Inside $scratch_root, for the subshell reason the cleanup header at
+  # the top of this file gives: callers write
+  # `PATH="$(make_tool_path ...)"`.
   exclude=$1
-  dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-toolpath.XXXXXX")
-  cleanup_paths="$cleanup_paths $dir"
+  dir=$(mktemp -d "$scratch_root/toolpath.XXXXXX")
   #
   # `mv` ADDED (B2 regression work): it was missing from this list, and
   # its absence was not harmless. check-off-flag.sh claims a sentinel by
@@ -10247,5 +10273,24 @@ upsH21cout=$(capture_stdout_with_path "$fpH21c_script" "$homeH21c" "$noawk_pathH
 assert_contains "$upsH21cout" "squirrel-mode: cannot bound the profile for reinjection" "FAILURE PROOF (HOARD-21c), control: the mutant still SAYS what went wrong - the mutation moves the stamp, it does not restore the silence, which is what makes the two halves separable"
 assert_eq "yes" "$([ -f "$homeH21c/.squirrel/profile-seen/sH21" ] && echo yes || echo no)" "FAILURE PROOF (HOARD-21c): stamping before the body is prepared marks the session as having seen a profile it was never shown"
 assert_not_contains "$(capture_stdout "$fpH21c_script" "$homeH21c" "$stdinH21")" "PB_H21_BODY_MARKER" "FAILURE PROOF (HOARD-21c): so the next prompt, with awk back on PATH, reinjects NOTHING - the profile is gone for the rest of that session. This is what HOARD-21's recovery assertion is measuring"
+
+# ==========================================================================
+# SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.
+#
+#     The cleanup header at the top of this file described a mechanism
+#     that did not hold for its own busiest helpers: new_home,
+#     make_script_scratch, make_tool_path and the `ls` probe all
+#     registered their scratch from inside a `$( )` subshell, so 354
+#     paths per run outlived the trap. A promise written in a comment is
+#     what let that stand for as long as it did, so the promise is an
+#     assertion now.
+#
+#     It runs BEFORE the trap, so the paths still exist; what it checks
+#     is that each is SCHEDULED. Presence, not a count - see
+#     assert_no_scratch_leak in tests/lib/assert.sh for why a number
+#     would be the wrong lock, and why the run's own starting snapshot is
+#     subtracted first.
+# ==========================================================================
+assert_no_scratch_leak "$scratch_before" "$cleanup_paths" "SCRATCH-LEAK: every path this file created in \$TMPDIR must be on \$cleanup_paths (directly, or inside \$scratch_root) so the single EXIT trap removes it - a helper that registers its own path while running inside \$( ) registers nothing at all"
 
 assert_report

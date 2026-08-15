@@ -14,15 +14,35 @@ repo_root=$(cd "$script_dir/.." && pwd)
 
 hoard_search_script="$repo_root/scripts/hoard-search.sh"
 
-# One EXIT trap for every scratch path (a second `trap ... EXIT` would
-# REPLACE this one, not add to it - the same rule tests/test_hooks.sh
-# states for itself).
+# One EXIT trap, and it really does reach every scratch path this file
+# creates (a second `trap ... EXIT` would REPLACE this one, not add to
+# it - the same rule tests/test_hooks.sh states for itself).
+#
+# TWO MECHANISMS, because one of them cannot work on its own. A path
+# created at the TOP LEVEL of this file is appended to $cleanup_paths
+# directly, and the trap sees it. A path created inside a helper called
+# as `h=$(new_home)` CANNOT be registered that way: command substitution
+# runs the helper in a SUBSHELL, so the assignment to $cleanup_paths
+# there dies with the subshell and the trap never learns the path. The
+# header this replaces claimed one trap covered every scratch path while
+# that was false for exactly the two helpers below - measured under a
+# private $TMPDIR, one run of this file alone left 57 directories and
+# files behind.
+#
+# So the helpers do not register anything. They mktemp INSIDE
+# $scratch_root, one directory registered here, at the top level, before
+# any of them runs; removing it removes everything they made, whatever
+# subshell made it. The SCRATCH-LEAK scenario at the bottom of this file
+# asserts that nothing this run put in $TMPDIR is left unscheduled.
 cleanup_paths=""
 trap 'rm -rf $cleanup_paths' EXIT
 
+scratch_before=$(scratch_snapshot)
+scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hoard-root.XXXXXX")
+cleanup_paths="$cleanup_paths $scratch_root"
+
 new_home() {
-  h=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hoard-home.XXXXXX")
-  cleanup_paths="$cleanup_paths $h"
+  h=$(mktemp -d "$scratch_root/home.XXXXXX")
   printf '%s' "$h"
 }
 
@@ -77,10 +97,12 @@ print(src.count(old))
 }
 
 new_mutant() {
-  # new_mutant -> path to a fresh executable scratch file, registered for
-  # cleanup.
-  nm_path=$(mktemp "${TMPDIR:-/tmp}/squirrel-hoard-mutant.XXXXXX")
-  cleanup_paths="$cleanup_paths $nm_path"
+  # new_mutant -> path to a fresh executable scratch file. Created inside
+  # $scratch_root rather than registered on $cleanup_paths, for the
+  # subshell reason the cleanup header above gives: this helper is called
+  # as `m=$(new_mutant)`, so an assignment here would never reach the
+  # trap.
+  nm_path=$(mktemp "$scratch_root/mutant.XXXXXX")
   chmod +x "$nm_path"
   printf '%s' "$nm_path"
 }
@@ -535,7 +557,7 @@ assert_contains "$dig_body" "titles only" "dig must state that the first result 
 # two `uses` needles below: the backticks are literal Markdown characters
 # in the text being searched for, never command substitution to evaluate.
 assert_contains "$dig_body" '`Read` tool' "dig must name the Read tool for hydrating a body - only Read carries the auto-approval. Matched on the backticked tool name, not the bare word 'Read', which any sentence telling the model to read something would satisfy"
-assert_contains "$dig_body" "one permission prompt" "dig must disclose that running the search costs a permission prompt, because no hook can auto-approve a Bash call"
+assert_contains "$dig_body" "one permission prompt" "dig must disclose that running the search costs a permission prompt, because this plugin registers no hook that runs on a Bash call"
 # shellcheck disable=SC2016 # literal Markdown backticks, not substitution.
 assert_contains "$dig_body" '`uses`' "dig must update the memory's uses counter when a body is actually read - reinforcement is what keeps a used memory ranked. Matched on the backticked frontmatter key, not the bare word, which is a substring of 'causes' and an ordinary verb besides"
 assert_contains "$dig_body" "last_used" "dig must update last_used when a body is actually read"
@@ -2698,5 +2720,21 @@ mut30_out=$(HOME="$home2" "$mutant30" 2>/dev/null) || true
 mut30_err=$(HOME="$home2" "$mutant30" 2>&1 >/dev/null) || true
 assert_eq "" "$mut30_out" "FAILURE PROOF (30): one apostrophe in one comment and the reader returns NOTHING, on a store holding a memory - the store answering like an empty one, from a rewording"
 assert_contains "$mut30_err" "awk" "FAILURE PROOF (30): and what the user gets instead is an awk diagnostic naming a source line of a program they never wrote"
+
+# ==========================================================================
+# SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.
+#
+#     The header at the top of this file used to promise this and not
+#     deliver it: new_home and new_mutant are both called as `x=$(...)`,
+#     the assignment to $cleanup_paths inside them ran in a subshell, and
+#     57 scratch paths per run outlived the trap. A promise in a comment
+#     is what let that stand, so the promise is now an assertion.
+#
+#     It runs BEFORE the trap, so the paths are all still there; what it
+#     checks is that each one is SCHEDULED. Presence, not a count - see
+#     assert_no_scratch_leak in tests/lib/assert.sh for why a number
+#     would be the wrong lock here.
+# ==========================================================================
+assert_no_scratch_leak "$scratch_before" "$cleanup_paths" "SCRATCH-LEAK: every path this file created in \$TMPDIR must be on \$cleanup_paths (directly, or inside \$scratch_root) so the single EXIT trap removes it - a helper that registers its own path while running inside \$( ) registers nothing at all"
 
 assert_report

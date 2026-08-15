@@ -31,17 +31,30 @@ skills_dir="$repo_root/skills"
 # --- Cleanup ------------------------------------------------------------
 #
 # Scratch mutant files (failure-proof scenarios only, see the bottom of
-# this file) accumulate here and are removed by a single EXIT trap - the
-# same technique tests/test_hooks.sh uses for its own scratch scripts.
+# this file) are removed by a single EXIT trap - the same technique
+# tests/test_hooks.sh uses for its own scratch scripts, including the
+# part of it that had to be fixed there: skill_scratch is called as
+# `m=$(skill_scratch ...)`, so an assignment to $cleanup_paths inside it
+# would run in a SUBSHELL and reach no trap. It did, and leaked 31
+# scratch files per run of this file.
+#
+# The helper therefore registers nothing and mktemps inside
+# $scratch_root, one directory registered here at the top level; removing
+# it removes every mutant, from whatever subshell. The SCRATCH-LEAK
+# scenario at the bottom of this file asserts that nothing this run put
+# in $TMPDIR is left unscheduled.
 cleanup_paths=""
 trap 'rm -rf $cleanup_paths' EXIT
+
+scratch_before=$(scratch_snapshot)
+scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-skills-root.XXXXXX")
+cleanup_paths="$cleanup_paths $scratch_root"
 
 skill_scratch() {
   # skill_scratch <src> - copies <src> into a throwaway scratch file and
   # returns its path. The real, shipped skill file is never touched.
   src=$1
-  scratch=$(mktemp "${TMPDIR:-/tmp}/squirrel-skill-mutant.XXXXXX")
-  cleanup_paths="$cleanup_paths $scratch"
+  scratch=$(mktemp "$scratch_root/mutant.XXXXXX")
   cp "$src" "$scratch"
   printf '%s' "$scratch"
 }
@@ -498,7 +511,7 @@ assert_contains "$pickup_body" "Never write to it, move it, or delete it" "P1 mi
 # what docs/adr/0002 promises a checkpoint interaction never costs. The
 # hook now hands over the list; this is what makes pickup use it rather
 # than enumerate the directory itself.
-assert_contains "$pickup_body" "Project checkpoint files, newest first" "PICKUP-LIST: pickup must reference the injected 'Project checkpoint files, newest first (session <token>):' block - without it the model has no enumeration it can perform with the Read tool alone, and falls back to a Bash call no hook can auto-approve"
+assert_contains "$pickup_body" "Project checkpoint files, newest first" "PICKUP-LIST: pickup must reference the injected 'Project checkpoint files, newest first (session <token>):' block - without it the model has no enumeration it can perform with the Read tool alone, and falls back to a Bash call this plugin has registered no hook to run on"
 assert_contains "$pickup_body" "read each path it names with the Read tool, in the order given" "PICKUP-LIST: pickup must say to read the injected paths with the Read tool in the given order - naming the block without saying what to do with it leaves the listing behaviour in place"
 
 # [PICKUP-LIST] The block is NOT promised to be complete, and this file
@@ -1434,5 +1447,13 @@ else
   digest_fp_question_seen=no
 fi
 assert_eq "yes" "$digest_fp_question_seen" "FAILURE PROOF (scenario 28, independence): the retired description still carries the ordinary-language question, so the question pin above cannot be what distinguishes narrowed from unnarrowed"
+
+# ==========================================================================
+# SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.
+# See the cleanup header at the top of this file for the subshell defect
+# this locks shut, and assert_no_scratch_leak in tests/lib/assert.sh for
+# why the lock is presence-based rather than a count.
+# ==========================================================================
+assert_no_scratch_leak "$scratch_before" "$cleanup_paths" "SCRATCH-LEAK: every path this file created in \$TMPDIR must be on \$cleanup_paths (directly, or inside \$scratch_root) so the single EXIT trap removes it - a helper that registers its own path while running inside \$( ) registers nothing at all"
 
 assert_report

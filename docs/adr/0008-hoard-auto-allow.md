@@ -16,8 +16,9 @@ interrupt the task at exactly the moment the user is trying not to be interrupte
 
 **That is a statement about the write, and `/squirrel:stash` as a whole is not prompt-free.**
 Amended after `README.md` was corrected to publish the real cost: the command needs a UTC timestamp,
-built by running `date -u +%Y%m%dT%H%M%SZ`, and that is a `Bash` call, which no hook can auto-approve
-at any path. So an interactive `/squirrel:stash` costs **one** permission prompt — for the stamp,
+built by running `date -u +%Y%m%dT%H%M%SZ`, and that is a `Bash` call, which this plugin registers no
+hook to run on at any path (ADR-0002's own "the fix is not a wider matcher" section records that as a
+decision, not as something Claude Code forbids). So an interactive `/squirrel:stash` costs **one** permission prompt — for the stamp,
 never for the memory — and a `/squirrel:dig` you open a memory from costs two, one for the search
 script and one for the same stamp. `README.md` says this in both the command table and the privacy
 section. It is recorded here because a reader who reaches only this ADR would otherwise conclude the

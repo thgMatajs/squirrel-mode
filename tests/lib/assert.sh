@@ -181,6 +181,78 @@ assert_exit_code() {
   return 0
 }
 
+# --- Scratch-directory leak lock ---------------------------------------
+#
+# Every test file here creates scratch paths under $TMPDIR and removes
+# them with ONE `trap ... EXIT`. The mechanism has a silent hole, and it
+# was open in three files at once: a helper called as `h=$(new_home)`
+# runs in a SUBSHELL, so `cleanup_paths="$cleanup_paths $h"` inside it
+# dies with that subshell and the trap never learns the path. Measured
+# before the fix, under a private $TMPDIR: one run of tests/run.sh left
+# 443 scratch directories and files behind, ~14 MB, and the header of
+# tests/test_hoard.sh claimed "one EXIT trap for every scratch path"
+# while it was happening.
+#
+# The fix is structural (each file mktemps helper scratch inside ONE
+# registered parent directory, so no registration has to survive a
+# subshell at all); this pair is what stops it silently coming back.
+# scratch_snapshot records what $TMPDIR held before a run;
+# assert_no_scratch_leak fails on anything that appeared during the run
+# and is not scheduled for removal by the trap.
+#
+# PRESENCE, not a count: the assertion names the unscheduled paths
+# instead of comparing "how many are left" against a number, because a
+# number would rot the moment a file gained one scenario, and because
+# these files run on a developer's real $TMPDIR, which already holds
+# other programs' scratch. The snapshot is what makes that residue
+# invisible to the check - it subtracts whatever was already there.
+#
+# Called BEFORE the trap fires (the last assertions in a file), so the
+# paths still exist: what is asserted is that each is on the list the
+# trap will remove, not that it is already gone.
+scratch_snapshot() {
+  # scratch_snapshot - the entries $TMPDIR holds right now, as
+  # "|path|path|...|" for a substring test. Nothing else in this harness
+  # needs the format, so it is a private one rather than a newline list:
+  # `case` can test it with no subshell, no temp file, and no dependence
+  # on how a path sorts.
+  ss_out="|"
+  for ss_e in "${TMPDIR:-/tmp}"/*; do
+    [ -e "$ss_e" ] || continue
+    ss_out="$ss_out$ss_e|"
+  done
+  printf '%s' "$ss_out"
+}
+
+assert_no_scratch_leak() {
+  # assert_no_scratch_leak <snapshot> <scheduled paths> <message>
+  #
+  # <snapshot> comes from scratch_snapshot, taken before the file
+  # created anything. <scheduled paths> is the space-joined list the
+  # file's own EXIT trap removes - normally "$cleanup_paths".
+  ansl_before=$1
+  ansl_scheduled=$2
+  ansl_message=$3
+  ansl_leaked=""
+  for ansl_e in "${TMPDIR:-/tmp}"/*; do
+    [ -e "$ansl_e" ] || continue
+    case "$ansl_before" in
+      *"|$ansl_e|"*)
+        # Already there before this file ran - not ours.
+        continue
+        ;;
+    esac
+    case " $ansl_scheduled " in
+      *" $ansl_e "*)
+        continue
+        ;;
+    esac
+    ansl_leaked="$ansl_leaked $ansl_e"
+  done
+  assert_eq "" "$ansl_leaked" "$ansl_message"
+  return 0
+}
+
 assert_report() {
   # Prints a machine-parseable summary line that tests/run.sh parses to
   # aggregate results across files, then exits 1 if any assertion in

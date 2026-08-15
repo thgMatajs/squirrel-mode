@@ -280,8 +280,14 @@ fails if the tree is dirty — that is the drift check. Never hand-edit a GENERA
 - Location: `~/.squirrel/profile.md` (ADR-0003). Never inside a repo — document the ignore
   pattern so users don't commit it by accident.
 - Plain markdown, human-editable, ~15 lines, 11 fields.
-- **The SessionStart hook caps what it injects at 100 lines / 4 KB**, truncating with a one-line
-  notice past that. The documented format is ~15 lines, so the cap is generous by any honest measure.
+- **The SessionStart hook caps the profile BODY at 100 lines / 4 KB**, truncating with a one-line
+  notice past that. Two fixed additions sit outside that budget and are stated here rather than
+  rounded away: the truncation notice itself, and the `[profile] ` marker `neutralise_forged_lines`
+  puts in front of any body line spelling one of squirrel-mode's own line prefixes — at most 100 × 10
+  = 1000 bytes, both applied after the cut. So the worst case injected is about 5.1 KB, not 4 KB.
+  Neither addition scales with the size of `profile.md`, which is the property the cap exists for;
+  `scripts/load-profile.sh` carries the same arithmetic beside `PROFILE_MAX_LINES` and scenario
+  34b-G asserts the ceiling against the real hook. The documented format is ~15 lines, so the cap is generous by any honest measure.
   Two reasons: an uncapped profile is unbounded context bloat on every session start, and the injected
   text is framed to the model as authoritative field overrides — so anything that can write this file
   gets a persistent, privileged prompt-injection surface. The cap bounds the blast radius without
