@@ -33,16 +33,81 @@ remembered writing it.
    prefix strip and the component symlink walk run identically on whichever root matched, and the
    walk still tests the matched root itself first — so a symlink planted at `hoard/` defers exactly
    as one planted at `checkpoints/` does. That is a property of the walk being handed `$root`
-   rather than a fixed directory, not of a second copy of the check. The full attack matrix was
-   re-run against the hoard shape rather than assumed to transfer; see `tests/test_hooks.sh`'s
-   `HOARD-3`.
-2. **A direct child file of `hoard/` defers for every tool**, `Read` included. There is no legacy
+   rather than a fixed directory, not of a second copy of the check. The full attack matrix runs
+   against the hoard shape rather than being assumed to transfer; see `tests/test_hooks.sh`'s
+   `HOARD-3` **and `HOARD-3f` through `HOARD-3n`**.
+
+   *Corrected.* This bullet used to cite `HOARD-3` alone as "the full attack matrix". `HOARD-3` held
+   four assertions — a `..` component, a prefix escape, a symlink below the root, a symlink at the
+   root — while the matrix the checkpoint root is held to also contains field shadowing (AB1), the
+   nested decoy (AC1), `jq` absent, `jq` returning `null`, `jq` returning nothing, a malformed
+   payload, a `file_path` over the length cap, and `$HOME` unset/empty/`/`/trailing-slash. None had
+   ever been run with a hoard path. They have now, they all behave as the checkpoint root does, and
+   `HOARD-3f`–`HOARD-3n` are where they live — so the sentence is true because the scenarios exist,
+   not because it was narrowed.
+
+2. **A hard link inside a governed root is not auto-approved.** *(Added; this closes a blocker.)*
+   Layers 0–2 all reason about the path — its text, its prefix, whether any component is a symlink.
+   A hard link is none of those: it is a second directory entry for an inode that already has one
+   somewhere else, and it leaves the path completely ordinary. `ln ~/.ssh/id_rsa
+   ~/.squirrel/hoard/global/notes.md` produced `allow` for both `Read` and `Write`, in both roots —
+   the private key read, and overwritten, with the prompt this hook had just suppressed. The
+   symlink spelling of the same attack deferred, which is what made the gap easy to miss.
+
+   The refusal is: an **existing regular file** at the leaf must have a link count of 1. A leaf that
+   does not exist yet is not tested (it has no link count, and every first write has that shape); a
+   directory is not tested either (directories always carry at least two links, so testing them
+   would defer the legitimate `Read` of a checkpoint's per-project directory). Every file either
+   root legitimately holds is created by one `Write` from this plugin's own flow and has exactly one
+   name, so this is a guard with no correct traffic behind it. `HOARD-14` pins it in both roots for
+   `Read`, `Write` and `Edit`, alongside the four "must still allow" shapes.
+
+   **It needs `find`, and without `find` it does not run.** There is no way to read a link count
+   from POSIX `sh` without an external command. `find <file> -links +1` is the narrowest one
+   available — no output parsing, and no `stat`, whose flags differ between BSD and GNU. It is
+   placed **after every other decision in `decide()`**, so it runs only where the answer would
+   otherwise already be `allow`: `jq` is already mandatory on that exact path, so one more command
+   there costs a path that already pays for one, while every defer — a `..` component, an over-cap
+   path, a path outside both roots, a symlink, a credential — still reaches its answer with no
+   process spawned at all. With `find` off `PATH` the layer cannot run and the hard link is
+   auto-approved again, which is the same shape of degradation `grep` already has for the secret
+   scan below. Deferring instead was rejected for the usual reason: it would put a permission prompt
+   on every checkpoint write on such a machine, and the hole it would close is the hole that exists
+   there today. `HOARD-14e` asserts both directions on a `PATH` holding only `jq`, `cat` and `grep`.
+
+   **What an `allow` therefore means, stated exactly.** It is a statement about the **name**, checked
+   at the instant the hook runs. It is not a statement that the bytes reached live inside the root
+   (that is the hard-link case, now closed while `find` is present), and it is not a statement about
+   what the name refers to a moment later — whatever this script resolves, the filesystem can be
+   changed between the decision and the tool call it approved. `scripts/allow-checkpoint.sh`'s header
+   said "resolves inside", every reader took it for the stronger claim, and it now says what it
+   checks.
+3. **A direct child file of `hoard/` defers for every tool**, `Read` included. There is no legacy
    layout to read, so nothing correct targets that shape, which makes it a tripwire with no
    legitimate traffic behind it.
-3. **A `Write` or `Edit` whose text looks like it carries a credential is not auto-approved.** On a
+4. **A `Write` or `Edit` whose text looks like it carries a credential is not auto-approved.** On a
    hit the hook declines to decide: the write falls back to the ordinary permission prompt and the
    user chooses. It **refuses auto-approval; it never denies.** Text past the scan cap defers
-   unscanned, on the same reasoning as the existing path length cap.
+   unscanned.
+
+   *Corrected.* That last sentence used to end "on the same reasoning as the existing path length
+   cap", and the two caps are not the same reasoning. `MAX_FILE_PATH_LEN` bounds a **quadratic**
+   cost — the lexical normaliser and the component walk are both `O(segments²)`, which is why a few
+   thousand segments already cost seconds. The scan is **linear**. Linear still needs bounding, but
+   capping a straight line is not removing a curve, and calling them the same overstated what one of
+   them does.
+
+   **The whole payload is capped too, and that cap is the one that was missing.** `MAX_SCAN_LEN`
+   bounds what is *scanned*, never what was *parsed* to produce it: `${#written}` cannot exist until
+   `written` does, and producing it runs `jq` over the entire payload — as does reading `tool_name`
+   and `file_path`, on every call this hook sees, before any cap was consulted. Measured on one
+   32 MB payload: 8.22 s and 407 MB peak RSS for a hoard write, and 2.91 s / 237 MB for a checkpoint
+   write, which never scans at all. `MAX_PAYLOAD_LEN` (1 MiB, sixteen times the scan cap) is now
+   tested with `${#input}` — a shell expansion, so it adds no command to any path — before the first
+   `jq` runs; the same payloads then cost 0.71 s and 0.70 s. What it does **not** bound is
+   `input=$(cat)` itself, which runs before it and reads whatever the harness delivers; that residue
+   is stated in the script rather than papered over. `HOARD-15` pins a discriminating pair (an
+   under-cap and an over-cap payload differing only in an `old_string` no scan reads).
 
    **Both fields are read and both are scanned** — `content`, which `Write` carries, and
    `new_string`, which `Edit` carries. Reading `content` and merely *falling back* to `new_string`
@@ -51,18 +116,51 @@ remembered writing it.
    payload carrying a benign one alongside a credential-bearing `new_string` would have had its
    decoy scanned and its real write auto-approved. A field the tool does not read must never
    satisfy a check on the field it does.
-4. **The secret scan is scoped to the hoard.** `checkpoints/` is excluded deliberately: rule 14
+5. **The secret scan is scoped to the hoard.** `checkpoints/` is excluded deliberately: rule 14
    rewrites a checkpoint every turn, and a scan there would put a permission prompt in the middle
    of the one write ADR-0002 exists to keep silent.
 
 ## What the secret scan does NOT catch
 
 **Stated honestly: this is not a complete secret scanner, and does not claim to be.** It matches
-unambiguous shapes — PEM headers, provider token prefixes, and one assignment-shaped rule for
-opaque strings that carry no prefix. A credential in a shape it does not know is auto-approved, and
-the skill's own instruction not to write one is the only thing in front of it.
+unambiguous shapes — PEM private-key delimiters, provider token prefixes, and one assignment-shaped
+rule for opaque strings that carry no prefix. A credential in a shape it does not know is
+auto-approved, and the skill's own instruction not to write one is the only thing in front of it.
 
-Three specific limits, each established by running the hook rather than by reading it. An ADR that
+### What it started catching, and what that cost (audit fixes)
+
+Three shapes it claimed to cover and did not, all reproduced against the shipped hook and all
+auto-approved before:
+
+- **Compound key names.** The assignment rule required its keyword to sit *immediately* before the
+  `:` or `=`, so `aws_secret_access_key = <40 opaque chars>` was auto-approved while the bare
+  `api_key = …` deferred — and an AWS secret access key line *is* "the `api_key = <long opaque
+  string>` case" the rule's own comment named as its scope. `secret_key = …`,
+  `password_hash=…` and `token_value: …` escaped the same way. A `[A-Za-z0-9_-]*` run is now allowed
+  between the keyword and the separator, so the keyword may sit anywhere in the name.
+- **Values carrying punctuation.** The value class was `[A-Za-z0-9/+_-]{16,}`, which stops at the
+  first character outside it: `password = Tr0ub4dor&3xK9!zQmW#pL2vN` was auto-approved because of
+  the `&`. **Decision: widen, not document.** The class is now `[^[:space:]]{16,}` — any run of
+  sixteen or more non-blank characters. `grep` matches within a line, so a run can never cross a
+  line ending.
+- **Six whole families with no arm at all:** `sk-proj-` (OpenAI project keys), `sk_live_` /
+  `sk_test_` (Stripe), `glpat-` (GitLab), `GOCSPX-` (Google OAuth client secrets), `xapp-1-` (Slack
+  app-level tokens), and DSA private keys — the PEM arms named five algorithms explicitly and DSA
+  was not one of them. A `PRIVATE KEY-----` arm now catches every PEM private key by its delimiter,
+  DSA and anything invented later included; the five algorithm-specific arms are kept beside it
+  because they also match a header whose trailing dashes were stripped or reflowed, which the
+  delimiter arm cannot.
+
+**Families deliberately left out, and why.** Every prefix is a false-positive surface as well as a
+catch, so this list grows on evidence rather than on completeness. `ASIA` (AWS STS session keys) is
+excluded because it would defer any memory that mentions the continent — the exact reason `AKIA` is
+tolerable and `ASIA` is not. A bare `sk-` is excluded because it is a substring of ordinary words
+(`task-force`, `risk-adjusted`). `eyJ` (the base64 opening of a JWT) is excluded because it is also
+the base64 opening of `{"`, which any quoted JSON in a memory carries. `SG.` (SendGrid) is excluded
+for the same class of collision with ordinary punctuation. Adding any of these is a decision to
+trade prompts for coverage, and it should be made with a measurement rather than by reflex.
+
+Four specific limits, each established by running the hook rather than by reading it. An ADR that
 lists what a scan catches and omits what it stops catching is the half-true guarantee this trail
 exists to prevent.
 
@@ -80,9 +178,20 @@ either direction.
 as substrings, unanchored, so any text containing `AKIA`, `AIza`, `sk-ant` or `ghp_` defers — which
 means **a memory about this guard itself would defer**, and so would the word `MAKIAVELIAN`, whose
 fourth through seventh letters are `AKIA`. A hex SHA following `token:` satisfies the assignment
-rule too. Ordinary prose is clean: "never commit without running the test suite" is auto-approved.
-Each false positive costs exactly one permission prompt, never a denial. `HOARD-13f` asserts all
-five of those cases, the clean one included.
+rule too. The two widenings above buy more of the same, on purpose: a keyword anywhere in the name
+means `secretary:` reaches the rule, and a value of any sixteen unbroken characters means
+`password: correct-horse-battery-staple` does. Ordinary prose is clean: "never commit without
+running the test suite" is auto-approved. Each false positive costs exactly one permission prompt,
+never a denial. `HOARD-13f` asserts all five of the original cases, the clean one included, and
+`HOARD-16` asserts the two new ones alongside four clean memories that must still be auto-approved.
+
+**With `find` absent from `PATH`, the hard-link refusal drops out.** Same shape as the `grep` limit
+above, one layer up: reading a link count needs an external command, `find <file> -links +1` is it,
+and with `find` off `PATH` an existing hard link inside a governed root is auto-approved exactly as
+it was before that layer existed. Reproduced on a `PATH` holding only `jq`, `cat` and `grep`: an
+ordinary new memory still allowed (so the hook was genuinely running), a credential-bearing write to
+the same path still deferred (so the rest of the decision was intact), and the hard-linked path came
+back `allow`. `HOARD-14e` pins all four of those outcomes.
 
 **The scan cap bounds a range of byte counts, not a single one.** What `${#var}` counts is decided
 by the locale, and not uniformly by every `sh` either. Measured on a 6-byte, 4-character string:
@@ -94,6 +203,15 @@ The hook runs under whatever locale it inherits, on whatever `/bin/sh` the machi
 rather than an exact one. It is still a fixed bound at either end, and it still never grows with
 attacker input, which is the property the cap exists for; tightening it would mean an external
 command on the hot path of every hoard write, which is the wrong trade for what it buys.
+
+The range is **observable end to end**, not just in a `${#var}` probe: one 40000-character payload of
+`€` (three bytes each) defers under `LC_ALL=C` and is auto-approved under `LC_ALL=en_US.UTF-8` — same
+hook, same input, same machine. `scripts/allow-checkpoint.sh`'s own comment beside the constant used
+to state the character reading without qualification and conclude the cap was *loose*, which is only
+the multibyte half: under `C` the same expansion counts bytes and the cap is *tighter*. This ADR had
+it right and the script's comment was the copy that fell behind; it now says what this paragraph
+says. The same locale slack applies to `MAX_FILE_PATH_LEN` and `MAX_PAYLOAD_LEN`, which are measured
+the same way.
 
 ## Consequences
 
@@ -119,12 +237,20 @@ another one. `HOARD-13` pins the whole line byte for byte, asserts a hoard `allo
 pinned any of that before.
 
 **This script's name now names only one of the two roots it governs.** That mismatch is known and
-deliberate: renaming it touches `hooks/hooks.json` and, in `tests/test_hooks.sh`, 103 occurrences
-of the literal filename plus 136 uses of the variable built from it — counted against the
-8300-line file this ADR was written beside, because the "roughly forty" the note it replaces
-claimed was neither counted nor close. Doing that in the same change that widens a security
-boundary braids two risky edits together. The rename is deferred to the phase that rewrites this
-file's ADR trail.
+deliberate: renaming it touches `hooks/hooks.json` and a large, specific number of places in
+`tests/test_hooks.sh`. Doing that in the same change that widens a security boundary braids two
+risky edits together. The rename is deferred to the phase that rewrites this file's ADR trail.
+
+**The three figures are recorded in `scripts/allow-checkpoint.sh`, not here, and a test re-derives
+them.** This ADR used to carry its own copy of them, marked "counted", and both copies were wrong at
+the moment they were written — two of the three could not be produced by any counting method, and
+the sentence censured the estimate it replaced ("roughly forty") for being an estimate in the same
+breath as being incorrect itself. The script's own comment records exactly which figures were
+claimed and which were true; that history is written down once, where the numbers live, rather than
+twice. One snapshot with a test behind it beats two snapshots without one, so
+`tests/test_hooks.sh`'s `RENAME-COUNT` recounts all three from the real file on every run and fails
+with the recomputed values when any has drifted. `RENAME-COUNT-b` is what keeps the copy from coming
+back here.
 
 ## Two independent layers around the injected context, and why both
 

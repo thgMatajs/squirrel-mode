@@ -736,7 +736,16 @@ allow_hook_body=$(cat "$repo_root/scripts/allow-checkpoint.sh" 2>/dev/null || pr
 # never a shell expansion. Expanding any of them would search for whatever the test happens to hold
 # in a variable of that name, which is nothing, and assert_contains rejects an empty needle.
 assert_contains "$allow_hook_body" 'grep -qiE "$phs_re"' "the assignment rule really is the only part of payload_has_secret that shells out - which is what makes ADR-0008's grep-absent paragraph true rather than plausible"
-assert_contains "$allow_hook_body" '*AKIA* | *xoxb-* | *xoxp-* | *AIza*' "the provider prefixes really are matched by an unanchored case pattern, so the substring false positives ADR-0008 names are the shell's behaviour and not a guess"
+# NARROWED (hard-link/scanner audit): this needle used to end '| *AIza*',
+# spelling the whole arm as it stood. Adding the five provider families
+# the audit found missing put *xapp-1-* and *GOCSPX-* between *xoxp-* and
+# *AIza*, so the full-arm needle stopped matching a file that had got
+# STRICTER - a needle that fails when the guard improves is measuring the
+# arm's exact membership, which is not what this assertion is for. It now
+# names the three consecutive patterns that carry the property under test
+# (unanchored `*...*` case globs), and leaves the membership of the arm to
+# tests/test_hooks.sh HOARD-16, which asserts it by running the hook.
+assert_contains "$allow_hook_body" '*AKIA* | *xoxb-* | *xoxp-*' "the provider prefixes really are matched by an unanchored case pattern, so the substring false positives ADR-0008 names are the shell's behaviour and not a guess"
 # shellcheck disable=SC2016 # literal source text, see above.
 assert_contains "$allow_hook_body" 'written=$(extract_tool_input_field "$input" "content")' "the hook really does read content on its own line..."
 # shellcheck disable=SC2016 # literal source text, see above.

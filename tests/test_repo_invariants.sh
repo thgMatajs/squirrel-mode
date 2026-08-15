@@ -885,6 +885,27 @@ assert_eq "no" "$same_sentence_safe_caught" "sanity check: a /plugin verb and an
 # ================================================================================================
 NETWORK_COMMAND_REGEX="curl|wget|fetch|nc|ncat|netcat|socat|ssh|scp|sftp|ftp|tftp|telnet|rsync|ping|traceroute|tracepath|nslookup|dig|drill|whois|openssl|python|python3|perl|ruby|node|nodejs|php|lwp-request|lynx|w3m|links"
 
+# AN OPERAND IS NOT AN INVOCATION (added by the hard-link audit). `grep
+# -w` treats "-" as a word boundary, so a flag or operand that ENDS in a
+# listed name matches as though the command had been invoked. That is not
+# hypothetical: scripts/allow-checkpoint.sh's hard-link refusal calls
+# `find "$leaf" -links +1`, and `-links` matched the `links` text
+# browser, turning a POSIX `find` predicate into a reported network call.
+# There is no other spelling of that predicate - POSIX find offers only
+# `-links` - so the check is what was wrong.
+#
+# strip_operands removes every token that BEGINS with whitespace followed
+# by "-", before the word scan runs. Nothing real is lost, because no
+# command is ever invoked by a name starting with "-": the command name
+# is always the first token of a command, never one introduced by a
+# space-dash. `curl -s https://x` still reports `curl`; `lwp-request` is
+# untouched, because its hyphen is not preceded by whitespace and it is
+# the command name itself. Both directions are proved below, against real
+# scratch copies, rather than argued here.
+strip_operands() {
+  sed 's/[[:space:]]-[A-Za-z0-9][A-Za-z0-9-]*//g'
+}
+
 network_hits=""
 shipped_scripts=$(git -C "$repo_root" ls-files 'scripts/*.sh')
 shipped_scripts="$shipped_scripts
@@ -896,7 +917,7 @@ IFS='
 for f in $shipped_scripts; do
   [ -n "$f" ] || continue
   [ -f "$repo_root/$f" ] || continue
-  code_only=$(grep -vE '^[[:space:]]*#' "$repo_root/$f" 2>/dev/null || true)
+  code_only=$(grep -vE '^[[:space:]]*#' "$repo_root/$f" 2>/dev/null | strip_operands || true)
   if printf '%s\n' "$code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
     network_hits="$network_hits $f"
   fi
@@ -907,7 +928,7 @@ assert_eq "" "$network_hits" "no shipped script (scripts/*.sh, targets/*/install
 network_code_fixture="$glossary_avoid_scratch/network_code.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_code_fixture"
 printf '\ncurl https://example.com/exfiltrate >/dev/null 2>&1\n' >>"$network_code_fixture"
-fixture_code_only=$(grep -vE '^[[:space:]]*#' "$network_code_fixture" 2>/dev/null || true)
+fixture_code_only=$(grep -vE '^[[:space:]]*#' "$network_code_fixture" 2>/dev/null | strip_operands || true)
 if printf '%s\n' "$fixture_code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_code_fixture_caught=yes
 else
@@ -918,13 +939,57 @@ assert_eq "yes" "$network_code_fixture_caught" "FAILURE PROOF (invariant 10, cod
 network_comment_fixture="$glossary_avoid_scratch/network_comment.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_comment_fixture"
 printf '\n# example of what NOT to do: curl https://example.com/exfiltrate would be a network call\n' >>"$network_comment_fixture"
-fixture_comment_only=$(grep -vE '^[[:space:]]*#' "$network_comment_fixture" 2>/dev/null || true)
+fixture_comment_only=$(grep -vE '^[[:space:]]*#' "$network_comment_fixture" 2>/dev/null | strip_operands || true)
 if printf '%s\n' "$fixture_comment_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_comment_fixture_caught=yes
 else
   network_comment_fixture_caught=no
 fi
 assert_eq "no" "$network_comment_fixture_caught" "sanity check: the identical text placed inside a full-line comment must NOT be caught — this check scans CODE, not the prose that happens to describe an attack path (e.g. this very file's own '.ssh/id_rsa' comment, or allow-checkpoint.sh's identical comment)"
+
+# --- strip_operands must not become a way to smuggle a network call past
+#     this check. Two more fixtures, both against a real shipped script:
+#     a command that takes a flag (the flag is stripped, the COMMAND is
+#     still the first token and must still be reported), and a command
+#     whose own name contains a hyphen (nothing to strip, still reported).
+#     Without these, widening the scan to tolerate `find -links` would be
+#     an unproved loosening of the one invariant that keeps this plugin
+#     network-free.
+network_flag_fixture="$glossary_avoid_scratch/network_flag.sh"
+cp "$repo_root/scripts/allow-checkpoint.sh" "$network_flag_fixture"
+printf '\nnc -l 1234 >/dev/null 2>&1\n' >>"$network_flag_fixture"
+fixture_flag_only=$(grep -vE '^[[:space:]]*#' "$network_flag_fixture" 2>/dev/null | strip_operands || true)
+if printf '%s\n' "$fixture_flag_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_flag_fixture_caught=yes
+else
+  network_flag_fixture_caught=no
+fi
+assert_eq "yes" "$network_flag_fixture_caught" "FAILURE PROOF (invariant 10, operand stripping): a real network command invoked WITH a flag must still be caught - stripping ' -l' must never take the command name with it"
+
+network_hyphen_fixture="$glossary_avoid_scratch/network_hyphen.sh"
+cp "$repo_root/scripts/allow-checkpoint.sh" "$network_hyphen_fixture"
+printf '\nlwp-request -m GET https://example.com >/dev/null 2>&1\n' >>"$network_hyphen_fixture"
+fixture_hyphen_only=$(grep -vE '^[[:space:]]*#' "$network_hyphen_fixture" 2>/dev/null | strip_operands || true)
+if printf '%s\n' "$fixture_hyphen_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_hyphen_fixture_caught=yes
+else
+  network_hyphen_fixture_caught=no
+fi
+assert_eq "yes" "$network_hyphen_fixture_caught" "FAILURE PROOF (invariant 10, hyphenated command name): lwp-request must still be caught - its hyphen is not preceded by whitespace, so operand stripping must leave it whole"
+
+# And the case that motivated the change, asserted directly rather than
+# only through the real-repo scan above: a `find` predicate that ends in
+# a listed name is an OPERAND and must not be reported.
+network_operand_fixture="$glossary_avoid_scratch/network_operand.sh"
+# shellcheck disable=SC2016 # single-quoted deliberately: literal fixture source text, not substitution.
+printf '#!/bin/sh\nif [ -n "$(find "$1" -links +1 2>/dev/null)" ]; then\n  exit 1\nfi\n' >"$network_operand_fixture"
+fixture_operand_only=$(grep -vE '^[[:space:]]*#' "$network_operand_fixture" 2>/dev/null | strip_operands || true)
+if printf '%s\n' "$fixture_operand_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+  network_operand_fixture_caught=yes
+else
+  network_operand_fixture_caught=no
+fi
+assert_eq "no" "$network_operand_fixture_caught" "sanity check (invariant 10): \`find <file> -links +1\` is a POSIX predicate, not the \`links\` browser - this is the false positive that made the operand stripping necessary, and it is asserted here so a future change to the regex cannot silently reintroduce it"
 
 # --- 11. docs/ACCEPTANCE.md's probe-6 citation is the corrected one (S9 fix cycle 1, Y4) --------
 #
