@@ -2180,6 +2180,7 @@ Session off-token:
 Project checkpoint directory:
 Project checkpoint path:
 Hoard search command:
+Hoard directory:
 Project checkpoint files, newest first (session
 (more checkpoint files exist in that directory than are listed here - session
 Legacy checkpoint file:
@@ -2550,6 +2551,38 @@ Project checkpoint path: $checkpoint_file"
   if [ -n "$script_dir" ] && [ -f "$script_dir/hoard-search.sh" ]; then
     context="$context
 Hoard search command: $script_dir/hoard-search.sh"
+  fi
+
+  # THE HOARD DIRECTORY - the absolute path /squirrel:stash writes a
+  # memory to and /squirrel:dig reads one back from, through the Write,
+  # Edit and Read tools.
+  #
+  # HANDED OVER FOR THE REASON DECISION 1 GIVES ABOUT THE CHECKPOINT
+  # PATH, one paragraph of which is worth repeating because this line was
+  # missing for a whole phase: the model cannot compute these paths, so
+  # they are handed to it. Both skills used to spell this directory as
+  # `~/.squirrel/hoard/`, and scripts/allow-checkpoint.sh rejects a
+  # tool_input path that does not begin with "/" before it looks at
+  # anything else - measured: Write, Edit and Read all DEFER on the
+  # tilde form and all three are allowed with $HOME expanded. So the
+  # whole value of the auto-approval rested on the model expanding $HOME
+  # correctly and silently, which is the guess this project does not ask
+  # it to make anywhere else.
+  #
+  # GATED ON $home_dir AND NOTHING ELSE. Deliberately NOT on the
+  # directory existing: the first /squirrel:stash of a new install
+  # creates it, and a line that appeared only after the first memory was
+  # written would be absent exactly when it is first needed.
+  #
+  # Emitted beside the search-command line, below the "Session
+  # off-token:" line, and before the checkpoint list block, for the three
+  # reasons that block spells out immediately above. Its prefix is
+  # registered in SQUIRREL_RESERVED_LINE_PREFIXES, so a profile body
+  # spelling it is marked as profile text rather than reaching the model
+  # looking like this one.
+  if [ -n "$home_dir" ]; then
+    context="$context
+Hoard directory: $home_dir/.squirrel/hoard"
   fi
 
   # The enumerated list, newest first, optionally closed by the
