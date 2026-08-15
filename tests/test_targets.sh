@@ -2051,6 +2051,30 @@ assert_eq "0" "$plan_mutant_line_count" "FAILURE PROOF (scenario 33, PLAN.md): r
 #      no cell in the first four columns contains a `|` - they hold a
 #      command name in backticks and single characters.
 #
+#      NAMING WHAT THAT EXEMPTION LETS THROUGH, because "prose varies"
+#      was too kind a description of it. The Reason column is free text,
+#      but it is not free of FACTS: it is where both files explain what a
+#      command costs, and a cost is a number a reader acts on exactly as
+#      much as a ✅ is. A review mutated ONLY that column, in PLAN.md
+#      alone, to "A stash costs ZERO permission prompts on Claude Code" -
+#      false, and contradicted by docs/OTHER-TOOLS.md's own stash row and
+#      by README.md - and the whole suite closed green. Nothing in this
+#      scenario looked at the cell, and nothing anywhere else pinned that
+#      claim, so the exemption was covering a factual assertion and not a
+#      difference of length or audience.
+#
+#      The class is therefore: a PROMPT-COST claim about a command,
+#      written in the one column no cross-file check reads. Proof (d)
+#      below closes the shape the review actually produced - the two
+#      files may not say a stash costs zero or no permission prompts,
+#      which is the assertion the mutant fails - without pinning the
+#      wording around it. The residual is stated rather than implied: a
+#      cost claim spelled some other way ("free", "silently", a different
+#      command) still escapes, exactly as MARKER_REGEX cannot catch a
+#      marker spelled some new way. The pairing that would close the
+#      class outright is a cost claim carried in ONE place both files
+#      cite, and neither file is written that way today.
+#
 #      THE HEADING'S NUMBER IS PINNED TWICE, on purpose. Once across the
 #      two files (they must agree), and once against the table itself
 #      (the word must be the number of COMMANDS marked ❌ for both Codex
@@ -2190,6 +2214,52 @@ if cmp -s "$other_tools_doc" "$port_row_mutant"; then port_row_differs=no; else 
 assert_eq "yes" "$port_row_differs" "FAILURE PROOF (scenario 33b), control: the row deletion must genuinely change docs/OTHER-TOOLS.md"
 assert_eq "5" "$(port_unported_command_count "$port_row_mutant")" "FAILURE PROOF (scenario 33b): with the \`dig\` row deleted the derived count must fall to 5, so the 'six' in the heading no longer matches the table it describes"
 
+# --- The one factual class the free-form Reason column let through. See ---
+#     "NAMING WHAT THAT EXEMPTION LETS THROUGH" in this scenario's header
+#     for what this does and does not cover.
+port_reason_false_cost_hits() {
+  # port_reason_false_cost_hits <file> - prints every SENTENCE of <file> that
+  # names `stash` and also claims zero or no permission prompts. "Sentence" =
+  # newlines flattened to spaces, then split on `.`, the same construction
+  # tests/test_repo_invariants.sh's same-sentence scan uses and for the same
+  # reason: grep never sees across its own line boundaries, so a hit needs
+  # both anchors inside one chunk. That is what keeps docs/OTHER-TOOLS.md's
+  # TRUE sentence - the memory *write* costs no permission prompt, the
+  # command still costs one - out of this: it does not contain the word
+  # `stash`, which sits in the row's first cell, one chunk earlier.
+  tr '\n' ' ' <"$1" 2>/dev/null | tr '.' '\n' \
+    | grep -i 'stash' | grep -iE '(zero|no) permission prompts?'
+}
+
+assert_eq "" "$(port_reason_false_cost_hits "$plan_doc")" "PLAN.md must not claim a stash costs zero or no permission prompts - it costs one (README.md's command table, and docs/specs/2026-08-13-hoard-design.md section 12), and the Reason column of the table above is free text no other check reads"
+assert_eq "" "$(port_reason_false_cost_hits "$other_tools_doc")" "docs/OTHER-TOOLS.md must not claim it either - the same scan on the other side of the same table, so the guard cannot be satisfied by whichever file happens to stay honest"
+
+# --- Failure proof (d): the review's ACTUAL mutant. Only the Reason cell ---
+#     of PLAN.md's stash row is replaced, exactly as the review did it. Two
+#     things are asserted about it, and the second is the point: the new
+#     scan catches it, AND the four-column equality check above still
+#     PASSES on the same mutant - which is what proves this assertion is
+#     closing a real gap rather than duplicating a check that already fired.
+port_reason_mutant="$port_mutant_dir/PLAN-zero-cost.md"
+awk 'BEGIN { FS = "|"; OFS = "|" }
+  /^\| `stash` \| / {
+    print "| `stash` | ✅ | ❌ | ❌ | A stash costs ZERO permission prompts on Claude Code. |"
+    next
+  }
+  { print }
+' "$plan_doc" >"$port_reason_mutant"
+if cmp -s "$plan_doc" "$port_reason_mutant"; then port_reason_differs=no; else port_reason_differs=yes; fi
+assert_eq "yes" "$port_reason_differs" "FAILURE PROOF (scenario 33b, prompt cost), control: the Reason-cell mutation must genuinely change PLAN.md - if PLAN.md no longer carries a stash row in that shape, everything below passes for a reason nobody chose"
+if [ -n "$(port_reason_false_cost_hits "$port_reason_mutant")" ]; then port_reason_caught=yes; else port_reason_caught=no; fi
+assert_eq "yes" "$port_reason_caught" "FAILURE PROOF (scenario 33b, prompt cost): the review's own mutant - 'A stash costs ZERO permission prompts on Claude Code', in the Reason column and nowhere else - must be caught"
+if [ "$(extract_port_table "$port_reason_mutant")" = "$other_tools_port_table" ]; then
+  port_reason_table_still_matches=yes
+else
+  port_reason_table_still_matches=no
+fi
+assert_eq "yes" "$port_reason_table_still_matches" "FAILURE PROOF (scenario 33b, prompt cost), the gap itself: the four-column equality check must STILL PASS on that mutant. This is why the assertion above had to be added - the Reason column is truncated before comparison, so every other check in this scenario is green while the file publishes a false cost"
+assert_eq "$other_tools_port_word" "$(port_heading_word "$port_reason_mutant")" "FAILURE PROOF (scenario 33b, prompt cost), the gap itself: and the heading checks stay green on it too - the mutant touches nothing they read"
+
 # ==========================================================================
 # 34. [S9, PLAN.md Section 5: "Installs user-scoped; zero files written
 #     inside any project repository"] Running either installer from
@@ -2252,18 +2322,32 @@ assert_eq "$before34" "$after34u" "cursor install.sh --yes (install then uninsta
 #     (expect that one specifically absent, the other still present).
 # ==========================================================================
 readme_content_35=$(read_file "$readme_doc")
+# The symlink needle is the WHOLE clause, not the bare "never auto-approved"
+# it used to be. Since the hard-link refusal below became its own paragraph,
+# "never auto-approved" appears twice in README.md, and a mutant that deleted
+# the symlink paragraph would still contain the phrase - the proof at the
+# bottom of this scenario would then report clean while proving nothing.
+# shellcheck disable=SC2016 # single-quoted deliberately: the backtick is a literal Markdown character in README.md's text.
+symlink_pin_needle='checkpoints/` itself, or anywhere below it, is never auto-approved'
+# The two needles scenario 35a below pins, defined here because the symlink
+# proof further down asserts the hard-link paragraph SURVIVES its mutation.
+# shellcheck disable=SC2016 # single-quoted deliberately: literal Markdown backticks, not command substitution.
+hardlink_pin_needle='that some other name also points at is never auto-approved either'
+# shellcheck disable=SC2016 # ditto.
+hardlink_find_needle='the test needs `find` on `PATH`'
 assert_contains "$readme_content_35" "a symlink at" "README.md's checkpoint auto-approval disclosure must still name the ADR-0002 symlink trust boundary (S8-5)"
-assert_contains "$readme_content_35" "checkpoints/\` itself, or anywhere below it, is never auto-approved" "README.md's checkpoint auto-approval disclosure must still state that a symlink at or below checkpoints/ is never auto-approved (S8-5)"
+assert_contains "$readme_content_35" "$symlink_pin_needle" "README.md's checkpoint auto-approval disclosure must still state that a symlink at or below checkpoints/ is never auto-approved (S8-5)"
 assert_contains "$readme_content_35" "cap them at one checkpoint write per turn" "README.md's checkpoint auto-approval disclosure must still state the one-write-per-turn cap (S8-5)"
 
 symlink_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-symlink-pin-mutant.XXXXXX")
 cleanup_dirs="$cleanup_dirs $symlink_pin_mutant_dir"
 symlink_pin_mutant="$symlink_pin_mutant_dir/README.md"
 # shellcheck disable=SC2016 # single-quoted deliberately: literal sed pattern, not substitution.
-sed '/^The auto-approval only covers paths that genuinely resolve inside that directory/,/^normal permission prompt instead of being silently redirected through the symlink\.$/d' "$readme_doc" >"$symlink_pin_mutant"
+sed '/^The auto-approval decides about the path as a \*\*name\*\*/,/^normal permission prompt instead of being silently redirected through the symlink\.$/d' "$readme_doc" >"$symlink_pin_mutant"
 symlink_pin_mutant_content=$(read_file "$symlink_pin_mutant")
-if printf '%s' "$symlink_pin_mutant_content" | grep -qF "never auto-approved"; then symlink_pin_removed=no; else symlink_pin_removed=yes; fi
+if printf '%s' "$symlink_pin_mutant_content" | grep -qF "$symlink_pin_needle"; then symlink_pin_removed=no; else symlink_pin_removed=yes; fi
 assert_eq "yes" "$symlink_pin_removed" "FAILURE PROOF (scenario 35, symlink boundary): deleting that paragraph from a scratch copy of README.md must remove the pinned text"
+assert_contains "$symlink_pin_mutant_content" "$hardlink_pin_needle" "FAILURE PROOF (scenario 35, symlink boundary): deleting the SYMLINK paragraph alone must leave the hard-link paragraph standing - the two refusals are separate facts and one must not cover for the other"
 assert_contains "$symlink_pin_mutant_content" "cap them at one checkpoint write per turn" "FAILURE PROOF (scenario 35, symlink boundary): deleting the symlink-boundary paragraph alone must leave the SEPARATE one-write-per-turn sentence untouched (proving the two pins are independent, not one accidentally covering for the other)"
 
 perturn_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-perturn-pin-mutant.XXXXXX")
@@ -2273,7 +2357,57 @@ sed '/^The base rules that trigger these writes also cap them at one checkpoint 
 perturn_pin_mutant_content=$(read_file "$perturn_pin_mutant")
 if printf '%s' "$perturn_pin_mutant_content" | grep -qF "cap them at one checkpoint write per turn"; then perturn_pin_removed=no; else perturn_pin_removed=yes; fi
 assert_eq "yes" "$perturn_pin_removed" "FAILURE PROOF (scenario 35, per-turn cap): deleting that sentence from a scratch copy of README.md must remove the pinned text"
-assert_contains "$perturn_pin_mutant_content" "never auto-approved" "FAILURE PROOF (scenario 35, per-turn cap): deleting the one-write-per-turn sentence alone must leave the SEPARATE symlink-boundary paragraph untouched (proving the two pins are independent)"
+assert_contains "$perturn_pin_mutant_content" "$symlink_pin_needle" "FAILURE PROOF (scenario 35, per-turn cap): deleting the one-write-per-turn sentence alone must leave the SEPARATE symlink-boundary paragraph untouched (proving the two pins are independent)"
+
+# ==========================================================================
+# 35a. [hard-link fix] The SECOND exception, which this disclosure claimed
+#      did not exist.
+#
+#      README.md used to open this paragraph with "The auto-approval only
+#      covers paths that genuinely resolve inside that directory" and then
+#      name the symlink as the single exception. The hard-link refusal
+#      (scripts/allow-checkpoint.sh Layer 2b, shipped in this same branch)
+#      falsified both halves at once: a hard link inside checkpoints/ IS a
+#      path that genuinely resolves inside the directory, and it is not
+#      auto-approved. One sentence enumerating one exception where there
+#      are two is exactly the shape scenario 35 above exists to stop, so
+#      the second exception gets the same treatment as the first.
+#
+#      Three pins, each proved by deleting what it pins:
+#        1. README states there IS a hard-link refusal.
+#        2. README states its LIMIT - the check needs `find` on PATH, and
+#           without it the hard link is auto-approved again. A refusal
+#           published without the condition it depends on is the
+#           overstated guarantee this repo keeps having to retract.
+#        3. It is pinned against the hook that has to actually implement
+#           it, so README cannot go on claiming a refusal that
+#           scripts/allow-checkpoint.sh stopped making (invariant 6e,
+#           the same cross-file shape as scenario 35b's pin 2).
+# ==========================================================================
+assert_contains "$readme_content_35" "$hardlink_pin_needle" "README.md's checkpoint auto-approval disclosure must name the hard-link refusal: a hard link resolves inside the directory and is still not auto-approved, so a disclosure naming only the symlink enumerates one exception where there are two"
+assert_contains "$readme_content_35" "$hardlink_find_needle" "README.md must also state the hard-link refusal's LIMIT - it needs \`find\` on PATH and does not run without it (docs/adr/0008-hoard-auto-allow.md:65-72, tests/test_hooks.sh HOARD-14e) - because a refusal published without its precondition is a guarantee wider than the code makes"
+assert_contains "$(read_file "$repo_root/scripts/allow-checkpoint.sh")" "-links +1" "scripts/allow-checkpoint.sh must actually carry the link-count test, or README.md's hard-link disclosure is claiming a refusal that no longer exists (cross-file agreement, invariant 6e)"
+
+hardlink_pin_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-hardlink-pin-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $hardlink_pin_mutant_dir"
+
+hardlink_pin_mutant="$hardlink_pin_mutant_dir/README-hardlink.md"
+sed '/^The second is a hard link, and it is the reason the sentence above says/,/records that limit)\.$/d' "$readme_doc" >"$hardlink_pin_mutant"
+if cmp -s "$readme_doc" "$hardlink_pin_mutant"; then hardlink_pin_differs=no; else hardlink_pin_differs=yes; fi
+assert_eq "yes" "$hardlink_pin_differs" "FAILURE PROOF (scenario 35a), control: deleting the hard-link paragraph must genuinely change README.md - a sed that matched nothing would leave a byte-identical copy and turn the proof below into a second copy of the passing test"
+hardlink_pin_mutant_content=$(read_file "$hardlink_pin_mutant")
+if printf '%s' "$hardlink_pin_mutant_content" | grep -qF "$hardlink_pin_needle"; then hardlink_pin_removed=no; else hardlink_pin_removed=yes; fi
+assert_eq "yes" "$hardlink_pin_removed" "FAILURE PROOF (scenario 35a): deleting that paragraph from a scratch copy of README.md must remove the pinned text"
+assert_contains "$hardlink_pin_mutant_content" "$symlink_pin_needle" "FAILURE PROOF (scenario 35a): deleting the HARD-LINK paragraph alone must leave the symlink-boundary paragraph standing (proving the two pins are independent, not one accidentally covering for the other)"
+
+hardlink_find_mutant="$hardlink_pin_mutant_dir/README-hardlink-find.md"
+grep -vF "$hardlink_find_needle" "$readme_doc" >"$hardlink_find_mutant"
+if cmp -s "$readme_doc" "$hardlink_find_mutant"; then hardlink_find_differs=no; else hardlink_find_differs=yes; fi
+assert_eq "yes" "$hardlink_find_differs" "FAILURE PROOF (scenario 35a, find limit), control: the deletion must genuinely change README.md"
+hardlink_find_mutant_content=$(read_file "$hardlink_find_mutant")
+if printf '%s' "$hardlink_find_mutant_content" | grep -qF "$hardlink_find_needle"; then hardlink_find_removed=no; else hardlink_find_removed=yes; fi
+assert_eq "yes" "$hardlink_find_removed" "FAILURE PROOF (scenario 35a, find limit): dropping the line that states the \`find\` dependency must remove the pinned text - README would then publish the refusal without the one condition that switches it off"
+assert_contains "$hardlink_find_mutant_content" "$hardlink_pin_needle" "FAILURE PROOF (scenario 35a, find limit): dropping the limit alone must leave the refusal claim itself standing (proving the two pins are independent)"
 
 # ==========================================================================
 # 35b. Same disclosure, the half about which TOOL writes a checkpoint.
@@ -2281,7 +2415,7 @@ assert_contains "$perturn_pin_mutant_content" "never auto-approved" "FAILURE PRO
 #      README used to disclose a live gap here: the auto-approval covers
 #      Write|Edit|Read, and the base rule that keeps a checkpoint current
 #      named no tool at all, so the model could reach for a Bash heredoc
-#      no hook can auto-approve. Commit cecbd7c closed it - rule 14 now
+#      this plugin registers no hook for. Commit cecbd7c closed it - rule 14 now
 #      names the `Read` and `Write` tools (pinned at the rule's own end by
 #      tests/test_base_rules.sh scenario 36, which also pins PLAN.md's
 #      copy). README now says so, which makes it the THIRD file carrying
@@ -2307,7 +2441,7 @@ base_rules_content_35b=$(read_file "$repo_root/rules/base-rules.md")
 
 assert_contains "$readme_content_35" "$readme_tools_needle" "README.md's checkpoint auto-approval disclosure must state that the base rule names the Read and Write tools - that is what closed the Bash-heredoc gap this paragraph used to disclose as open"
 assert_contains "$base_rules_content_35b" "$readme_tools_needle" "rules/base-rules.md must actually name those two tools, or README.md's disclosure is claiming a closure that no longer exists (cross-file agreement, invariant 6e)"
-assert_contains "$readme_content_35" "$readme_unenforced_needle" "README.md must keep saying the tool naming is an INSTRUCTION and not enforcement - a model can still reach for a Bash heredoc, and no hook can auto-approve one, so 'names the tools' must never be read as 'cannot happen'"
+assert_contains "$readme_content_35" "$readme_unenforced_needle" "README.md must keep saying the tool naming is an INSTRUCTION and not enforcement - a model can still reach for a Bash heredoc, and this plugin registers no hook that would run on one, so 'names the tools' must never be read as 'cannot happen'"
 
 readme_35b_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-tools-pin-mutant.XXXXXX")
 cleanup_dirs="$cleanup_dirs $readme_35b_mutant_dir"

@@ -180,19 +180,39 @@ scan this section defends is most of what a search spends. Re-measured independe
 machine — the real `scripts/hoard-search.sh` run whole, and again cut short after the two `set --`,
 after the prescan, and after awk, so every phase is timed inside one run, in one locale, against one
 fixture — the totals reproduce and the attribution does not. The totals came back 42, 81 and 159 ms
-at the three sizes. At the 2000-memory size the phases are about **41 ms** expanding the two globs,
-**29 ms** in the prescan that keeps a FIFO or a broken symlink away from awk, **84 ms** in awk, and
-about 2 ms in the trailing `sort | head | read` loop. The awk pass is about half of the run, not the 71% the old
-number implied, and the shell's own enumeration of the files is most of the other half.
+at the three sizes. At the 2000-memory size the awk pass is **about half** of the run rather than the
+71% the old 110-of-155 figure implied, and the shell's own enumeration — the two glob expansions plus
+the prescan that keeps a FIFO or a broken symlink away from awk — is most of the other half. The
+trailing `sort | head | awk` formatter is a rounding error beside either of them.
 
-**Half is not a property of the design either.** On the same fixture, the same run and the same
-machine, `mawk` does that pass in about 53 ms and `gawk` in about 114 ms — a third to two thirds of
-the same 159 ms — so which awk the machine ships decides the share more than the design does.
-(Locale moves it too: the glob expansion is locale-collated, so under `LC_ALL=C` it drops from about
-41 ms to under 2 ms, the total to about 112 ms, and awk's share rises to about 85%. The numbers above
-are from the ambient `pt_BR.UTF-8`, which is the condition the published totals were taken in, with
-the awk macOS ships — version 20200816.) What *is* a property of the design is that every search
-reads every file, so both the enumeration and the parse grow with the number of memories.
+**The per-phase split that stood here has been withdrawn, and it is not replaced.** This paragraph
+used to give a millisecond figure for each of those four phases. An independent re-run of the same
+cuts, on the same machine, did not reproduce them: it put the prescan consistently *above* the glob
+expansion at every size tried, where the published figures had it comfortably below. The two runs
+cannot be reconciled from what was written down, because this section never recorded the parameter
+that separates them — the length of the fixture's paths. `scripts/hoard-search.sh`'s own measurement
+block states that dependence in as many words for the timings it publishes there: the same 2000
+files and the same loop cost 14.67 s under a directory making each path 176 bytes and 24.08 s at 292.
+Neither the glob expansion nor the prescan is any less sensitive to it than that loop was. A split a
+third party cannot reproduce from the method as published is not a measurement, so this section now
+publishes the one ratio two independent runs agree on — awk is about half — and stops there. The same
+gap bounds how far the totals above travel, which is why they are stated as one machine's numbers at
+three sizes and never as a property of the design.
+
+**Half is not a property of the design either.** Which awk the machine ships decides that share more
+than anything in the design does. Swapping the system awk for `mawk` and for `gawk` on the same
+fixture moves the pass in both directions, and far enough to cross the halfway line: both runs that
+tried it agree that under `mawk` the frontmatter pass is a minority of a search and under `gawk` it is
+the majority of one. No millisecond figures are published for those two, for the same reason the
+split above is not. (Locale moves it too, in one identified place: the glob expansion is
+locale-collated, so `LC_ALL=C` makes it markedly cheaper, and whatever it saves there raises awk's
+share of what is left. The totals above are from the ambient `pt_BR.UTF-8`, which is the condition
+they were taken in, with the awk macOS ships — version 20200816. An earlier draft of this parenthesis
+put the `LC_ALL=C` total at about 112 ms and awk's share at about 85%; those two do not agree with
+each other — the 84 ms that draft gave for awk is 75% of its own 112 ms — and an independent re-run
+reproduced neither, so both are withdrawn rather than adjusted.) What *is* a
+property of the design is that every search reads every file, so both the enumeration and the parse
+grow with the number of memories.
 
 The paragraph below is the same kind of correction one level up, and the two are worth reading
 together: the first measurement corrected which *component* dominated, this one corrects the split
