@@ -115,7 +115,7 @@ assert_eq "yes" "$semver_ok" "plugin.json .version ('$plugin_version') must matc
 # an agent tidying a manifest, a stray rebase, a half-finished release -
 # has nothing to move it, and turns red here instead of shipping a
 # version number nobody chose.
-EXPECTED_PLUGIN_VERSION="0.5.0"
+EXPECTED_PLUGIN_VERSION="0.6.0"
 assert_eq "$EXPECTED_PLUGIN_VERSION" "$plugin_version" "plugin.json .version must be the released version this test pins. If you are cutting a release, update EXPECTED_PLUGIN_VERSION in tests/test_manifests.sh in the SAME commit as the bump - that edit is the acknowledgement this check asks for. If you did not mean to change the version, revert it"
 
 # 5. plugin.json .license is MIT.
