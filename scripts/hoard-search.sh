@@ -24,8 +24,8 @@
 # WHICH MAKES EVERY SILENT DROP A DEFECT, not a tolerance. If a store
 # that holds memories can answer like a store that holds none, the user
 # cannot tell the two apart, and this file is the only thing that could
-# have told them. Six ways it did exactly that have been fixed rather
-# than accepted - a regular file awk cannot open, a CRLF or a BOM
+# have told them. The ways it did exactly that have been fixed rather
+# than accepted, not tolerated - a regular file awk cannot open, a CRLF or a BOM
 # anywhere in the frontmatter, whitespace on either side of a key or a
 # value, a one-character search term thrown away for being one character
 # long, and a query whose terms really were all discarded - each one
@@ -441,13 +441,15 @@ function is_finite(v,   t) {
   #
   # THE TWO IDIOMS THAT ANSWER THIS EVERYWHERE ELSE BOTH FAIL ON THE awk
   # macOS SHIPS, which is the awk most users of this plugin will run.
-  # Measured on version 20200816, gawk 5 and mawk 1.3, same expressions,
-  # same values:
+  # Measured on the three this project meets, each named from what its own
+  # version flag printed rather than from memory - awk version 20200816
+  # (macOS 26.5.2), GNU Awk 5.4.1 and mawk 1.3.4 20260302 - same
+  # expressions, same values:
   #
   #     v = "nan" + 0      v >= 1     v != v     sprintf("%.1f", v)
-  #     macOS awk              1          0      "nan"
-  #     gawk                   0          0      "0.0"   (reads "nan" as 0)
-  #     mawk                   0          0      "0.0"   (reads "nan" as 0)
+  #     awk 20200816           1          0      "nan"
+  #     GNU Awk 5.4.1          0          0      "0.0"   (reads "nan" as 0)
+  #     mawk 1.3.4             0          0      "0.0"   (reads "nan" as 0)
   #
   # So on the one awk that produces a nan at all, a nan compares as
   # GREATER THAN OR EQUAL TO 1 and is EQUAL TO ITSELF. Negating the range
@@ -457,9 +459,9 @@ function is_finite(v,   t) {
   # library on all three and neither an infinity nor a nan can be spelled
   # with digits. `%.1f` of a finite double is always `-?<digits>.<digit>`;
   # of the others it is "nan", "inf", "+inf" or "-inf", all of which fail
-  # this pattern on all three awks. Checked, all three, both directions -
-  # including 1e300, which formats as three hundred digits and correctly
-  # reads as finite.
+  # this pattern on all three of those awks. Checked on all three, both
+  # directions - including 1e300, which formats as three hundred digits and
+  # correctly reads as finite.
   t = sprintf("%.1f", v)
   return (t ~ /^-?[0-9]+\.[0-9]$/)
 }

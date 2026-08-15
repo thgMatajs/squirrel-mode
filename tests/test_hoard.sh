@@ -1937,10 +1937,13 @@ assert_eq "yes" "$mut21_noisy" "FAILURE PROOF (21): and a term with a real newli
 # 22. A QUERY WHOSE TERMS WERE ALL DISCARDED IS NOT A QUERY WITH NO
 #     TERMS.
 #
-#     The tokeniser drops one-character tokens and a small stopword list,
-#     and it replaces every byte that is not an ASCII letter or digit
-#     with a space - so an accented short word comes apart into
-#     one-character pieces and nothing survives. With no terms surviving,
+#     The tokeniser drops a small stopword list, and it replaces every
+#     byte that is not an ASCII letter or digit with a space - so an
+#     accented short word comes apart into one-character pieces, and those
+#     pieces are dropped as fragments of a word it cannot spell. (A
+#     one-character term the user actually TYPED is kept; that is the
+#     other half of this scenario and the distinction the fixture below
+#     exists to hold apart.) With no terms surviving,
 #     the reader used to answer as though the user had asked for nothing
 #     at all, and hand back the top of the store: the user asked about
 #     one thing and got a list that had nothing to do with it, scored and
@@ -2586,13 +2589,20 @@ out28q=$(run_search "$home28" -- "paths")
 assert_contains "$out28q" "a memory under a home with an apostrophe" "and a real query must work there too, so the acceptance covers the ordinary path and not just the empty one"
 
 # ==========================================================================
-# 29. FOUR CLAIMS scripts/hoard-search.sh MADE ABOUT ITSELF THAT WERE NOT
+# 29. TWO CLAIMS scripts/hoard-search.sh MADE ABOUT ITSELF THAT WERE NOT
 #     TRUE, each replaced by what was measured.
 #
-#     Two of them are the kind that outlive their fixture and get copied
-#     into a document; two describe behaviour a reader would rely on and
-#     be wrong about. All four are pinned as SENTENCES rather than as
-#     numbers or words, for the reason scenario 27 gives.
+#     These two are pinned as SENTENCES, for the reason scenario 27 gives:
+#     one is a number that outlives its fixture and gets copied into a
+#     document, the other describes behaviour a reader would rely on and
+#     be wrong about, and neither has any behaviour of its own to assert.
+#
+#     TWO MORE COMMENTS WERE FALSE IN THE SAME ROUND and are NOT pinned
+#     here, because they have behaviour and are pinned by it instead: the
+#     "finite by construction" claim about the ordering key is held by
+#     scenarios 23 and 23d, and the claim that a leading space on a key
+#     was left untrimmed deliberately is held by 18d. A sentence needle on
+#     top of those would be a second guard on one fact.
 # ==========================================================================
 # (i) The awk pass at 2000 memories. docs/specs/2026-08-13-hoard-design.md
 #     §5.1 and README.md both now say the "110 of 155" split was published
