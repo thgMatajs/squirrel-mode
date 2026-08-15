@@ -221,21 +221,56 @@ assert_exit_code() {
 # under some other prefix leaks silently, exactly as the four fixed here
 # did. The prefix is the contract; keep to it.
 #
+# NARROW IS ALSO WHAT KEEPS THIS PAIR CHEAP, and that is the second
+# reason it is not negotiable. Both loops below hand the shell a pattern
+# that already carries the prefix, so it expands this suite's own
+# scratch and nothing else. The form they replaced expanded EVERY entry
+# $TMPDIR holds and sorted the names out afterwards, which billed this
+# guard for the user's junk drawer rather than for anything the suite
+# created - and billed it QUADRATICALLY, because appending one path at a
+# time to a shell string makes macOS's /bin/sh (bash 3.2) copy the whole
+# string on every append. Measured in one shell, on entries this suite
+# never made: 1.81 s at 2000 of them, 27.58 s at 8000, 174.12 s at
+# 20000. The $TMPDIR of the machine this was written on holds 176299
+# entries, and one run of tests/test_skills.sh against a 20000-entry
+# $TMPDIR took 383.96 s with the wide walk against 1.08 s with these
+# two - same file, the same 307 assertions, the same verdict. 1.05 s of
+# that second figure is what the file costs on an EMPTY $TMPDIR, so what
+# the narrowing bought back is very nearly the whole of it.
+#
+# scripts/hoard-search.sh carries the identical mechanism under the
+# heading "THE PER-FILE FORM IS QUADRATIC"; read the two together,
+# because this one arrived INSIDE the guard written one round earlier to
+# stop scratch mess. The shape that costs is deliberately not spelled
+# out anywhere in this file: tests/test_shell_dialect.sh greps THIS file
+# for it, and a guard its own subject's comment satisfies is a guard
+# that cannot fail.
+#
 # Called BEFORE the trap fires (the last assertions in a file), so the
 # paths still exist: what is asserted is that each is on the list the
 # trap will remove, not that it is already gone.
 scratch_snapshot() {
-  # scratch_snapshot - the entries $TMPDIR holds right now, as
-  # "|path|path|...|" for a substring test. Nothing else in this harness
-  # needs the format, so it is a private one rather than a newline list:
-  # `case` can test it with no subshell, no temp file, and no dependence
-  # on how a path sorts.
-  ss_out="|"
-  for ss_e in "${TMPDIR:-/tmp}"/*; do
+  # scratch_snapshot - the `squirrel-` entries $TMPDIR holds right now,
+  # as "|path|path|...|" for a substring test. Nothing else in this
+  # harness needs the format, so it is a private one rather than a
+  # newline list: `case` can test it with no subshell, no temp file, and
+  # no dependence on how a path sorts.
+  #
+  # STREAMED, NEVER ACCUMULATED. Each path goes straight to this
+  # function's standard output, which every caller is already capturing
+  # with `$( )`, so the cost is linear in what it prints and this
+  # function assigns nothing at all. Growing a variable instead would
+  # keep the copy-per-append above alive on the one list that can still
+  # grow here - the suite's own leftover scratch, which is reachable:
+  # interrupting a run leaves it behind, and one run left 443 paths
+  # before the structural fix described above. Both forms were timed on
+  # 20000 planted `squirrel-` entries, each printing the identical
+  # 3260001 characters: 0.80 s streamed, 392.47 s accumulated.
+  printf '|'
+  for ss_e in "${TMPDIR:-/tmp}"/squirrel-*; do
     [ -e "$ss_e" ] || continue
-    ss_out="$ss_out$ss_e|"
+    printf '%s|' "$ss_e"
   done
-  printf '%s' "$ss_out"
 }
 
 assert_no_scratch_leak() {
@@ -248,17 +283,16 @@ assert_no_scratch_leak() {
   ansl_scheduled=$2
   ansl_message=$3
   ansl_leaked=""
-  for ansl_e in "${TMPDIR:-/tmp}"/*; do
+  # This suite's scratch, by the prefix every mktemp template here uses,
+  # selected by the pattern itself rather than by testing each name the
+  # directory happens to hold - see the header above both for what
+  # judging only these gives up and for what walking the whole directory
+  # cost. An unmatched glob stays literal in POSIX sh and the literal
+  # names no file, which is what the `[ -e ]` below drops; it is also
+  # why no separate test of the name survives here, since one that
+  # could never say no is a guard that cannot fail.
+  for ansl_e in "${TMPDIR:-/tmp}"/squirrel-*; do
     [ -e "$ansl_e" ] || continue
-    case "${ansl_e##*/}" in
-      squirrel-*)
-        # This suite's scratch, by the prefix every mktemp template here
-        # uses. See the header above for what judging only these gives up.
-        ;;
-      *)
-        continue
-        ;;
-    esac
     case "$ansl_before" in
       *"|$ansl_e|"*)
         # Already there before this file ran - not ours.
