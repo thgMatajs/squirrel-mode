@@ -632,7 +632,7 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
 | Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no | no |
 
-**Which commands port, and why the other four cannot.**
+**Which commands port, and why the other six cannot.**
 
 | Command | Claude Code | Codex | Cursor | Reason |
 | :-- | :-- | :-- | :-- | :-- |
@@ -642,6 +642,8 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | `tune` | ✅ | ✅ | ❌ | Same as `init`. |
 | `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
 | `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
+| `stash` | ✅ | ❌ | ❌ | Not built for either target in phase 1 of the hoard, and porting it is a rewrite rather than a copy. It writes a memory with Claude Code's `Write` tool, named explicitly because that is what the `PreToolUse` hook auto-approves. Neither other target has that tool name or that auto-approval, so every sentence resting on the mechanism has to be rewritten. The files themselves are plain markdown under `~/.squirrel/hoard/`, readable from anywhere. |
+| `dig` | ✅ | ❌ | ❌ | Same, plus one more reason: its rules for telling squirrel-mode's own injected lines from a profile that copies them are about lines a `SessionStart` hook puts in context, and neither other target has a lifecycle hook to put them there. It also names the `Read` tool for the same auto-approval reason `stash` names `Write`. |
 | `rules` | ✅ | ❌ | ❌ | Pulls the base rules back into one conversation after the forced output style has been turned off. Neither other target has an output style to turn off, so there is nothing to recover from: the rules are a block in `AGENTS.md` or a `.mdc` file, restored by editing the file, not by a command. |
 
 One consequence worth stating plainly in `docs/OTHER-TOOLS.md`: because all three targets read the
