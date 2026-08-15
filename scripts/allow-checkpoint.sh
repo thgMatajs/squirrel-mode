@@ -211,15 +211,31 @@
 # easy to miss for anyone reasoning from the tests rather than from the
 # filesystem.
 #
-# THE TEST IS LINK COUNT, AND IT CANNOT BAR CORRECT WORK. Every file
-# either root legitimately holds is created by one Write from this
-# plugin's own flow and has exactly one name. A leaf that does not exist
-# yet has no link count at all and is not tested. A directory is not
-# tested either - directories always carry at least two links, so testing
-# them would defer the legitimate `Read` of a checkpoint's per-project
-# directory for a reason unrelated to this attack. What is left is the
-# one shape with no legitimate producer: an existing regular file inside
-# a governed root that some other name also points at.
+# THE TEST IS LINK COUNT, AND WHAT IT COSTS IS ONE PROMPT ON A
+# DEDUPLICATED STORE (CORRECTED, cycle 2). Every file either root
+# legitimately holds is created by one Write from this plugin's own flow,
+# and NOTHING THIS PLUGIN DOES gives it a second name. That is a property
+# of the plugin. It is not a property of the user's filesystem, and the
+# sentence here used to claim the stronger thing - "has exactly one name,
+# so this is a guard with no correct traffic behind it". A filesystem-wide
+# deduplicator breaks it without any attack: `jdupes -L`,
+# `rdfind -makehardlinks` and `hardlink(1)` all replace duplicate files
+# with hard links, and two identical memories - or a memory and its own
+# copy elsewhere - become one inode with two names, BOTH of them inside
+# the governed root. Every later read or rewrite of such a file then costs
+# one permission prompt. That is the honest cost of this layer: not zero,
+# but one prompt per deduplicated file, never a denial, on a machine whose
+# owner ran a deduplicator. Two neighbouring cases were checked and are
+# NOT affected: an APFS clone (`cp -c`) leaves nlink at 1, and a directory
+# is never tested at all.
+#
+# A leaf that does not exist yet has no link count and is not tested. A
+# directory is not tested either - directories always carry at least two
+# links, so testing them would defer the legitimate `Read` of a
+# checkpoint's per-project directory for a reason unrelated to this
+# attack. What is left is the one shape with no producer inside this
+# plugin: an existing regular file inside a governed root that some other
+# name also points at.
 #
 # THE COST, AND THE ESCAPE HATCH THIS FILE TOOK. There is no way to read
 # a link count from POSIX `sh` without an external command; `[ ]` has no
@@ -227,13 +243,43 @@
 # is the narrowest one available (no output parsing, no `stat`, whose
 # flags are not portable between BSD and GNU). The tech-lead rule for
 # this file is that the `allow` path may take one more command - it
-# already REQUIRES `jq` - while the defer path may take none, so the test
-# is placed after every other decision, where the answer would otherwise
-# already be `allow`. With `find` absent from PATH the layer does not run
-# and the hard link is auto-approved again; that limit is recorded here,
-# in docs/adr/0008-hoard-auto-allow.md, and asserted by tests/
-# test_hooks.sh HOARD-14e, which runs the real hook on a PATH holding
-# only jq and cat and pins the `allow` it produces.
+# already REQUIRES `jq` - while the defer path may take no NEW one, so
+# the test is placed after every other decision, where the answer would
+# otherwise already be `allow`. With `find` absent from PATH the layer
+# does not run and the hard link is auto-approved again; that limit is
+# recorded here, in docs/adr/0008-hoard-auto-allow.md, and asserted by
+# tests/test_hooks.sh HOARD-14e, which runs the real hook on a PATH
+# holding only jq, cat and grep - grep is there deliberately, because
+# HOARD-14e's isolation assertion needs the secret refusal to still work
+# - and pins the `allow` it produces.
+#
+# WHAT "THE DEFER PATH TAKES NO NEW COMMAND" MEANS, MEASURED (CORRECTED,
+# cycle 2). It does not mean a defer is free of processes, and the
+# sentence that used to sit here implied that. Counted with shims that
+# log every invocation, on this file as it stands:
+#
+#   over MAX_PAYLOAD_LEN     defer   1 cat
+#   `..` component           defer   1 cat, 2 jq
+#   outside both roots       defer   1 cat, 2 jq
+#   symlink component        defer   1 cat, 2 jq
+#   credential in the body   defer   1 cat, 4 jq, 1 grep
+#   hard link, Read          defer   1 cat, 2 jq, 1 find
+#   hard link, Write         defer   1 cat, 4 jq, 2 grep, 1 find
+#   allow, leaf absent       allow   1 cat, 4 jq, 2 grep
+#   allow, leaf present      allow   1 cat, 4 jq, 2 grep, 1 find
+#
+# `input=$(cat)` runs on every call before any decision, and the two
+# field extractions run `jq`. The true and narrow claim, and the only one
+# Layer 2b's placement buys, has to be stated with its enumeration
+# attached: EVERY DEFER DECIDED BEFORE LAYER 2B - the five classes above
+# the rule - SPAWNS NO `find`. `find` runs only after every other layer
+# has already said `allow`, and only when the leaf already exists. The
+# sixth and seventh rows are the exception and they are not a leak in the
+# claim: THAT defer is Layer 2b's own, and it is produced BY the `find`,
+# exactly as the credential defer is produced by a `grep`. Writing the
+# claim without its enumeration - "no find on any defer" - is false for
+# precisely those two rows, which is the same shape of overstatement this
+# paragraph exists to correct. HOARD-14f asserts every row.
 #
 # WHY A HARD LINK IS NOT ALSO REJECTED ABOVE THE LEAF: it cannot be
 # there. POSIX forbids hard links to directories, so every component
@@ -1218,9 +1264,9 @@ decide() {
   # literal string, and every occurrence of the identifier (which
   # includes the one line that assigns it, not only the uses of it).
   #
-  #   rename-cost literal-occurrences: 119
-  #   rename-cost identifier-occurrences: 187
-  #   rename-cost test-file-lines: 9299
+  #   rename-cost literal-occurrences: 121
+  #   rename-cost identifier-occurrences: 193
+  #   rename-cost test-file-lines: 9718
   checkpoints_dir=$(normalize_path "$home_dir/.squirrel/checkpoints") || checkpoints_dir="$home_dir/.squirrel/checkpoints"
   hoard_dir=$(normalize_path "$home_dir/.squirrel/hoard") || hoard_dir="$home_dir/.squirrel/hoard"
 
@@ -1342,15 +1388,29 @@ decide() {
   # reproduction).
   #
   # PLACED LAST, DELIBERATELY, AND THAT PLACEMENT IS THE WHOLE REASON
-  # THIS IS AFFORDABLE. It is the only test in this file that spawns a
-  # process, and it runs ONLY where the answer would otherwise already be
-  # `allow`: every defer above - a `..` component, an over-cap path, a
-  # path outside both roots, a symlink, a credential - is reached without
-  # it. `jq` is already a hard requirement of this exact path (no `jq`,
-  # no `allow`, ever - see the header), so one more command HERE costs a
-  # path that already pays for one; one more command on the defer path
-  # would have been a new cost on every file operation in the session,
-  # and is not what this is.
+  # THIS IS AFFORDABLE. It runs ONLY where the answer would otherwise
+  # already be `allow`: every defer above - a `..` component, an over-cap
+  # path, a path outside both roots, a symlink, a credential - is reached
+  # WITHOUT SPAWNING `find`. `jq` is already a hard requirement of this
+  # exact path (no `jq`, no `allow`, ever - see the header), so one more
+  # command HERE costs a path that already pays for one; one more command
+  # on the defer path would have been a new cost on every file operation
+  # in the session, and is not what this is.
+  #
+  # (CORRECTED, cycle 2. This paragraph used to open "It is the only test
+  # in this file that spawns a process", which is false three times over:
+  # `input=$(cat)` at the top of decide() spawns one on EVERY call before
+  # any decision is taken, both field extractions spawn `jq`, and
+  # payload_has_secret spawns `grep` - twice on an allowed hoard write,
+  # once on a credential defer, which is a defer PRODUCED BY a spawned
+  # process. The measured per-path table is in this file's header, beside
+  # "THE COST, AND THE ESCAPE HATCH THIS FILE TOOK". What is true, and is
+  # all that this placement ever bought, is the sentence above WITH its
+  # enumeration attached: every defer decided BEFORE this rule spawns no
+  # `find`. Dropping the enumeration - "no `find` on any defer" - would be
+  # false, because THIS rule's own defer is produced by a `find`, exactly
+  # as the credential defer is produced by a `grep`. A correction that
+  # over-reaches is the defect it was correcting.)
   #
   # `[ -f ]` FIRST, for two reasons and not only for the spawn it saves.
   # A leaf that does not exist yet - the ordinary case for a brand-new
@@ -1377,9 +1437,50 @@ decide() {
   # `stat`, whose flags differ between BSD and GNU. `find` is already in
   # this repo's shipped-command inventory (docs/ACCEPTANCE.md), so this
   # adds a command to one path, not a dependency to the plugin.
+  #
+  # THE OUTPUT MUST BE WELL FORMED, NOT MERELY NON-EMPTY (FIXED, cycle 2).
+  # This used to read `[ -n "$(find ...)" ]`: ANY byte on stdout was taken
+  # for "link count above one". Measured against a `find` shim that prints
+  # one unrelated line - a wrapper with a banner is all it takes - an
+  # ORDINARY in-place rewrite of an ordinary one-link checkpoint came back
+  # `defer`, which is a permission prompt on the exact write ADR-0002
+  # exists to keep silent, for a file with nothing wrong with it. The test
+  # is now that some LINE of the output is the leaf's own path, which is
+  # what `find` prints and what a banner is not. A noisy `find` that still
+  # reports the match therefore still defers; a noisy `find` with nothing
+  # to report no longer blocks correct work.
+  #
+  # A LEAF WHOSE NAME CARRIES A NEWLINE cannot be compared line-wise
+  # against line-oriented output, so for that shape - and only that shape
+  # - any output at all defers, which is what the old test did for every
+  # shape. It is the conservative reading, it costs at most one prompt,
+  # and nothing this plugin writes has that name.
+  #
+  # THE EXIT STATUS IS DELIBERATELY NOT CONSULTED, and that is a stated
+  # limit rather than an oversight. There is no reading of it that changes
+  # an answer: a `find` that fails and a file with exactly one link both
+  # mean "no hard link was proven here", and this layer's rule for an
+  # unproven hard link is `allow` - the same answer it gives with `find`
+  # absent from PATH entirely, for the same reason (see the paragraph
+  # above: deferring would put a prompt on every write on such a machine).
+  # So a `find` that exits 127, or 1, or is a shim that does nothing, is
+  # treated exactly as an absent one. What CANNOT be closed from POSIX
+  # `sh` is a `find` that never returns: there is no portable timeout, so
+  # a wedged `find` on PATH hangs this hook. Both limits are in
+  # docs/adr/0008-hoard-auto-allow.md and pinned by HOARD-14f.
   leaf="$root/$after"
   if [ -f "$leaf" ] && command -v find >/dev/null 2>&1; then
-    if [ -n "$(find "$leaf" -links +1 2>/dev/null)" ]; then
+    hl_out=$(find "$leaf" -links +1 2>/dev/null) || true
+    hl_nl='
+'
+    hl_hit=no
+    case "$hl_nl$hl_out$hl_nl" in
+      *"$hl_nl$leaf$hl_nl"*) hl_hit=yes ;;
+    esac
+    case "$leaf" in
+      *"$hl_nl"*) [ -z "$hl_out" ] || hl_hit=yes ;;
+    esac
+    if [ "$hl_hit" = yes ]; then
       printf 'defer'
       return 0
     fi

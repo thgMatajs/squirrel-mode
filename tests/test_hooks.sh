@@ -587,10 +587,41 @@ replace_block() {
   # tests/test_build.sh's own single-LINE helpers do is not portable
   # here - `head`/`tail` never pass the replacement through awk at all.
   # Re-asserts +x afterwards for the same reason replace_line does.
+  #
+  # A START LINE BELOW 1 IS REFUSED HERE, AND IT USED TO BE FATAL
+  # (FIXED, cycle 2 of the hard-link audit). Every caller computes its
+  # start line with `line_of`, which prints NOTHING when the literal it
+  # was handed is not in the file, and the idiom beside every such call
+  # is `[ -n "$x" ] || x=0` followed by an assertion that REPORTS the
+  # miss. Reporting was all it did: the replace_block call two lines
+  # later still ran, with s=0, and `head -n "$((0 - 1))"` is
+  # `head -n -1`, which BSD head rejects outright ("illegal line count").
+  # Under this file's `set -eu` that killed the whole run - the last line
+  # of output was head's error, exit was 1, `assert_report` never
+  # printed, and every scenario after the failure silently did not
+  # execute. Observed on HOARD-16c, where it would have taken
+  # RENAME-COUNT, RENAME-COUNT-b, HOARD-17, HOARD-18 and HOARD-18b down
+  # with it. Refusing here - loudly, countably, and without touching the
+  # file - leaves the mutant byte-identical to its source, lets the
+  # caller's own control assertion name the literal that went missing,
+  # and keeps every later scenario running. HOARD-16e is the proof.
   file=$1
   s=$2
   e=$3
   t=$4
+  rb_bad=no
+  case "$s" in '' | *[!0-9]*) rb_bad=yes ;; esac
+  case "$e" in '' | *[!0-9]*) rb_bad=yes ;; esac
+  if [ "$rb_bad" = no ] && { [ "$s" -lt 1 ] || [ "$e" -lt "$s" ]; }; then
+    rb_bad=yes
+  fi
+  if [ "$rb_bad" = yes ]; then
+    # _assert_fail rather than a bare `printf ... >&2`: an unusable line
+    # range is a test defect, and a test defect that only prints is the
+    # thing this guard exists to stop. Counting it makes the run red.
+    _assert_fail "replace_block refused an unusable line range for $file - start='$s' end='$e'. A line_of that matched nothing yields start 0, and head -n -1 then aborts this entire file under set -eu before assert_report can print. Fix the literal the caller is searching for." "start >= 1 and end >= start" "start=$s end=$e"
+    return 0
+  fi
   tmp="$file.tmp.$$"
   head -n "$((s - 1))" "$file" >"$tmp"
   printf '%s\n' "$t" >>"$tmp"
@@ -8677,11 +8708,56 @@ assert_no_opinion "$outH3l" "$exitH3l" "HOARD-3l: a file_path past MAX_FILE_PATH
 #     scenario 36). Unset and empty must defer; the other two must still
 #     allow a genuine hoard write, because a hook that deferred there
 #     would be barring correct work on an ordinary machine.
+#
+#     THE FIXTURE THE FIRST TWO ASSERTIONS NEED IS ROOT-ABSOLUTE, AND IT
+#     USED TO BE A SCRATCH-HOME PATH (FIXED, cycle 2). With $HOME empty,
+#     the roots this script derives are "/.squirrel/checkpoints" and
+#     "/.squirrel/hoard". A file_path under the scratch home -
+#     "/tmp/.../.squirrel/hoard/global/x.md" - matches NEITHER, so it
+#     defers at Layer 1 whether the empty-$HOME guard exists or not:
+#     deleting that guard outright changed neither assertion's outcome,
+#     which is the "guard that cannot fail for its own target" class this
+#     repo keeps rediscovering. The discriminating path is one that
+#     begins at the real root, and it is asserted first below; the
+#     scratch-home path is kept beside it, relabelled for what it
+#     actually proves, because both shapes must defer.
+stdinH3m_disc=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/.squirrel/hoard/global/m3m-disc.md","content":"x"}}')
+outH3m_disc_unset=$(printf '%s' "$stdinH3m_disc" | env -u HOME "$allow_checkpoint_script" 2>/dev/null) && exitH3m_disc_unset=0 || exitH3m_disc_unset=$?
+assert_no_opinion "$outH3m_disc_unset" "$exitH3m_disc_unset" "HOARD-3m: \$HOME entirely unset must defer for a path that WOULD match the root an empty \$HOME derives - /.squirrel/hoard/global/... is the only shape this assertion can be about, and it is the shape the empty-\$HOME guard is the sole reason for"
+outH3m_disc_empty=$(printf '%s' "$stdinH3m_disc" | HOME="" "$allow_checkpoint_script" 2>/dev/null) && exitH3m_disc_empty=0 || exitH3m_disc_empty=$?
+assert_no_opinion "$outH3m_disc_empty" "$exitH3m_disc_empty" "HOARD-3m: and \$HOME set to an empty string must defer for the same root-absolute path"
+
 stdinH3m=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s","content":"x"}}' "$hoardH3f_legit")
 outH3m_unset=$(printf '%s' "$stdinH3m" | env -u HOME "$allow_checkpoint_script" 2>/dev/null) && exitH3m_unset=0 || exitH3m_unset=$?
-assert_no_opinion "$outH3m_unset" "$exitH3m_unset" "HOARD-3m: \$HOME entirely unset must defer for a hoard path, never allow"
+assert_no_opinion "$outH3m_unset" "$exitH3m_unset" "HOARD-3m: \$HOME entirely unset must also defer for a scratch-home hoard path - this one defers at Layer 1 rather than at the guard, and is asserted for completeness, not as the guard's proof"
 outH3m_empty=$(printf '%s' "$stdinH3m" | HOME="" "$allow_checkpoint_script" 2>/dev/null) && exitH3m_empty=0 || exitH3m_empty=$?
-assert_no_opinion "$outH3m_empty" "$exitH3m_empty" "HOARD-3m: \$HOME set to an empty string must defer for a hoard path, never allow"
+assert_no_opinion "$outH3m_empty" "$exitH3m_empty" "HOARD-3m: same for \$HOME set to an empty string"
+
+# --- HOARD-3m-b. FAILURE PROOF: delete the empty-$HOME guard and the
+#     root-absolute path must come back `allow`. Mutating the CONDITION
+#     keeps the mutant a working script, so the allow is the guard's
+#     absence and not a broken file.
+mutantH3mb=$(make_script_scratch "$allow_checkpoint_script")
+# shellcheck disable=SC2016 # single-quoted deliberately: the literal source text of scripts/allow-checkpoint.sh to match, not shell expansion.
+fpH3mb_want='  if [ -z "$home_dir" ]; then'
+fpH3mb_line=$(line_of "$mutantH3mb" "$fpH3mb_want")
+[ -n "$fpH3mb_line" ] || fpH3mb_line=0
+assert_eq "yes" "$([ "$fpH3mb_line" -gt 0 ] && echo yes || echo no)" "FAILURE PROOF (HOARD-3m-b), control: the empty-\$HOME guard's own source line must be FOUND, or the mutant is byte-identical and proves nothing"
+replace_line "$mutantH3mb" "$fpH3mb_line" '  if false; then'
+if cmp -s "$allow_checkpoint_script" "$mutantH3mb"; then mutantH3mb_differs=no; else mutantH3mb_differs=yes; fi
+assert_eq "yes" "$mutantH3mb_differs" "FAILURE PROOF (HOARD-3m-b), control: the mutation must genuinely change the script"
+
+outH3mb=$(printf '%s' "$stdinH3m_disc" | env -u HOME "$mutantH3mb" 2>/dev/null) || true
+if printf '%s' "$outH3mb" | grep -qF '"allow"'; then fpH3mb_allows=yes; else fpH3mb_allows=no; fi
+assert_eq "yes" "$fpH3mb_allows" "FAILURE PROOF (HOARD-3m-b): with the empty-\$HOME guard disabled, a write to /.squirrel/hoard/global/... must be AUTO-APPROVED with no \$HOME at all - that is what the guard prevents, and the scratch-home fixture this scenario used to rely on could not show it"
+
+outH3mb_scratch=$(printf '%s' "$stdinH3m" | env -u HOME "$mutantH3mb" 2>/dev/null) || true
+if printf '%s' "$outH3mb_scratch" | grep -qF '"allow"'; then fpH3mb_scratch_allows=yes; else fpH3mb_scratch_allows=no; fi
+assert_eq "no" "$fpH3mb_scratch_allows" "FAILURE PROOF (HOARD-3m-b), the point of the fixture change: the SAME mutant still defers the scratch-home path, because that one never reached the guard - asserted here so nobody re-narrows the fixture back to a payload the mutation cannot move"
+
+outH3mb_ok=$(capture_stdout "$mutantH3mb" "$homeH3f" "$stdinH3f_ctrl")
+if printf '%s' "$outH3mb_ok" | grep -qF '"allow"'; then fpH3mb_ok_allows=yes; else fpH3mb_ok_allows=no; fi
+assert_eq "yes" "$fpH3mb_ok_allows" "FAILURE PROOF (HOARD-3m-b), isolation: the mutant must still allow an ordinary hoard write with \$HOME set - a mutant that merely broke the script would satisfy the assertion above for the wrong reason"
 
 stdinH3m_root=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/.squirrel/hoard/global/m3m.md","content":"x"}}')
 outH3m_root=$(printf '%s' "$stdinH3m_root" | HOME="/" "$allow_checkpoint_script" 2>/dev/null) || true
@@ -8721,10 +8797,23 @@ assert_no_opinion "$outH3n" "$exitH3n" "HOARD-3n: a tool this hook does not gove
 #
 #     The fix refuses auto-approval when an EXISTING REGULAR FILE at the
 #     leaf has a link count above one. It never denies; the operation
-#     falls back to the ordinary permission prompt. A legitimate
-#     checkpoint or memory has exactly one name, so this is a guard with
-#     no correct traffic behind it - and the three "must still allow"
-#     assertions below are what hold that claim to account.
+#     falls back to the ordinary permission prompt. Nothing this plugin
+#     does gives a checkpoint or a memory a second name - and the "must
+#     still allow" assertions below are what hold that claim to account.
+#
+#     WHAT THAT SENTENCE USED TO SAY, AND WHY IT WAS TOO STRONG
+#     (CORRECTED, cycle 2). It read "a legitimate checkpoint or memory
+#     has exactly one name, so this is a guard with no correct traffic
+#     behind it". The first half is about the plugin; the second is about
+#     the user's filesystem, and a deduplicator makes it false without
+#     any attack - `jdupes -L`, `rdfind -makehardlinks` and `hardlink(1)`
+#     each turn two identical memories into one inode with two names,
+#     both inside the governed root, and every later access then costs
+#     one prompt. The honest cost is one prompt per deduplicated file,
+#     never a denial. ADR-0008 and the script's header carry the same
+#     correction; this is the third copy of the claim and it is fixed in
+#     the same pass, because a correction applied to one copy is how the
+#     ADR-0002 sentence survived a whole cycle.
 # ==========================================================================
 homeH14=$(new_home)
 mkdir -p "$homeH14/.squirrel/hoard/global" "$homeH14/.squirrel/checkpoints/repo-h14" "$homeH14/.ssh"
@@ -8803,17 +8892,28 @@ if printf '%s' "$fpH14b_ok" | grep -qF '"allow"'; then fpH14b_ok_allows=yes; els
 assert_eq "yes" "$fpH14b_ok_allows" "FAILURE PROOF (HOARD-14), isolation: the mutant must still allow an ordinary new memory - a mutant that merely broke the script would satisfy the two assertions above for the wrong reason"
 assert_eq "0" "$(capture_exit "$mutantH14b" "$homeH14" "$fpH14b_stdin")" "FAILURE PROOF (HOARD-14), isolation: and must still exit 0"
 
-# --- HOARD-14e. THE LIMIT, PINNED RATHER THAN DESCRIBED. Layer 2b is the
-#     only test in allow-checkpoint.sh that needs an external command
-#     (`find`); there is no way to read a link count from POSIX sh
-#     without one. With `find` off PATH the layer cannot run and the hard
-#     link is auto-approved again. That is the same shape of degradation
-#     `grep` already has for the secret scan (HOARD-13e), it is the
-#     deliberate choice - deferring instead would put a permission prompt
-#     on every checkpoint write on such a machine - and it is asserted
-#     here so the limit written in the script's header and in
+# --- HOARD-14e. THE LIMIT, PINNED RATHER THAN DESCRIBED. Layer 2b needs
+#     `find`: there is no way to read a link count from POSIX sh without
+#     an external command. With `find` off PATH the layer cannot run and
+#     the hard link is auto-approved again. That is the same shape of
+#     degradation `grep` already has for the secret scan (HOARD-13e), it
+#     is the deliberate choice - deferring instead would put a permission
+#     prompt on every checkpoint write on such a machine - and it is
+#     asserted here so the limit written in the script's header and in
 #     docs/adr/0008-hoard-auto-allow.md cannot drift away from what the
 #     code does.
+#
+#     THIS COMMENT USED TO OPEN "Layer 2b is the only test in
+#     allow-checkpoint.sh that needs an external command", and then said
+#     three lines later that `grep` already has the same degradation
+#     (CORRECTED, cycle 2). Both halves cannot be true, and the second
+#     one is: the secret refusal shells out to `grep`, `decide()` reads
+#     stdin through `cat`, and both field extractions run `jq`. That is
+#     also why the shim PATH below carries `grep` and not just `jq` and
+#     `cat` - HOARD-14e's isolation assertion needs the secret refusal to
+#     still be working, so it can show that what dropped out is Layer 2b
+#     and not the whole decision. The script's header said "only jq and
+#     cat" about this very loop and was corrected in the same pass.
 shimH14e=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-nofind.XXXXXX")
 cleanup_paths="$cleanup_paths $shimH14e"
 for toolH14e in jq cat grep; do
@@ -8833,6 +8933,189 @@ assert_eq "allow" "$(nofind_decision_H14e "$fpH14b_stdin")" "HOARD-14e: and with
 stdinH14e_secret=$(jq -n --arg p "$hoardH14_link" \
   '{tool_name:"Write", tool_input:{file_path:$p, content:"api_key = 0123456789abcdefghijklmnop"}}')
 assert_eq "defer" "$(nofind_decision_H14e "$stdinH14e_secret")" "HOARD-14e, isolation: with find absent the OTHER refusals still work - a credential-bearing write to the same hard-linked path still defers, so the allow above is Layer 2b dropping out and not the whole decision collapsing"
+
+# --- HOARD-14f. WHAT `find` MUST SAY BEFORE THIS LAYER BELIEVES IT, AND
+#     WHAT IS AND IS NOT SPAWNED ON THE WAY TO A DEFER.
+#
+#     TWO DEFECTS, both reproduced against the shipped hook.
+#
+#     ONE: the test was `[ -n "$(find ...)" ]`, so ANY byte on stdout
+#     counted as "link count above one" - the exit status was ignored and
+#     stderr was discarded. A `find` that prints one unrelated line (a
+#     wrapper with a banner is enough) turned the ORDINARY in-place
+#     rewrite of an ordinary one-link checkpoint into a `defer`: a
+#     permission prompt on the exact write ADR-0002 exists to keep
+#     silent, for a file with nothing wrong with it. The layer now asks
+#     whether some LINE of the output is the leaf's own path, which is
+#     what `find` prints and what a banner is not - so a noisy `find`
+#     that still reports the match still defers, and a noisy `find` with
+#     nothing to report no longer blocks correct work. Both directions
+#     are asserted below, because a fix that simply ignored the output
+#     would satisfy the first and lose the second.
+#
+#     TWO: `scripts/allow-checkpoint.sh` said Layer 2b "is the only test
+#     in this file that spawns a process" and docs/adr/0008 said every
+#     defer "reaches its answer with no process spawned at all". Counted
+#     with shims that log every invocation: the over-cap defer spawns
+#     only the `cat` that reads stdin, three more of the five enumerated
+#     defers spawn that `cat` plus two `jq`, and the credential defer
+#     spawns four `jq` and a `grep` - and IS PRODUCED BY that `grep`.
+#
+#     THE CLAIM THAT REPLACES IT KEEPS ITS ENUMERATION, and that is not
+#     pedantry. "No `find` on any defer" is ALSO false: the hard-link
+#     defer spawns one, because that defer IS the `find`'s answer. The
+#     true statement is that every defer decided BEFORE Layer 2b - the
+#     five classes the old sentence listed - spawns no `find`, and that
+#     `find` runs only after every other layer has already said `allow`.
+#     Both halves are asserted below, the hard-link rows included, so a
+#     future re-tightening of the sentence has a row to trip over.
+#
+#     THE LIMITS THAT ARE DOCUMENTED RATHER THAN CLOSED, asserted so they
+#     cannot drift: a `find` that fails - exit 127, or anything else - is
+#     treated exactly as a `find` that is absent, because there is no
+#     reading of the status that changes an answer (an unproven hard link
+#     is allowed either way, for the reason HOARD-14e states). And a
+#     `find` that never returns hangs this hook: POSIX `sh` has no
+#     timeout, so that one is stated in the ADR and not tested here,
+#     because a test for it would itself hang.
+h14f_root=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-findshim.XXXXXX")
+cleanup_paths="$cleanup_paths $h14f_root"
+h14f_real_find=$(command -v find 2>/dev/null) || h14f_real_find=""
+assert_eq "yes" "$([ -n "$h14f_real_find" ] && echo yes || echo no)" "HOARD-14f, control: the real find must be resolvable, or the shims below have nothing to wrap and every row is about a machine this suite cannot describe"
+
+h14f_shim() {
+  # h14f_shim <name> <find-script-text> - a PATH directory holding jq,
+  # cat and grep (so the rest of the decision keeps working, exactly as
+  # HOARD-14e's shim does) plus a `find` built from <find-script-text>.
+  hs_dir="$h14f_root/$1"
+  mkdir -p "$hs_dir"
+  for hs_tool in jq cat grep; do
+    hs_real=$(command -v "$hs_tool" 2>/dev/null) || hs_real=""
+    [ -n "$hs_real" ] && ln -sf "$hs_real" "$hs_dir/$hs_tool" || :
+  done
+  printf '%s' "$2" >"$hs_dir/find"
+  chmod +x "$hs_dir/find"
+  printf '%s' "$hs_dir"
+}
+
+h14f_banner=$(h14f_shim banner '#!/bin/sh
+echo "find: this build prints a banner"
+exit 0
+')
+h14f_noisy=$(h14f_shim noisy "#!/bin/sh
+echo \"find: this build prints a banner\"
+exec $h14f_real_find \"\$@\"
+")
+h14f_broken=$(h14f_shim broken '#!/bin/sh
+exit 127
+')
+
+h14f_decision() {
+  # h14f_decision <shim-dir> <stdin>
+  hd_out=$(capture_stdout_with_path "$allow_checkpoint_script" "$homeH14" "$1" "$2")
+  if [ -z "$hd_out" ]; then printf 'defer'; else printf 'allow'; fi
+}
+
+# Controls first: each shim must genuinely be the thing it claims to be.
+h14f_banner_out=$(PATH="$h14f_banner" find "$homeH14/.squirrel/hoard/global/plain.md" -links +1 2>/dev/null) || true
+assert_eq "yes" "$([ -n "$h14f_banner_out" ] && echo yes || echo no)" "HOARD-14f, control: the banner shim must print SOMETHING for a one-link file - if it printed nothing the row below would pass without the old code ever having been wrong"
+assert_eq "no" "$([ "$h14f_banner_out" = "$homeH14/.squirrel/hoard/global/plain.md" ] && echo yes || echo no)" "HOARD-14f, control: and what it prints must NOT be the leaf's path - the whole distinction under test is 'output' versus 'output that names this file'"
+
+stdinH14f_plain=$(jq -n --arg p "$homeH14/.squirrel/hoard/global/plain.md" \
+  '{tool_name:"Write", tool_input:{file_path:$p, content:"rewritten"}}')
+assert_eq "allow" "$(hoard_decision "$homeH14" "$stdinH14f_plain")" "HOARD-14f, baseline: with the real find, rewriting an existing one-link memory is auto-approved - the hot path this scenario is about"
+
+assert_eq "allow" "$(h14f_decision "$h14f_banner" "$stdinH14f_plain")" "HOARD-14f: a find whose stdout carries a banner and nothing else must NOT turn an ordinary in-place rewrite into a prompt. This is the shipped defect: \`[ -n \"\$(find ...)\" ]\` read the banner as a link count and deferred every existing checkpoint and memory on such a machine"
+assert_eq "allow" "$(h14f_decision "$h14f_banner" "$fpH14b_stdin")" "HOARD-14f, the cost of that, stated: a find that never names the leaf cannot prove a hard link either, so the hard-linked path is auto-approved on that machine - the same class of limit as find being absent, and it is written down in ADR-0008 rather than hidden behind the row above"
+
+assert_eq "allow" "$(h14f_decision "$h14f_noisy" "$stdinH14f_plain")" "HOARD-14f: a find that prints a banner AND then does its job must still auto-approve the ordinary rewrite"
+assert_eq "defer" "$(h14f_decision "$h14f_noisy" "$fpH14b_stdin")" "HOARD-14f, and this is what stops the fix being 'ignore the output': the SAME noisy find still defers the hard link, because one line of what it printed IS the leaf's path. A fix that merely dropped the emptiness test would allow here"
+
+assert_eq "allow" "$(h14f_decision "$h14f_broken" "$stdinH14f_plain")" "HOARD-14f: a find that exits 127 must leave the ordinary rewrite auto-approved"
+assert_eq "allow" "$(h14f_decision "$h14f_broken" "$fpH14b_stdin")" "HOARD-14f, the documented limit: a find that FAILS is treated exactly as a find that is ABSENT - the hard link is auto-approved. Checking the status changes no answer, because an unprovable hard link is allowed either way, and pretending otherwise would put a prompt on every write on such a machine"
+
+# A leaf whose own name carries a newline cannot be compared line-wise
+# against line-oriented output, so that shape keeps the old, conservative
+# reading: any output at all defers. Asserted because it is the one place
+# the new test is deliberately weaker than a line match, and a silent
+# weakening there would be a hole.
+h14f_nl_leaf="$homeH14/.squirrel/hoard/global/two
+lines.md"
+ln "$homeH14/.ssh/id_rsa" "$h14f_nl_leaf" 2>/dev/null || :
+h14f_nl_ok=no
+if [ -f "$h14f_nl_leaf" ] && [ -n "$(find "$h14f_nl_leaf" -links +1 2>/dev/null)" ]; then h14f_nl_ok=yes; fi
+assert_eq "yes" "$h14f_nl_ok" "HOARD-14f, control: the newline-named hard link must genuinely exist with a link count above one - on a filesystem that refused the name, the assertion below would be about a path that is not there"
+stdinH14f_nl=$(jq -n --arg p "$h14f_nl_leaf" '{tool_name:"Read", tool_input:{file_path:$p}}')
+assert_eq "defer" "$(hoard_decision "$homeH14" "$stdinH14f_nl")" "HOARD-14f: a hard link whose name contains a newline must still defer - line-wise matching cannot see it, so that shape falls back to 'any output defers', which is the conservative reading and costs at most one prompt on a name nothing this plugin writes has"
+
+# --- HOARD-14f, part two: WHICH PROCESSES EACH DECISION COSTS.
+#     Counting shims log every invocation and then exec the real tool, so
+#     the decisions below are the real ones and only the accounting is
+#     added.
+h14f_count_dir="$h14f_root/counting"
+mkdir -p "$h14f_count_dir"
+h14f_log="$h14f_root/calls.log"
+h14f_tools_ok=yes
+for h14f_tool in jq cat grep find; do
+  h14f_treal=$(command -v "$h14f_tool" 2>/dev/null) || h14f_treal=""
+  if [ -z "$h14f_treal" ]; then h14f_tools_ok=no; continue; fi
+  # shellcheck disable=SC2016 # single-quoted deliberately: $SQUIRREL_SHIM_LOG and $@ must reach the generated shim as literal text, to be expanded when the shim runs, not now.
+  printf '#!/bin/sh\nprintf "%%s\\n" "%s" >>"$SQUIRREL_SHIM_LOG"\nexec %s "$@"\n' "$h14f_tool" "$h14f_treal" >"$h14f_count_dir/$h14f_tool"
+  chmod +x "$h14f_count_dir/$h14f_tool"
+done
+assert_eq "yes" "$h14f_tools_ok" "HOARD-14f, control: every tool the counting shims wrap must be resolvable, or a count of zero below would mean 'not installed' rather than 'not spawned'"
+
+homeH14f=$(new_home)
+mkdir -p "$homeH14f/.squirrel/hoard/global"
+printf 'an ordinary memory\n' >"$homeH14f/.squirrel/hoard/global/plain.md"
+ln -s /nowhere-at-all "$homeH14f/.squirrel/hoard/global/planted" 2>/dev/null || :
+printf 'lives outside the root\n' >"$homeH14f/outside.txt"
+ln "$homeH14f/outside.txt" "$homeH14f/.squirrel/hoard/global/linked.md" 2>/dev/null || :
+h14f_link_ok=no
+if [ -n "$(find "$homeH14f/.squirrel/hoard/global/linked.md" -links +1 2>/dev/null)" ]; then h14f_link_ok=yes; fi
+assert_eq "yes" "$h14f_link_ok" "HOARD-14f, control: the counting home's hard link must genuinely have a link count above one, or the two rows that show Layer 2b spawning \`find\` on a DEFER would be measuring an ordinary file"
+
+h14f_run() {
+  # h14f_run <stdin> - runs the hook under the counting shims and prints
+  # "<decision> find=<n> grep=<n> jq=<n> cat=<n>".
+  : >"$h14f_log"
+  hr_out=$(printf '%s' "$1" | HOME="$homeH14f" PATH="$h14f_count_dir" SQUIRREL_SHIM_LOG="$h14f_log" "$allow_checkpoint_script" 2>/dev/null) || true
+  if [ -z "$hr_out" ]; then hr_dec=defer; else hr_dec=allow; fi
+  printf '%s find=%s grep=%s jq=%s cat=%s' "$hr_dec" \
+    "$(awk '$0 == "find" { n++ } END { print n + 0 }' "$h14f_log")" \
+    "$(awk '$0 == "grep" { n++ } END { print n + 0 }' "$h14f_log")" \
+    "$(awk '$0 == "jq" { n++ } END { print n + 0 }' "$h14f_log")" \
+    "$(awk '$0 == "cat" { n++ } END { print n + 0 }' "$h14f_log")"
+}
+
+# The over-cap payload is built with printf, not `jq -n --arg`, for the
+# ARG_MAX reason HOARD-15's own fixture comment sets out.
+h14f_filler=$(awk 'BEGIN { printf "%1200000s", "" }' | tr ' ' 'a')
+h14f_over="{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$homeH14f/.squirrel/hoard/global/plain.md\",\"content\":\"$h14f_filler\"}}"
+h14f_dotdot=$(jq -n --arg p "$homeH14f/.squirrel/hoard/global/../../../.ssh/id_rsa" '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+h14f_outside=$(jq -n --arg p "$homeH14f/elsewhere/x.md" '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+h14f_symlink=$(jq -n --arg p "$homeH14f/.squirrel/hoard/global/planted/x.md" '{tool_name:"Write", tool_input:{file_path:$p, content:"x"}}')
+h14f_secret=$(jq -n --arg p "$homeH14f/.squirrel/hoard/global/plain.md" '{tool_name:"Write", tool_input:{file_path:$p, content:"api_key = 0123456789abcdefghijklmnop"}}')
+h14f_allow=$(jq -n --arg p "$homeH14f/.squirrel/hoard/global/plain.md" '{tool_name:"Write", tool_input:{file_path:$p, content:"an ordinary memory"}}')
+
+assert_eq "defer find=0 grep=0 jq=0 cat=1" "$(h14f_run "$h14f_over")" "HOARD-14f: a payload past MAX_PAYLOAD_LEN defers having spawned only the \`cat\` that read stdin - which is one process, not none, and ADR-0008 used to say none"
+assert_eq "defer find=0 grep=0 jq=2 cat=1" "$(h14f_run "$h14f_dotdot")" "HOARD-14f: a \`..\` component defers after two \`jq\` (tool_name and file_path) and one \`cat\` - no find, which is the claim that survives"
+assert_eq "defer find=0 grep=0 jq=2 cat=1" "$(h14f_run "$h14f_outside")" "HOARD-14f: a path outside both roots, likewise"
+assert_eq "defer find=0 grep=0 jq=2 cat=1" "$(h14f_run "$h14f_symlink")" "HOARD-14f: a symlink component, likewise - Layer 2 is a shell builtin walk and adds nothing"
+assert_eq "defer find=0 grep=1 jq=4 cat=1" "$(h14f_run "$h14f_secret")" "HOARD-14f: and the credential defer spawns a \`grep\` - it is not merely 'not free', it is PRODUCED BY a spawned process, which is precisely what 'no process spawned at all' denied"
+assert_eq "allow find=1 grep=2 jq=4 cat=1" "$(h14f_run "$h14f_allow")" "HOARD-14f: \`find\` runs only after every other layer has already said \`allow\`, and only with the leaf on disk - that is the whole of what placing Layer 2b last buys"
+
+# AND THE EXCEPTION, ASSERTED RATHER THAN LEFT FOR A REVIEWER TO FIND.
+# "No `find` on any defer" is false, and stating the corrected claim that
+# way would repeat the defect it corrects: Layer 2b's OWN defer spawns
+# one, because that defer is the `find`'s answer - the same relation the
+# credential defer has to its `grep`. Both tool shapes are pinned, since
+# a Read reaches the rule with two `jq` and no `grep` while a Write
+# reaches it with four and two.
+h14f_link_read=$(jq -n --arg p "$homeH14f/.squirrel/hoard/global/linked.md" '{tool_name:"Read", tool_input:{file_path:$p}}')
+h14f_link_write=$(jq -n --arg p "$homeH14f/.squirrel/hoard/global/linked.md" '{tool_name:"Write", tool_input:{file_path:$p, content:"an ordinary memory"}}')
+assert_eq "defer find=1 grep=0 jq=2 cat=1" "$(h14f_run "$h14f_link_read")" "HOARD-14f, the exception: the hard-link defer DOES spawn \`find\` - it is produced by it. The corrected claim is 'every defer decided BEFORE Layer 2b spawns no find', and this row is why it may never be shortened to 'no find on any defer'"
+assert_eq "defer find=1 grep=2 jq=4 cat=1" "$(h14f_run "$h14f_link_write")" "HOARD-14f, the exception on the write path: same defer, reached through both field extractions and both scans first - so the row's shape differs from the Read's and neither stands in for the other"
 
 # ==========================================================================
 # HOARD-15. THE WHOLE-PAYLOAD CAP (MAX_PAYLOAD_LEN).
@@ -8987,12 +9270,70 @@ Two releases went out with a broken suite." \
   assert_eq "allow" "$(hoard_write_decision_H16 "$cleanH16")" "HOARD-16, the other half: an ordinary memory must still be auto-approved - the widening buys false positives on purpose, and a widening that stopped real memories would be a guard that bars correct work"
 done
 
+# AND THE OTHER OTHER HALF: `chave: valor` WITH A LONG VALUE, which is
+# the shape this plugin's own memories are literally made of
+# (skills/stash/SKILL.md's frontmatter) and which the four rows above do
+# not have. The widening's trigger is a keyword-bearing NAME followed by
+# sixteen unbroken characters; a clean memory with the same punctuation
+# and the same value length, and only a non-keyword name, must still be
+# auto-approved. Without these rows, "the widening does not stop real
+# memories" was asserted only against text that could not have tripped it
+# either way.
+for cleanKvH16 in "runbook: docs/runbooks/deploy-blue-green.md" \
+  "created: 20260813T142530Z" \
+  "superseded_by: 20260813T142530Z-never-commit-without-running-tests" \
+  "endpoint: https://status.example.com/health" \
+  "owner: time-de-plataforma" \
+  "tags: git, tests
+importance: 4
+status: active"; do
+  assert_eq "allow" "$(hoard_write_decision_H16 "$cleanKvH16")" "HOARD-16, the key:value half: '$cleanKvH16' is the exact shape skills/stash/SKILL.md writes - a name, a colon, and a long unbroken value - and must still be auto-approved. The widening keys off the NAME, and these names carry no keyword"
+done
+
 # AND THE BREADTH THE WIDENING BUYS, asserted rather than hand-waved, in
 # the shape HOARD-13f already uses for the prefix arms: these are prose,
 # not credentials, and each costs exactly one permission prompt.
 for proseH16 in "secretary: indistinguishable-from-a-real-one" \
   "password: correct-horse-battery-staple"; do
   assert_eq "defer" "$(hoard_write_decision_H16 "$proseH16")" "HOARD-16, the cost: '$proseH16' carries no credential and still defers - a keyword ANYWHERE in the name now reaches the rule and a value is any sixteen unbroken characters. ADR-0008 names both; this asserts they are real"
+done
+
+# --- HOARD-16f. THE MEASURED RATE, PINNED. ADR-0008 publishes it: on a
+#     fifteen-line corpus written in the style of a developer's own
+#     memories, FIVE lines moved from `allow` to `defer` when the
+#     assignment rule was widened. A rate in a document that nothing
+#     re-derives is the class of claim this file exists to stop, so the
+#     five are asserted individually - each one is prose or a file path,
+#     none of them is a credential, and every one costs exactly one
+#     permission prompt.
+#
+#     The dominant trigger is the value class `[^[:space:]]{16,}`, which
+#     any URL and any file path satisfies. Rows 1, 2 and 5 are URLs and
+#     paths under a keyword-bearing name; rows 3 and 4 are ordinary
+#     Portuguese words whose first letters happen to spell one
+#     (`tokenizer`, `secretaria`).
+for fpRateH16 in "o endpoint de refresh token: https://auth.example.com/oauth2/token" \
+  "password_file: ~/.config/app/credentials.ini nao versionar" \
+  "tokenizer: sentencepiece-bpe-32k foi o que funcionou" \
+  "secretaria: reuniao-de-alinhamento-quinta" \
+  "api_key_rotation: docs/runbooks/rotacao-de-chaves.md"; do
+  assert_eq "defer" "$(hoard_write_decision_H16 "$fpRateH16")" "HOARD-16f, the published rate: '$fpRateH16' is one of the five lines in fifteen that the widening moved to defer. ADR-0008 states 5/15; this is what holds that number to the code"
+done
+
+# The other ten of the same fifteen, so the rate is pinned from BOTH
+# ends. A test that only asserted the five false positives would stay
+# green if the rule widened until everything deferred.
+for cleanRateH16 in "type: feedback" \
+  "title: never commit without running the test suite" \
+  "tags: git, tests" \
+  "importance: 4" \
+  "status: active" \
+  "runbook: docs/runbooks/deploy-blue-green.md" \
+  "o build quebrou porque o cache do gradle ficou desatualizado" \
+  "prefer removing a check, with its limit written down, over narrowing one" \
+  "a suite leva 5 minutos; rode antes de commitar" \
+  "owner: time-de-plataforma"; do
+  assert_eq "allow" "$(hoard_write_decision_H16 "$cleanRateH16")" "HOARD-16f, the other ten of fifteen: '$cleanRateH16' must still be auto-approved - the published rate is five in fifteen, and it is only a rate if the other ten are asserted too"
 done
 
 # --- HOARD-16b. FAILURE PROOF, the assignment rule: restore the old
@@ -9049,6 +9390,84 @@ assert_eq "yes" "$([ "$fpH16d_line" -gt 0 ] && echo yes || echo no)" "FAILURE PR
 replace_line "$mutantH16d" "$fpH16d_line" '    *"NO SUCH PEM DELIMITER IN ANY MEMORY"* | \'
 assert_eq "allow" "$(mutant_write_decision_H16 "$mutantH16d" "-----BEGIN DSA PRIVATE KEY-----")" "FAILURE PROOF (HOARD-16d): with the delimiter arm neutralised, a DSA private key header must be AUTO-APPROVED - proving the generic arm, not one of the five algorithm-specific ones, is what now catches it"
 assert_eq "defer" "$(mutant_write_decision_H16 "$mutantH16d" "-----BEGIN RSA PRIVATE KEY-----")" "FAILURE PROOF (HOARD-16d), isolation: the SAME mutant must still catch an RSA header through its own explicit arm - which is exactly why those five arms were kept beside the generic one instead of being folded into it"
+
+# --- HOARD-16e. THE HARNESS'S OWN FAILURE MODE: a `line_of` that matches
+#     nothing used to take this ENTIRE FILE down, silently.
+#
+#     HOARD-16c is the scenario that exposed it. `line_of` prints nothing
+#     when its literal is absent, the idiom beside it sets the line to 0
+#     and asserts the miss, and that assertion only REPORTS - the
+#     `replace_block "$m" 0 "$((0 + 2))"` two lines below still ran.
+#     `head -n "$((0 - 1))"` is `head -n -1`, which BSD head refuses; with
+#     `set -eu` the file died there, `assert_report` never printed, and
+#     RENAME-COUNT, RENAME-COUNT-b, HOARD-17, HOARD-18 and HOARD-18b did
+#     not run at all. A suite that vanishes is worse than one that fails,
+#     because the vanishing is what stops anyone noticing.
+#
+#     Proved on the REAL helper, extracted from this file at run time
+#     rather than retyped, so what is measured is the shipped text. The
+#     mutant disables the guard's own condition - the HOARD-14b technique
+#     - which leaves a working function that behaves exactly as the
+#     pre-fix one did.
+h16e_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-hooks-rb.XXXXXX")
+cleanup_paths="$cleanup_paths $h16e_dir"
+sed -n '/^replace_block() {$/,/^}$/p' "$0" >"$h16e_dir/guarded.fn"
+assert_eq "yes" "$([ -s "$h16e_dir/guarded.fn" ] && echo yes || echo no)" "HOARD-16e, control: replace_block's own source must be extractable from this file - an empty extraction would make both probes below trivially agree"
+NEWTEXT='  if false; then' awk '$0 == "  if [ \"$rb_bad\" = yes ]; then" { print ENVIRON["NEWTEXT"]; next } { print }' "$h16e_dir/guarded.fn" >"$h16e_dir/unguarded.fn"
+if cmp -s "$h16e_dir/guarded.fn" "$h16e_dir/unguarded.fn"; then h16e_differs=no; else h16e_differs=yes; fi
+assert_eq "yes" "$h16e_differs" "HOARD-16e, control: the mutation must genuinely change the extracted helper - a mutant identical to its source would make the two probes below agree for the boring reason"
+
+h16e_probe() {
+  # h16e_probe <function-file> - runs replace_block with a start line of
+  # 0 in a fresh `sh -eu`, exactly as a missed `line_of` would, and
+  # prints "<reached>:<target-state>". Both halves matter: reaching the
+  # end is what keeps every later scenario running, and leaving the
+  # target intact is what keeps the caller's own control assertion the
+  # thing that reports the miss. Run in a SEPARATE shell so the
+  # _assert_fail the guard raises lands in that shell's counters and not
+  # in this file's - the refusal is the expected outcome here, not a
+  # failure of this suite.
+  {
+    printf 'set -eu\n'
+    printf '. "%s/lib/assert.sh"\n' "$script_dir"
+    cat "$1"
+    # shellcheck disable=SC2016 # single-quoted deliberately: "$1" must reach the generated probe as literal text - it is the probe's own first argument, not this shell's.
+    printf 'replace_block "$1" 0 2 %s\n' "'X'"
+    printf "printf 'REACHED-THE-END\\\\n'\\n"
+  } >"$h16e_dir/probe.sh"
+  printf 'a\nb\nc\nd\ne\n' >"$h16e_dir/target.txt"
+  h16e_out=$(sh "$h16e_dir/probe.sh" "$h16e_dir/target.txt" 2>/dev/null) || true
+  case "$h16e_out" in
+    *REACHED-THE-END*) h16e_reached=reached ;;
+    *) h16e_reached=died ;;
+  esac
+  if [ "$(cat "$h16e_dir/target.txt")" = "$(printf 'a\nb\nc\nd\ne')" ]; then
+    h16e_state=intact
+  else
+    h16e_state=changed
+  fi
+  printf '%s:%s' "$h16e_reached" "$h16e_state"
+}
+
+assert_eq "reached:intact" "$(h16e_probe "$h16e_dir/guarded.fn")" "HOARD-16e: with the guard in place, replace_block called with start 0 must refuse, let the script REACH ITS END, and leave the target byte-identical - that is what keeps assert_report printing, keeps the five scenarios after HOARD-16c running, and keeps the caller's own control assertion the thing that names the missing literal"
+
+# WHICH WAY THE UNGUARDED HELPER FAILS IS PLATFORM-DEPENDENT, and both
+# ways are defects, so both are asserted rather than one being assumed.
+# BSD head rejects `head -n -1` outright, which is the reproduction the
+# audit was handed: the file dies mid-run with no SUMMARY. GNU head
+# ACCEPTS it and means "all but the last line", so on Linux the same call
+# does not crash - it silently writes a corrupted mutant, and a mutant
+# nobody can reason about is a proof that passes for an unknown reason.
+# The probe below decides which machine this is by running the command,
+# not by guessing from `uname`.
+printf 'a\nb\nc\nd\ne\n' >"$h16e_dir/headprobe.txt"
+if head -n -1 "$h16e_dir/headprobe.txt" >/dev/null 2>&1; then h16e_head_neg=accepted; else h16e_head_neg=rejected; fi
+h16e_unguarded=$(h16e_probe "$h16e_dir/unguarded.fn")
+if [ "$h16e_head_neg" = rejected ]; then
+  assert_eq "died:intact" "$h16e_unguarded" "FAILURE PROOF (HOARD-16e, BSD head): with the guard's condition disabled, the identical call must NOT reach the end - \`head -n -1\` is refused, \`set -eu\` kills the file, and that is exactly how HOARD-16c would have taken RENAME-COUNT, RENAME-COUNT-b, HOARD-17, HOARD-18 and HOARD-18b out of the run without printing a summary"
+else
+  assert_eq "reached:changed" "$h16e_unguarded" "FAILURE PROOF (HOARD-16e, GNU head): with the guard's condition disabled, \`head -n -1\` is ACCEPTED here and means 'all but the last line', so the call does not crash - it silently rewrites the target instead. The mutant a caller then measures is not the mutant it asked for, which is the same defect wearing a quieter coat"
+fi
 
 # ==========================================================================
 # RENAME-COUNT. THE THREE FIGURES IN allow-checkpoint.sh, RE-DERIVED.

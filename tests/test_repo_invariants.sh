@@ -885,25 +885,48 @@ assert_eq "no" "$same_sentence_safe_caught" "sanity check: a /plugin verb and an
 # ================================================================================================
 NETWORK_COMMAND_REGEX="curl|wget|fetch|nc|ncat|netcat|socat|ssh|scp|sftp|ftp|tftp|telnet|rsync|ping|traceroute|tracepath|nslookup|dig|drill|whois|openssl|python|python3|perl|ruby|node|nodejs|php|lwp-request|lynx|w3m|links"
 
-# AN OPERAND IS NOT AN INVOCATION (added by the hard-link audit). `grep
-# -w` treats "-" as a word boundary, so a flag or operand that ENDS in a
-# listed name matches as though the command had been invoked. That is not
-# hypothetical: scripts/allow-checkpoint.sh's hard-link refusal calls
-# `find "$leaf" -links +1`, and `-links` matched the `links` text
+# AN OPERAND IS NOT AN INVOCATION, AND THE CUT THAT SAYS SO IS ONE TOKEN
+# WIDE (added by the hard-link audit; NARROWED by the cycle-2 audit).
+# `grep -w` treats "-" as a word boundary, so a flag or operand that ENDS
+# in a listed name matches as though the command had been invoked. That
+# is not hypothetical: scripts/allow-checkpoint.sh's hard-link refusal
+# calls `find "$leaf" -links +1`, and `-links` matched the `links` text
 # browser, turning a POSIX `find` predicate into a reported network call.
-# There is no other spelling of that predicate - POSIX find offers only
-# `-links` - so the check is what was wrong.
+# POSIX find offers no other spelling of that predicate, so the check is
+# what had to change.
 #
-# strip_operands removes every token that BEGINS with whitespace followed
-# by "-", before the word scan runs. Nothing real is lost, because no
-# command is ever invoked by a name starting with "-": the command name
-# is always the first token of a command, never one introduced by a
-# space-dash. `curl -s https://x` still reports `curl`; `lwp-request` is
-# untouched, because its hyphen is not preceded by whitespace and it is
-# the command name itself. Both directions are proved below, against real
-# scratch copies, rather than argued here.
-strip_operands() {
-  sed 's/[[:space:]]-[A-Za-z0-9][A-Za-z0-9-]*//g'
+# WHAT THE FIRST REPAIR DID, AND WHY IT WAS THE WRONG CUT. It removed
+# EVERY token beginning with whitespace-then-"-" before the word scan
+# ran, and justified that with "no command is ever invoked by a name
+# starting with '-'". That argument is about the FIRST token of a
+# command; the sed was applied to every token of every line, so it also
+# deleted the text a network call was hiding INSIDE. Measured, not
+# reasoned: appending `foo -mode-curl https://example.com/exfiltrate` -
+# a real, working network call - to a real shipped script left this
+# invariant reporting zero hits and the whole file green at 133 pass /
+# 0 fail. `foo -x-wget https://x`, `sh -c-python3 -m http.server`,
+# `cmd | -filter-ssh host` and `aws s3 -no-verify-ssh https://x` all
+# went the same way. Every one of them was caught before that repair,
+# and none of the three fixtures it shipped with covers the class it
+# deleted - the three cover only the cases that still worked.
+#
+# WHAT IS CUT NOW: the literal `-links` predicate, and nothing else. It
+# is the only false positive this repo has, it is silenced by name, and
+# every other space-dash token reaches the word scan exactly as it did
+# before the hard-link layer existed. `curl -s https://x` still reports
+# `curl`; `lwp-request` is untouched, because its hyphen is not preceded
+# by whitespace and it is the command name itself; and
+# `foo -mode-curl https://x` is reported again, which is the class the
+# blind cut lost. All of those directions are proved below against real
+# scratch copies rather than argued here, the recovered class included.
+#
+# THE NARROWING IS SAFE FOR THIS REPO'S OTHER `find` USES, checked the
+# same way rather than assumed: the only other predicates any shipped
+# script passes to `find` are `-mtime` and `-newer`, neither of which
+# ends in a listed name, and the real-repo scan below reports zero hits
+# under this rule.
+strip_links_predicate() {
+  sed -E 's/[[:space:]]-links([[:space:]]|$)/ /g'
 }
 
 network_hits=""
@@ -917,7 +940,7 @@ IFS='
 for f in $shipped_scripts; do
   [ -n "$f" ] || continue
   [ -f "$repo_root/$f" ] || continue
-  code_only=$(grep -vE '^[[:space:]]*#' "$repo_root/$f" 2>/dev/null | strip_operands || true)
+  code_only=$(grep -vE '^[[:space:]]*#' "$repo_root/$f" 2>/dev/null | strip_links_predicate || true)
   if printf '%s\n' "$code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
     network_hits="$network_hits $f"
   fi
@@ -928,7 +951,7 @@ assert_eq "" "$network_hits" "no shipped script (scripts/*.sh, targets/*/install
 network_code_fixture="$glossary_avoid_scratch/network_code.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_code_fixture"
 printf '\ncurl https://example.com/exfiltrate >/dev/null 2>&1\n' >>"$network_code_fixture"
-fixture_code_only=$(grep -vE '^[[:space:]]*#' "$network_code_fixture" 2>/dev/null | strip_operands || true)
+fixture_code_only=$(grep -vE '^[[:space:]]*#' "$network_code_fixture" 2>/dev/null | strip_links_predicate || true)
 if printf '%s\n' "$fixture_code_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_code_fixture_caught=yes
 else
@@ -939,7 +962,7 @@ assert_eq "yes" "$network_code_fixture_caught" "FAILURE PROOF (invariant 10, cod
 network_comment_fixture="$glossary_avoid_scratch/network_comment.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_comment_fixture"
 printf '\n# example of what NOT to do: curl https://example.com/exfiltrate would be a network call\n' >>"$network_comment_fixture"
-fixture_comment_only=$(grep -vE '^[[:space:]]*#' "$network_comment_fixture" 2>/dev/null | strip_operands || true)
+fixture_comment_only=$(grep -vE '^[[:space:]]*#' "$network_comment_fixture" 2>/dev/null | strip_links_predicate || true)
 if printf '%s\n' "$fixture_comment_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_comment_fixture_caught=yes
 else
@@ -947,18 +970,18 @@ else
 fi
 assert_eq "no" "$network_comment_fixture_caught" "sanity check: the identical text placed inside a full-line comment must NOT be caught — this check scans CODE, not the prose that happens to describe an attack path (e.g. this very file's own '.ssh/id_rsa' comment, or allow-checkpoint.sh's identical comment)"
 
-# --- strip_operands must not become a way to smuggle a network call past
-#     this check. Two more fixtures, both against a real shipped script:
-#     a command that takes a flag (the flag is stripped, the COMMAND is
-#     still the first token and must still be reported), and a command
-#     whose own name contains a hyphen (nothing to strip, still reported).
-#     Without these, widening the scan to tolerate `find -links` would be
-#     an unproved loosening of the one invariant that keeps this plugin
-#     network-free.
+# --- strip_links_predicate must not become a way to smuggle a network
+#     call past this check. Two fixtures, both against a real shipped
+#     script: a command that takes a flag (the flag is left alone now,
+#     and the COMMAND was always the first token, so it must still be
+#     reported), and a command whose own name contains a hyphen (nothing
+#     to strip, still reported). Without these, tolerating `find -links`
+#     would be an unproved loosening of the one invariant that keeps this
+#     plugin network-free.
 network_flag_fixture="$glossary_avoid_scratch/network_flag.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_flag_fixture"
 printf '\nnc -l 1234 >/dev/null 2>&1\n' >>"$network_flag_fixture"
-fixture_flag_only=$(grep -vE '^[[:space:]]*#' "$network_flag_fixture" 2>/dev/null | strip_operands || true)
+fixture_flag_only=$(grep -vE '^[[:space:]]*#' "$network_flag_fixture" 2>/dev/null | strip_links_predicate || true)
 if printf '%s\n' "$fixture_flag_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_flag_fixture_caught=yes
 else
@@ -969,7 +992,7 @@ assert_eq "yes" "$network_flag_fixture_caught" "FAILURE PROOF (invariant 10, ope
 network_hyphen_fixture="$glossary_avoid_scratch/network_hyphen.sh"
 cp "$repo_root/scripts/allow-checkpoint.sh" "$network_hyphen_fixture"
 printf '\nlwp-request -m GET https://example.com >/dev/null 2>&1\n' >>"$network_hyphen_fixture"
-fixture_hyphen_only=$(grep -vE '^[[:space:]]*#' "$network_hyphen_fixture" 2>/dev/null | strip_operands || true)
+fixture_hyphen_only=$(grep -vE '^[[:space:]]*#' "$network_hyphen_fixture" 2>/dev/null | strip_links_predicate || true)
 if printf '%s\n' "$fixture_hyphen_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_hyphen_fixture_caught=yes
 else
@@ -983,13 +1006,48 @@ assert_eq "yes" "$network_hyphen_fixture_caught" "FAILURE PROOF (invariant 10, h
 network_operand_fixture="$glossary_avoid_scratch/network_operand.sh"
 # shellcheck disable=SC2016 # single-quoted deliberately: literal fixture source text, not substitution.
 printf '#!/bin/sh\nif [ -n "$(find "$1" -links +1 2>/dev/null)" ]; then\n  exit 1\nfi\n' >"$network_operand_fixture"
-fixture_operand_only=$(grep -vE '^[[:space:]]*#' "$network_operand_fixture" 2>/dev/null | strip_operands || true)
+fixture_operand_only=$(grep -vE '^[[:space:]]*#' "$network_operand_fixture" 2>/dev/null | strip_links_predicate || true)
 if printf '%s\n' "$fixture_operand_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
   network_operand_fixture_caught=yes
 else
   network_operand_fixture_caught=no
 fi
 assert_eq "no" "$network_operand_fixture_caught" "sanity check (invariant 10): \`find <file> -links +1\` is a POSIX predicate, not the \`links\` browser - this is the false positive that made the operand stripping necessary, and it is asserted here so a future change to the regex cannot silently reintroduce it"
+
+# --- THE CLASS THE BLIND CUT DELETED, PINNED SO IT CANNOT BE REOPENED IN
+#     SILENCE. A network command spelled so that its name is the tail of a
+#     space-dash token - `foo -mode-curl https://x` - is a working
+#     invocation of nothing at all on its own, but the TEXT is what this
+#     invariant scans, and every one of these was reported before the
+#     hard-link audit and by none of the fixtures above. Reproduced
+#     against a real shipped script: with the token-wide cut in place the
+#     whole file stayed green at 133 pass / 0 fail with a live
+#     `https://example.com/exfiltrate` sitting in scripts/check-off-flag.sh.
+#     Four spellings, because one of them could be silenced by an
+#     accident of the regex and four cannot.
+smuggled_lines_10='foo -mode-curl https://example.com/exfiltrate
+foo -x-wget https://example.com/x
+sh -c-python3 -m http.server
+aws s3 -no-verify-ssh https://example.com/x'
+old_ifs_10=$IFS
+IFS='
+'
+for smuggled_10 in $smuggled_lines_10; do
+  IFS=$old_ifs_10
+  network_smuggle_fixture="$glossary_avoid_scratch/network_smuggle.sh"
+  cp "$repo_root/scripts/check-off-flag.sh" "$network_smuggle_fixture"
+  printf '\n%s\n' "$smuggled_10" >>"$network_smuggle_fixture"
+  fixture_smuggle_only=$(grep -vE '^[[:space:]]*#' "$network_smuggle_fixture" 2>/dev/null | strip_links_predicate || true)
+  if printf '%s\n' "$fixture_smuggle_only" | grep -qwE "$NETWORK_COMMAND_REGEX" 2>/dev/null; then
+    network_smuggle_caught=yes
+  else
+    network_smuggle_caught=no
+  fi
+  assert_eq "yes" "$network_smuggle_caught" "FAILURE PROOF (invariant 10, the class a token-wide cut deletes): '$smuggled_10' appended to a real shipped script must be reported - a cut that removes every space-dash token removes the network command's own name along with the flag it is hiding behind, and this repo shipped exactly that with the suite green"
+  IFS='
+'
+done
+IFS=$old_ifs_10
 
 # --- 11. docs/ACCEPTANCE.md's probe-6 citation is the corrected one (S9 fix cycle 1, Y4) --------
 #
@@ -3382,5 +3440,81 @@ assert_eq "yes" "$mutant15_addsentence_manual_changed" "sanity (invariant 15, Fi
 mutant15_addsentence_manual_set=$(extract_manual_number_set "$mutant15_addsentence_manual_flat")
 mutant15_addsentence_manual_violations=$(set_subset_violations "$mutant15_addsentence_manual_set" "$s15_manual_set")
 assert_eq "" "$mutant15_addsentence_manual_violations" "LEGITIMATE REWORDING 4/4 (invariant 15, Fix 2, manual, added sentence): an added explanatory sentence mentioning criterion 8 (already genuinely \`manual\`) by number must pass CLEAN — mentioning a criterion that genuinely holds the status being checked is not a defect"
+
+# --- 16. NO TRACKED FILE MAY CLAIM THAT THIS PLUGIN CREATES EITHER
+# GOVERNED ROOT --------------------------------------------------------------
+#
+# The claim: "a symlink at `checkpoints/` is never legitimate because only the plugin creates that
+# directory". It is false, and `grep -rn mkdir` over this repo is the whole disproof — no shipped
+# script, skill or rule creates `~/.squirrel/checkpoints/` or `~/.squirrel/hoard/`. `/squirrel:init`
+# creates `~/.squirrel/` and writes `profile.md` into it, nothing deeper; both roots come into
+# existence implicitly, as the parent directory the model's first `Write` inside them creates. The
+# conclusion survives — a plain file write never produces a symlink — but the stated reason did not.
+#
+# WHY IT IS SCANNED REPO-WIDE AND NOT IN ONE FILE. `tests/test_hooks.sh`'s HOARD-18 already forbids
+# this claim by needle, and its scope is `scripts/allow-checkpoint.sh` — one file. So the identical
+# sentence sat untouched in `docs/adr/0002-checkpoint-auto-allow.md`, which is the document a reader
+# of the ADR trail reaches FIRST, for a whole audit cycle after the script was corrected. A guard
+# whose scope is narrower than the claim's reach is a guard the claim walks around. This one covers
+# every tracked file outside `tests/` — the exclusion those content scans all take, for the
+# self-reference reason the top of this file sets out: this very block has to name the phrase it
+# forbids.
+NO_PLUGIN_CREATES_ROOT_NEEDLES='plugin creates that directory
+plugin creates both directories'
+
+plugin_creates_hits=""
+old_ifs_16=$IFS
+IFS='
+'
+for needle_16 in $NO_PLUGIN_CREATES_ROOT_NEEDLES; do
+  IFS=$old_ifs_16
+  hits_16=$(git -C "$repo_root" grep -lF -- "$needle_16" 2>/dev/null | grep -v '^tests/' || true)
+  if [ -n "$hits_16" ]; then
+    plugin_creates_hits="$plugin_creates_hits $needle_16:$(printf '%s' "$hits_16" | tr '\n' ',')"
+  fi
+  IFS='
+'
+done
+IFS=$old_ifs_16
+assert_eq "" "$plugin_creates_hits" "no tracked file outside tests/ may say this plugin creates either governed root — nothing does; both come into existence as the parent directory of the model's first Write, and the symlink boundary rests on 'a plain file write never produces a symlink' instead"
+
+# FAILURE PROOF. A negative that could never match anything is the "guard that cannot fail for its
+# own target" class this repo has been bitten by repeatedly, so each needle is proved against real
+# document text with the stale sentence restored — not against a phrase typed to match itself.
+plugin_creates_mutant="$glossary_avoid_scratch/adr0002_stale.md"
+sed "s|the only mechanism that ever creates that directory is a plain file write through this plugin's own flow, and a plain file write never produces a symlink|only the plugin creates that directory|" \
+  "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" >"$plugin_creates_mutant"
+if cmp -s "$repo_root/docs/adr/0002-checkpoint-auto-allow.md" "$plugin_creates_mutant"; then
+  plugin_creates_mutant_differs=no
+else
+  plugin_creates_mutant_differs=yes
+fi
+assert_eq "yes" "$plugin_creates_mutant_differs" "FAILURE PROOF (invariant 16), control: restoring the stale clause must genuinely change docs/adr/0002-checkpoint-auto-allow.md — a sed that matched nothing would leave a byte-identical copy and prove nothing"
+if grep -qF -- "plugin creates that directory" "$plugin_creates_mutant" 2>/dev/null; then
+  plugin_creates_needle_live=yes
+else
+  plugin_creates_needle_live=no
+fi
+assert_eq "yes" "$plugin_creates_needle_live" "FAILURE PROOF (invariant 16): with the stale clause restored in a real copy of ADR-0002, the needle must find it — this is the sentence that survived a whole cycle because the guard that forbade it only ever read one script"
+
+# The second needle's own liveness, proved the same way against the OTHER document that used to
+# carry the both-roots spelling: scripts/allow-checkpoint.sh, whose stale wording HOARD-18b already
+# restores in a mutant. Re-derived here rather than cross-referenced, so this file's assertion does
+# not depend on another file having run.
+plugin_creates_mutant2="$glossary_avoid_scratch/allow_checkpoint_stale.sh"
+sed "s|legitimate, because the only thing that ever creates either root is a|legitimate, because this plugin creates both directories itself - see|" \
+  "$repo_root/scripts/allow-checkpoint.sh" >"$plugin_creates_mutant2"
+if cmp -s "$repo_root/scripts/allow-checkpoint.sh" "$plugin_creates_mutant2"; then
+  plugin_creates_mutant2_differs=no
+else
+  plugin_creates_mutant2_differs=yes
+fi
+assert_eq "yes" "$plugin_creates_mutant2_differs" "FAILURE PROOF (invariant 16), control: restoring the both-roots spelling must genuinely change scripts/allow-checkpoint.sh"
+if grep -qF -- "plugin creates both directories" "$plugin_creates_mutant2" 2>/dev/null; then
+  plugin_creates_needle2_live=yes
+else
+  plugin_creates_needle2_live=no
+fi
+assert_eq "yes" "$plugin_creates_needle2_live" "FAILURE PROOF (invariant 16): and the both-roots needle must find its own sentence when restored — two needles, two live proofs, so neither can pass by being unmatchable"
 
 assert_report
