@@ -79,7 +79,7 @@ to be copied into a project's own `.cursor/commands/` if you want them there too
 | `/squirrel:off` | Turns the base rules off for the rest of the current session. |
 | `/squirrel:on` | Turns them back on in the current session. |
 | `/squirrel:rules` | Pulls the base rules into the current conversation by hand. A recovery path only — see below. |
-| `/squirrel:stash` | Records one durable memory — a correction, a decision, a bug and its fix — in your cross-project hoard. Costs one permission prompt: the memory write itself is auto-approved, but the `date` command that stamps it is a `Bash` call, and no hook can auto-approve one. |
+| `/squirrel:stash` | Records one durable memory — a correction, a decision, a bug and its fix — in your cross-project hoard. Costs one permission prompt: the memory write itself is auto-approved, but the `date` command that stamps it is a `Bash` call, and this plugin registers no hook that runs on one. |
 | `/squirrel:dig` | Searches that hoard and shows ranked titles, then fetches only the one you open; `--all` also searches superseded memories. Costs one permission prompt for the search and a second for that same `date` stamp when you open a memory — both `Bash` calls, for the same reason. |
 
 All ten exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`. Cursor gets
@@ -211,12 +211,21 @@ is not.
 query costs about 44 ms at 500 memories, 79 ms at 1000, and 155 ms at 2000. Re-measured
 independently on that machine, those totals hold — 42, 81 and 159 ms — but the split this paragraph
 used to publish does not. At the 2000-memory size the `awk` pass over every file's frontmatter is
-about 84 ms of the 159 ms, not the 110 of 155 claimed here before; most of the rest is the shell
-enumerating the files and checking them one stat at a time. And that share is a fact about one machine's toolchain rather
-than about the design: on the same run it moves between about a third and about two thirds depending
-on which `awk` is installed.
-[docs/specs/2026-08-13-hoard-design.md](./docs/specs/2026-08-13-hoard-design.md) §5.1 carries the
-method and the per-phase numbers. It did not start out that way. The same query cost 12.08 s at 2000 until the list of
+about half of the run, not the 71% the old 110-of-155 figure implied; most of the rest is the shell
+enumerating the files and checking them one stat at a time.
+
+**That half is the whole of what survived re-measurement, and a finer breakdown has been withdrawn
+rather than corrected.** A per-phase split used to be published here. It was taken against a fixture
+whose path length was never written down, and path length is exactly the parameter
+`scripts/hoard-search.sh` already records as moving its own timings by a large factor — the same 2000
+files cost 14.67 s under paths of 176 bytes and 24.08 s under paths of 292. Without that number
+stated, nobody else can reproduce a split, so none is claimed. And even the half is a fact about one
+machine's toolchain rather than about the design: swapping in a different `awk` on the same fixture
+moves it far enough in both directions to change whether that pass is most of a search or a minority
+of it. [docs/specs/2026-08-13-hoard-design.md](./docs/specs/2026-08-13-hoard-design.md) §5.1 carries
+the method, and says which figures it stands behind and which it withdrew.
+
+The cost of a search did not start out this low. The same query cost 12.08 s at 2000 until the list of
 files handed to `awk` stopped being assembled one file at a time: appending a file to that list
 rebuilds the whole list, so building it cost O(n²) rather than O(n). Assembling each layer's files in
 one step instead took that phase from 12.05 s to 42 ms and left the results byte-identical. Three
@@ -249,25 +258,48 @@ response, not the read or write itself.
 **That guarantee is exactly as wide as the hook's matcher, and every instruction that touches a
 checkpoint now names a tool the matcher covers.** The matcher is `Write|Edit|Read`: three exact tool
 names, not a pattern that also catches things containing them. A checkpoint read or write made with
-one of those three skips the prompt. A `Bash` call cannot be auto-approved by any hook, at any path,
-so one that writes a checkpoint file with a heredoc instead goes through the normal permission flow —
-a prompt, in an interactive session. `/squirrel:pickup` names the `Read` tool explicitly; the base
+one of those three skips the prompt. `hooks/hooks.json` registers this plugin's `PreToolUse` hook for
+those three names and nothing else, so no hook of this plugin's is ever invoked for a `Bash` call and
+none of them can auto-approve one — a checkpoint written with a heredoc instead goes through the
+normal permission flow, a prompt, in an interactive session.
+
+**That is this plugin's own configuration, and not a limit of Claude Code.** A `PreToolUse` hook may
+match `Bash` and may answer `permissionDecision: "allow"`; squirrel-mode declines to register one,
+because auto-approving `Bash` means approving a tool whose argument is an arbitrary command string,
+while everything that makes this hook defensible rests on normalising one field,
+`tool_input.file_path`, against one directory this plugin owns
+([ADR-0002](./docs/adr/0002-checkpoint-auto-allow.md)). Every prompt count on this page follows from
+that choice rather than from something Claude Code makes impossible.
+
+`/squirrel:pickup` names the `Read` tool explicitly; the base
 rule that keeps a checkpoint current names the `Read` and `Write` tools and rules out a shell command
 in as many words. Neither is worded tool-agnostically any more.
 
 **That is an instruction, not enforcement, and the difference is worth stating.** The matcher decides
 which tool calls are auto-approved, never which tool gets called: nothing in the harness stops a model
-from reaching for a `Bash` heredoc against the checkpoint anyway, and no hook could auto-approve it if
-it did. What has been watched live is the tool-agnostic wording, not this one — `/squirrel:init`,
+from reaching for a `Bash` heredoc against the checkpoint anyway, and this plugin has registered no
+hook that would run on it if it did. What has been watched live is the tool-agnostic wording, not this one — `/squirrel:init`,
 `/squirrel:tune`, `/squirrel:off` and `/squirrel:on` still say "write" or "create" without naming a
 tool, and a live run recorded the model reaching for a `Bash` heredoc first there, then retrying with
 `Write` and saying so in one line (`docs/ACCEPTANCE.md`, Live-sweep finding 3 — observed on those
 four, never on the checkpoint rule itself). Should a checkpoint write ever go that way, the cost is
 the same as it was there: one permission prompt and one extra line of report, not a lost checkpoint.
 
-The auto-approval only covers paths that genuinely resolve inside that directory: a symlink at
+The auto-approval decides about the path as a **name**, at the moment the hook is asked, and it
+refuses two shapes rather than approving them. The first is a symlink: a symlink at
 `checkpoints/` itself, or anywhere below it, is never auto-approved — that write falls back to the
 normal permission prompt instead of being silently redirected through the symlink.
+
+The second is a hard link, and it is the reason the sentence above says *name* rather than *resolves
+inside that directory*, which is how this paragraph used to put it. An existing file inside
+`checkpoints/` that some other name also points at is never auto-approved either — for any tool,
+`Read` included — even though nothing about its own path leads anywhere else.
+`ln ~/.ssh/id_rsa ~/.squirrel/checkpoints/proj/x.md` gives a private key a second name inside the
+directory, and until that refusal landed a read of that name returned the key and a write overwrote
+it, both without a prompt. What is tested is the file's link count, only where the answer would
+otherwise already be `allow`, and the test needs `find` on `PATH`: with `find` missing, that one
+refusal does not run and the hard link is auto-approved again
+([ADR-0008](./docs/adr/0008-hoard-auto-allow.md) records that limit).
 
 The same auto-approval covers `~/.squirrel/hoard/`, on the same terms and through the same layers
 ([ADR-0008](./docs/adr/0008-hoard-auto-allow.md)) — the same `..` rejection, the same length cap,
@@ -282,8 +314,11 @@ permission prompt and you decide, rather than going through without one.
 **What that auto-approval does not buy, stated as a number rather than left to be discovered.** It
 covers the file operations and nothing else, and both hoard commands need one thing that is not a
 file operation: a UTC timestamp, built by running `date -u +%Y%m%dT%H%M%SZ`. That is a `Bash` call,
-and the rule above holds for it unchanged — no hook can auto-approve a `Bash` call, at any path — so
-it goes through the normal permission flow. In an interactive session the true cost is therefore
+and the matcher above holds for it unchanged — `Write|Edit|Read` does not name `Bash`, so this
+plugin's hook never runs on it — so it goes through the normal permission flow. Both counts below are
+therefore facts about how squirrel-mode is configured, not about what Claude Code permits: they would
+change if this plugin registered a different hook, which the paragraph above says why it does not. In
+an interactive session the true cost is
 **one prompt for a `/squirrel:stash`** (the memory write is auto-approved; the stamp is not) and
 **two for a `/squirrel:dig` you open a memory from** — one for the search script, which is also a
 `Bash` call, and one for the stamp the `uses`/`last_used` edit needs. The read and the edit
