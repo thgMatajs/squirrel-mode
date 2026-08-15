@@ -25,7 +25,7 @@
 # that holds memories can answer like a store that holds none, the user
 # cannot tell the two apart, and this file is the only thing that could
 # have told them. The ways it did exactly that have been fixed rather
-# than accepted, not tolerated - a regular file awk cannot open, a CRLF or a BOM
+# than tolerated - a regular file awk cannot open, a CRLF or a BOM
 # anywhere in the frontmatter, whitespace on either side of a key or a
 # value, a one-character search term thrown away for being one character
 # long, and a query whose terms really were all discarded - each one
@@ -188,8 +188,27 @@ hoard_dir="$home_dir/.squirrel/hoard"
 # Dropping it here, in O(1), is what keeps the rebuild for genuinely
 # irregular entries.
 #
+# $saw_entry RECORDS WHETHER THE HOARD HELD ANY ENTRY AT ALL, and it is
+# read once, at the exit below, to tell "this store is empty" apart from
+# "this store is full of things this reader could not open". Those two
+# were byte-identical - rc 0, empty stdout, EMPTY STDERR - and the second
+# is the store's only reader answering like an empty store, which the
+# header of this file calls the worst thing it can do.
+#
+# SET BESIDE EACH SHIFT, AND BEFORE IT, because this is the last point at
+# which an unmatched glob's literal is still distinguishable from a real
+# entry: after the shift both are gone from the list, and after the
+# prescan an unreadable file and a name that never existed look the same.
+# Three tests in one `if`, and each covers what the one before it cannot:
+# `-f` is the common case and short-circuits the other two, `-e` catches
+# a directory, a FIFO or an unreadable regular file, and `-L` catches a
+# BROKEN symlink, for which `-e` is false. Only the unmatched literal
+# fails all three, which is exactly the word this list is dropping.
+#
 # inbox/ is never enumerated: a candidate is not a memory.
+saw_entry=0
 set -- "$hoard_dir"/global/*.md
+if [ -f "$1" ] || [ -e "$1" ] || [ -L "$1" ]; then saw_entry=1; fi
 [ -f "$1" ] || shift
 if [ -n "$slug" ]; then
   # A slug carrying a "/" or a ".." COMPONENT would reach outside the
@@ -242,6 +261,7 @@ if [ -n "$slug" ]; then
   # never reaches the caller: the pipeline below sorts by score and then
   # by id, so awk's argument order decides nothing.
   set -- "$hoard_dir/projects/$slug"/*.md "$@"
+  if [ -f "$1" ] || [ -e "$1" ] || [ -L "$1" ]; then saw_entry=1; fi
   [ -f "$1" ] || shift
 fi
 
@@ -335,7 +355,43 @@ if [ "$irregular" = 1 ]; then
   done
 fi
 
-[ $# -gt 0 ] || exit 0
+# AN UNREADABLE STORE IS NOT AN EMPTY ONE, AND IT NO LONGER ANSWERS LIKE
+# ONE. Everything above filters out what awk cannot safely open; when
+# that filtering empties the list, this is where the search stops. Until
+# this branch existed it stopped in silence, and a hoard holding three
+# memories at mode 000 produced rc 0, empty stdout and empty stderr -
+# byte for byte what a hoard holding nothing produces, for a discarded
+# term and for a term that was searched for alike. Reproduced, both
+# ways. The comment beside the tokeniser's stderr line used to justify
+# that silence by saying the store "really does hold nothing" in this
+# state, which is exactly the claim this branch exists because it is
+# false.
+#
+# ONE LINE, ON STDERR, EXIT 0, and no path in it - the same three rules
+# the tokeniser's line follows, for the same reasons: stdout stays the
+# four-field format callers parse, a reader must not fail loudly at a
+# user who has done nothing wrong, and a filename is text this script
+# does not control.
+#
+# LIMIT, WRITTEN DOWN, AND IT IS THE PARTIAL STORE. This branch fires
+# only when NOTHING survived the filtering. A hoard where some entries
+# are readable and some are not still returns the readable ones, says
+# nothing about the others, and looks complete - four memories in, one
+# at mode 000, three ranked lines out and an empty stderr, which is what
+# scenario 16 of tests/test_hoard.sh asserts today. Reporting that would
+# mean carrying a count of the dropped entries out of the prescan and
+# deciding what to say about a store that did answer; this branch is
+# about the store that could not answer at all, and stretching it to
+# cover both would put a diagnostic on the ordinary result of every
+# search that ever meets a stray file. The state left open is a
+# short answer, not a wrong one - and stdout is still complete for every
+# memory this reader could open.
+if [ $# -eq 0 ]; then
+  if [ "$saw_entry" = 1 ]; then
+    printf '%s\n' "hoard-search: no readable file in the hoard - every memory file found was unreadable or was not a regular file, so nothing was searched." >&2
+  fi
+  exit 0
+fi
 
 now_ymd=$(date -u +%Y%m%d 2>/dev/null) || now_ymd="19700101"
 tab=$(printf '\t')
@@ -402,15 +458,17 @@ function relevance(   hay, i, hits) {
   # memory is fully relevant. Terms that were all DISCARDED mean the user
   # asked for something this tokeniser cannot look for, and handing back
   # the top of the store dresses it up as an answer to their question.
-  # Two ways a query arrives here with nothing left of it: a stopword on
-  # its own, and a short accented word - the tokeniser above replaces
+  # Three ways a query arrives here with nothing left of it: a stopword
+  # on its own; a short accented word - the tokeniser above replaces
   # every byte that is not an ASCII letter or digit with a space, so
-  # "n" plus "o" is all it can make of the Portuguese for "no", and those
-  # two pieces are dropped as fragments of a word this tokeniser cannot
-  # spell rather than as terms that were merely short. A one-character
-  # term the user actually typed is kept - see the comment on the
-  # tokeniser itself for the difference, and for why it is drawn on the
-  # word rather than on the fragment.
+  # "n" plus "o" is all it can make of the Portuguese for "no"; and a
+  # word ASCII punctuation shatters into one-character pieces and
+  # nothing longer, `O(n)` and `R&D` among them. In every one of the
+  # three the pieces are dropped as FRAGMENTS of a word rather than as
+  # terms that were merely short. A one-character token that is the whole
+  # of the word the user typed is kept - see the comment on the tokeniser
+  # itself for the difference, and for why it is drawn on the word rather
+  # than on the fragment.
   #
   # Measured on the committed script, against a two-memory hoard: `nao`
   # spelled with its tilde, and `que`, each returned EVERY memory with
@@ -457,11 +515,29 @@ function is_finite(v,   t) {
   #
   # WHAT DOES WORK IS THE FORMATTED VALUE, because printf is the C
   # library on all three and neither an infinity nor a nan can be spelled
-  # with digits. `%.1f` of a finite double is always `-?<digits>.<digit>`;
-  # of the others it is "nan", "inf", "+inf" or "-inf", all of which fail
-  # this pattern on all three of those awks. Checked on all three, both
-  # directions - including 1e300, which formats as three hundred digits and
-  # correctly reads as finite.
+  # with digits. UNDER LC_ALL=C, `%.1f` of a finite double is always
+  # `-?<digits>.<digit>`; of the others it is "nan", "inf", "+inf" or
+  # "-inf", all of which fail this pattern on all three of those awks.
+  # Checked on all three, both directions - including 1e300, which
+  # formats as three hundred digits and correctly reads as finite.
+  #
+  # THAT "UNDER LC_ALL=C" IS A PRECONDITION, NOT A DECORATION, and this
+  # function cannot check it. `%.1f` writes the decimal separator of the
+  # LOCALE, which is the same trap the paragraph above the awk
+  # invocation records for the `printf "%.4f"` that publishes the score.
+  # Measured here under LC_ALL=pt_BR.UTF-8, all three awks:
+  # `sprintf("%.1f", 0.5)` is "0,5" on awk 20200816 and on mawk 1.3.4 and
+  # fails the pattern above, while GNU Awk 5.4.1 prints "0.5" and is
+  # unaffected - so two of the three would answer false for EVERY value.
+  # Run end to end on the same two: with the LC_ALL=C dropped from the
+  # invocation below and the caller under pt_BR, every memory in a
+  # twenty-memory store came back with `importance` forced to 1 and
+  # `uses` forced to 0, each printing `0,2000` - five ranked lines,
+  # ranked by nothing, in a format no caller can parse. The single caller
+  # runs this program under `LC_ALL=C awk`, which is what makes the
+  # sentence above true; the guarantee belongs to that invocation, not to
+  # this function, and a second caller that dropped it would inherit the
+  # failure in silence.
   t = sprintf("%.1f", v)
   return (t ~ /^-?[0-9]+\.[0-9]$/)
 }
@@ -599,11 +675,11 @@ BEGIN {
   # is deliberately tiny - it exists to stop "the" and "a" from making
   # every memory look half-relevant, not to be a linguistics project.
   #
-  # A ONE-CHARACTER TOKEN IS KEPT WHEN THE USER TYPED ONE AND DROPPED
-  # WHEN THIS TOKENISER MANUFACTURED IT. Those are two different things
-  # and one rule on the LENGTH of the token answered them the same way,
-  # which
-  # lost the first of them outright:
+  # A ONE-CHARACTER TOKEN IS KEPT WHEN IT IS THE WHOLE OF THE WORD THE
+  # USER TYPED, AND DROPPED WHEN THIS TOKENISER MANUFACTURED IT OUT OF A
+  # LONGER ONE. Those are two different things and one rule on the
+  # LENGTH of the token answered them the same way, which lost the first
+  # of them outright:
   #
   #   - `c`, `r`, `x`, and so `c++`, `C++`, `C`, `R`, `C#`, `F#`, are
   #     real search terms that people really type. Measured on the
@@ -625,26 +701,56 @@ BEGIN {
   #     unrelated memories and the word for "action" six - ranked, scored
   #     and looking exactly like an answer. That is the lie scenario 22 of
   #     tests/test_hoard.sh exists to stop, re-arriving by a new route.
+  #   - ASCII PUNCTUATION SHATTERS A WORD EXACTLY THE SAME WAY, and a
+  #     test that asked only whether the word held a non-ASCII byte let
+  #     that whole class straight back in. The apostrophe is the one that
+  #     hurts, and this comment cannot spell it - the whole awk program
+  #     is a single-quoted shell word - so: an English possessive comes
+  #     apart into the noun and a lone `s`, `O(n)` into `o` and `n`,
+  #     `I/O` into `i` and `o`. Measured on a twenty-memory bilingual
+  #     store against the script that tested only for the non-ASCII byte,
+  #     a four-word possessive query about caching returned the two
+  #     memories it was really about at 0.3600 and then THREE with
+  #     nothing to do with the question at 0.1200, matched on nothing but
+  #     the `s` their own apostrophes had manufactured; and
+  #     `O(n) complexity` returned a memory titled
+  #     `sort -n reads inf above every negative`, which is a search for a
+  #     lone `n` under another name. Both are in scenario 22e of
+  #     tests/test_hoard.sh.
   #
-  # SO THE TEST IS ON THE WORD, NOT ON THE FRAGMENT. A word carrying any
-  # byte outside printable ASCII cannot be spelled in the alphabet this
-  # tokeniser indexes, so it contributes only its runs of two characters
-  # or more; a word spelled entirely in ASCII contributes all of its
-  # runs, one character included. `c++` searches for `c`; `naive` written
-  # with a diaeresis over the i searches for `na` and `ve`; the word for
-  # "no" contributes nothing and is answered by the stderr line below.
-  # `[^ -~]` is a BYTE range - space through tilde - which is well defined
-  # because this awk runs under LC_ALL=C.
+  # SO THE TEST IS ON THE WORD, NOT ON THE FRAGMENT, AND IT IS DRAWN
+  # TWICE. A one-character token survives only when the word it came from
+  # is spelled entirely in printable ASCII AND left exactly ONE
+  # alphanumeric run behind - that run is then the whole of the word,
+  # which is what "the user typed it" means here. `c++` leaves one run
+  # and searches for `c`; `O(n)` leaves two and searches for neither;
+  # `naive` written with a diaeresis over the i leaves `na` and `ve`,
+  # both long enough to stand on their own; the word for "no" leaves two
+  # one-character runs, contributes nothing, and is answered by the
+  # stderr line below. `[^ -~]` is a BYTE range - space through tilde -
+  # which is well defined because this awk runs under LC_ALL=C.
+  #
+  # WHAT THE RUN COUNT COSTS, said rather than implied: a word whose
+  # alphanumeric runs are ALL single characters loses every one of them,
+  # so `R&D` and `C++/C` are searched for as nothing at all and get the
+  # stderr line below. Each is a term someone could really type, and each
+  # is also, at this level, indistinguishable from `O(n)`. The other
+  # arm - keeping every ASCII fragment - is the defect measured just
+  # above, and it is the worse of the two, because it answers a question
+  # nobody asked instead of saying it could not read the one that was
+  # asked.
   #
   # `a`, `e` AND `o` JOIN THE STOPWORD LIST FOR THAT SAME CHANGE, and the
   # measurement is why. They are the English and Portuguese articles, and
   # they stand alone in ordinary titles constantly, so accepting
   # one-character tokens without them re-ranked queries that have nothing
-  # to do with any of this: on the same fixture, `a race in the parser`
-  # went from two memories tied at 0.4000 to seven, five of them matching
-  # nothing but a lone `a` at 0.1500, and the top two swapped places.
-  # With the three letters stopped, that query returns byte-identically
-  # what it returned before. What a real one-character term gains is
+  # to do with any of this: `a race in the parser` went from two memories
+  # tied at 0.4000 to seven, five of them matching nothing but a lone `a`
+  # at 0.1500, and the top two swapped places. That measurement is not a
+  # remembered one - scenario 22f of tests/test_hoard.sh builds the
+  # seven-memory store it was taken on, asserts both numbers against this
+  # script, and asserts the other seven against a copy of this script
+  # with the line below deleted. What a real one-character term gains is
   # unaffected - `c` and `r` are not articles.
   q_n = 0
   q_dropped = 0
@@ -654,10 +760,10 @@ BEGIN {
       word = tolower(qwords[w])
       shredded = (word ~ /[^ -~]/)
       gsub(/[^a-z0-9]+/, " ", word)
-      c = split(word, qparts, " ")
-      for (i = 1; i <= c; i++) {
+      nparts = split(word, qparts, " ")
+      for (i = 1; i <= nparts; i++) {
         t = qparts[i]
-        if (shredded && length(t) < 2) continue
+        if (length(t) < 2 && (shredded || nparts > 1)) continue
         if (t == "a" || t == "e" || t == "o") continue
         if (t == "the" || t == "and" || t == "for" || t == "que" || t == "com" || t == "para") continue
         q_n++
@@ -674,15 +780,20 @@ BEGIN {
     # THE QUERY IS NOT ECHOED INTO IT. It is text the user typed and may
     # carry a newline, which would make this two lines instead of one.
     #
-    # LIMIT, WRITTEN DOWN: this runs inside the awk pass, so a hoard that
-    # is missing or holds no readable file exits above without printing
-    # it. That state is the one where an empty answer is honest anyway -
-    # the store really does hold nothing - and buying the line there
-    # would mean a second copy of this tokeniser in the shell, which is
-    # the drift this file spends its length avoiding.
+    # LIMIT, WRITTEN DOWN: this runs inside the awk pass, so a hoard the
+    # shell never got as far as opening exits above without printing it.
+    # That covers two different stores and they are answered
+    # differently. A hoard that is MISSING OR EMPTY exits in silence,
+    # which is honest: it really does hold nothing, and buying this line
+    # there would mean a second copy of this tokeniser in the shell,
+    # which is the drift this file spends its length avoiding. A hoard
+    # that HOLDS FILES AND NONE OF THEM READABLE is not that store, and
+    # the sentence here used to say it was; it now gets a line of its own
+    # from the `$saw_entry` branch above, which says nothing about the
+    # terms - the terms are beside the point when no file was opened.
     if (q_n == 0) {
       q_dropped = 1
-      print "hoard-search: no usable search term - every term given was a stopword or held no letter or digit this reader can look for, so the hoard was not searched." > "/dev/stderr"
+      print "hoard-search: no usable search term - every term given was a stopword, held no letter or digit this reader can look for, or came apart into one-character fragments, so the hoard was not searched." > "/dev/stderr"
     }
   }
 }
