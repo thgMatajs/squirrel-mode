@@ -79,8 +79,8 @@ to be copied into a project's own `.cursor/commands/` if you want them there too
 | `/squirrel:off` | Turns the base rules off for the rest of the current session. |
 | `/squirrel:on` | Turns them back on in the current session. |
 | `/squirrel:rules` | Pulls the base rules into the current conversation by hand. A recovery path only — see below. |
-| `/squirrel:stash` | Records one durable memory — a correction, a decision, a bug and its fix — in your cross-project hoard. |
-| `/squirrel:dig` | Searches that hoard and shows ranked titles, then fetches only the one you open. Costs one permission prompt, because no hook can auto-approve the search command. |
+| `/squirrel:stash` | Records one durable memory — a correction, a decision, a bug and its fix — in your cross-project hoard. Costs one permission prompt: the memory write itself is auto-approved, but the `date` command that stamps it is a `Bash` call, and no hook can auto-approve one. |
+| `/squirrel:dig` | Searches that hoard and shows ranked titles, then fetches only the one you open; `--all` also searches superseded memories. Costs one permission prompt for the search and a second for that same `date` stamp when you open a memory — both `Bash` calls, for the same reason. |
 
 All ten exist on Claude Code. Codex gets `digest`, `plan`, `init`, and `tune`. Cursor gets
 `digest` and `plan` only — see the parity table below for why. On Cursor they are `/squirrel-digest`
@@ -165,13 +165,30 @@ exactly five kinds of file:
 - `profile-seen/<session-id>` — an empty marker whose timestamp is all that matters: it is how a
   session knows whether it has already been shown the current `profile.md`, and it is what makes a
   `/squirrel:tune` in one session reach the others.
-- `hoard/global/<id>.md`, `hoard/projects/<slug>/<id>.md` — durable memories, written by
-  `/squirrel:stash` and read by `/squirrel:dig`. One file per memory. These are the only files
-  squirrel-mode writes that are meant to outlive the project they were written in.
+- `hoard/global/<id>.md`, `hoard/projects/<slug>/<id>.md` — durable memories. One file per memory.
+  `/squirrel:stash` writes them, `/squirrel:dig` reads them, and **both also edit memories that
+  already exist**, which is the part of this that is easiest to miss. Opening a memory through
+  `/squirrel:dig` adds 1 to its `uses` and sets its `last_used` to now, so a memory you keep
+  consulting holds its rank and one nobody opens sinks on its own. Only your opening one counts;
+  appearing in a result list does not. And when a fact changes, `/squirrel:stash` writes the new
+  memory and then sets `status: superseded` and `superseded_by:` on the old one. Neither path ever
+  rewrites a title or a body, and neither deletes anything: the superseded version stays on disk and
+  is still findable with `/squirrel:dig --all`. A memory goes to `projects/<slug>/` only when this
+  session injected a checkpoint path that qualifies; otherwise it goes to `global/`, and
+  `/squirrel:stash` says which in its one-line confirmation. These are the only files squirrel-mode
+  writes that are meant to outlive the project they were written in.
 
 Installs from before this location moved have their data at an older path instead — see the note at
 the end of this section; squirrel-mode detects that and tells you, once per session, rather than
 moving it for you.
+
+**Your `profile.md` is quoted back into the model's context, and one class of line is marked when it
+is.** squirrel-mode appends its own lines after that quoted text — the checkpoint path, the hoard
+search command, the session off-token — and a line of yours that COULD otherwise begin exactly the
+way one of those does gets `[profile] ` put in front of it before the model sees it, so it cannot be
+read as squirrel-mode's own ([ADR-0008](./docs/adr/0008-hoard-auto-allow.md)). Nothing is deleted
+and nothing is reworded: the marker exists only in the injected copy, and the file on disk stays
+byte for byte what `/squirrel:init` and `/squirrel:tune` wrote.
 
 **It also deletes, on its own, at session start.** Three prunes run in `scripts/load-profile.sh`, and
 only there — never on an ordinary message:
@@ -191,9 +208,15 @@ its relevance already stops appearing in results by its own score — which is r
 is not.
 
 **Search reads every memory file on each run, with no index.** Measured on the author's machine, a
-query costs about 44 ms at 500 memories, 79 ms at 1000, and 155 ms at 2000 — and at 2000, 110 ms of
-that 155 ms is the `awk` pass over every file's frontmatter, which is the no-index design itself
-doing the work. It did not start out that way. The same query cost 12.08 s at 2000 until the list of
+query costs about 44 ms at 500 memories, 79 ms at 1000, and 155 ms at 2000. Re-measured
+independently on that machine, those totals hold — 42, 81 and 159 ms — but the split this paragraph
+used to publish does not. At the 2000-memory size the `awk` pass over every file's frontmatter is
+about 84 ms of the 159 ms, not the 110 of 155 claimed here before; most of the rest is the shell
+enumerating the files and checking them one stat at a time. And that share is a fact about one machine's toolchain rather
+than about the design: on the same run it moves between about a third and about two thirds depending
+on which `awk` is installed.
+[docs/specs/2026-08-13-hoard-design.md](./docs/specs/2026-08-13-hoard-design.md) §5.1 carries the
+method and the per-phase numbers. It did not start out that way. The same query cost 12.08 s at 2000 until the list of
 files handed to `awk` stopped being assembled one file at a time: appending a file to that list
 rebuilds the whole list, so building it cost O(n²) rather than O(n). Assembling each layer's files in
 one step instead took that phase from 12.05 s to 42 ms and left the results byte-identical. Three
@@ -255,6 +278,17 @@ both add refusals rather than removing any: a file sitting directly inside `hoar
 level down is refused auto-approval for every tool, `Read` included, and a `Write` or `Edit` whose
 text looks like it carries a credential is refused too — that write falls back to the normal
 permission prompt and you decide, rather than going through without one.
+
+**What that auto-approval does not buy, stated as a number rather than left to be discovered.** It
+covers the file operations and nothing else, and both hoard commands need one thing that is not a
+file operation: a UTC timestamp, built by running `date -u +%Y%m%dT%H%M%SZ`. That is a `Bash` call,
+and the rule above holds for it unchanged — no hook can auto-approve a `Bash` call, at any path — so
+it goes through the normal permission flow. In an interactive session the true cost is therefore
+**one prompt for a `/squirrel:stash`** (the memory write is auto-approved; the stamp is not) and
+**two for a `/squirrel:dig` you open a memory from** — one for the search script, which is also a
+`Bash` call, and one for the stamp the `uses`/`last_used` edit needs. The read and the edit
+themselves are auto-approved. What ADR-0008 buys is that the writes are silent, not that the
+commands are.
 
 That credential check matches unambiguous shapes only — private-key headers, a handful of provider
 token prefixes, and one `key = <long opaque string>` rule — and **it is not a complete secret

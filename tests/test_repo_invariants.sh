@@ -112,7 +112,30 @@ fi
 #         exclusion" section disclosed only the visibility-scan exemption, never this one — an
 #         undisclosed scope change the document's own stated promise (report every scope change
 #         plainly) does not allow. Deleted outright rather than narrowed, since there was nothing to
-#         narrow to. `.sh` files are excluded structurally (not by denylist) because this project's
+#         narrow to.
+#         [Hoard docs fix] docs/specs/* and docs/plans/* ARE on this denylist, for the GLOSSARY scan
+#         only, and the difference from the ACCEPTANCE.md case above is the whole justification: this
+#         exemption protects against real hits, not against none. Both files carry a copy of the
+#         glossary's own `_Avoid_` vocabulary — docs/specs/2026-08-13-hoard-design.md §3's naming
+#         table, whose last column IS an avoid list, and docs/plans/2026-08-13-hoard-phase-1.md's
+#         task text specifying what CONTEXT.md's entries should say — so they trip on the avoided
+#         term for the same reason CONTEXT.md does: they are quoting the rule, not breaking it. They
+#         are also the same CATEGORY the denylist already names (internal design records, like
+#         PLAN.md and docs/adr/*), not a new one invented to make a term pass.
+#         WHAT IT GIVES UP, stated because an exemption that does not say so is the half-true
+#         guarantee this file exists to stop: those two files — 579 and 1986 lines, both still
+#         edited — are no longer scanned for ANY of the terms in GLOSSARY_AVOID_REGEX, not just the
+#         two that made the exemption necessary. Measured before it shipped: `grep -cwiE` with the
+#         pre-fix regex returns 0 on both, so nothing was being caught today; what is given up is
+#         future coverage, not present coverage. It is deliberately NOT extended to the visibility
+#         scan's denylist a few lines below, which keeps both files in scope — they have zero
+#         visibility hits, so exempting them there would be an exemption protecting nothing, which
+#         is exactly what the deleted ACCEPTANCE.md precedent forbids. The two lists diverging is
+#         the point, not an oversight.
+#         The exemption is also self-enforcing in one direction: delete it and the real scan reddens
+#         immediately on those two files' avoid lines, so it cannot rot into a line nobody can
+#         explain.
+#         `.sh` files are excluded structurally (not by denylist) because this project's
 #         own shell
 #         comments use several of these same English words as ordinary engineering jargon ("host
 #         detection" in targets/*/install.sh, "the host lacks a hook" in scripts/build.sh) with no
@@ -142,6 +165,44 @@ fi
 #           - "instructions" (Base rules) — collides with `keep-coding-instructions` (the literal,
 #             correct output-style frontmatter key) and ordinary phrases like "chunking
 #             instructions" in docs/RESEARCH.md.
+#         [Hoard docs fix] CONTEXT.md's three hoard entries (hoard / Memory / Layer) added SEVEN
+#         avoid-terms, and none of them was in this regex — which is exactly the gap the comment at
+#         the end of this block forbids leaving open. All seven were run through the check this
+#         comment records, with the scan's own scope and flags (`grep -nwiE`, `*.md`/`*.mdc`, tests/
+#         skipped, this denylist applied). Two passed and are now in the regex; five collide and
+#         stay out, each with its cost written down here in the same form as the entries above:
+#           - "memory bank", "knowledge base" (hoard) — PASS, and now enforced. Their only in-scope
+#             hits were docs/specs/2026-08-13-hoard-design.md:61 and
+#             docs/plans/2026-08-13-hoard-phase-1.md:1844, both of them the avoid list itself being
+#             quoted; those two paths are denylisted for this scan (see 4a above, which states what
+#             that costs). Nowhere else in the repo produces either phrase — two-word phrases
+#             specific enough that ordinary prose has no reason to.
+#           - "note" (Memory) — ordinary English, 27 hits across 11 in-scope files, none of them a
+#             memory being called a note: README.md's "see the note at the end of this section",
+#             skills/digest/SKILL.md's "a rambling ticket, email, pasted note" (the digest command's
+#             own shipped subject list), docs/ACCEPTANCE.md's 14 "Note:" lines. NOT CAUGHT,
+#             therefore: a document that calls a hoard memory "a note".
+#           - "entry" (Memory) — 30 hits, and the collisions are this project's own vocabulary for
+#             other things entirely: skills/pickup/SKILL.md's "Done log entries" / "drop an entry
+#             that repeats one you already have" (shipped, correct, about the checkpoint), and
+#             docs/RESEARCH.md's citation entries. NOT CAUGHT: "entry" used for a memory.
+#           - "fact" (Memory) — 22 hits, and the decisive one is shipped skill text:
+#             skills/stash/SKILL.md's `reference` type is DEFINED as "A fact, a state, or a
+#             pointer", and its "When a fact changed, supersede instead of editing" heading is the
+#             supersede rule's own name. Banning the word would fail on the file that teaches it.
+#             NOT CAUGHT: "fact" used as a synonym for the memory rather than for what it records.
+#           - "record" (Memory) — 38 hits, the worst of the five, because it is a VERB in shipped
+#             product text: skills/stash/SKILL.md's frontmatter description opens "Record one
+#             durable memory", and rules/base-rules.md:149 (plus every artifact scripts/build.sh
+#             generates from it — output-styles/, targets/codex/AGENTS.md, targets/cursor/*.mdc)
+#             says "a checkpoint, a plan, or any other record". NOT CAUGHT: "record" used as a noun
+#             for a memory.
+#           - "namespace" (Layer) — 5 hits, and the two in scope are a true statement about a real
+#             product surface, not a synonym for a hoard layer: README.md:87 and
+#             docs/OTHER-TOOLS.md:174 both say "Cursor has no command namespace", which is why the
+#             Cursor skills are named `squirrel-digest` rather than `/squirrel:digest`. Same shape
+#             as the "/config" collision recorded above. NOT CAUGHT: "namespace" used for `global`
+#             or `projects/<slug>`.
 #         GLOSSARY_AVOID_REGEX below lists exactly the terms that were checked, by hand, against
 #         every in-scope file before this fix shipped, and found to have zero legitimate collision —
 #         mostly multi-word phrases ("formatting rules", "session file", "drift detection", ...)
@@ -293,6 +354,37 @@ PIN_SKILLS_ON_HARDOFF='The hard off is `/plugin disable squirrel@squirrel-mode`,
 # directory prefix, not as part of a blanket docs/* exclusion — files
 # like docs/RESEARCH.md and docs/OTHER-TOOLS.md are user-facing and
 # stay in scope.
+#
+# WHAT THE docs/adr/ PREFIX GIVES UP FOR THE GLOSSARY SCAN, COUNTED
+# RATHER THAN LEFT AS A CATEGORY. A category comment says why a class is
+# exempt; it does not say what the exemption is letting through, and this
+# repo's rule is that an exemption has to say what it gives up. Counted
+# against the real files with the scan's own `grep -nwiE`, the prefix is
+# NOT empty — five lines in three ADRs match GLOSSARY_AVOID_REGEX today:
+#   - docs/adr/0008-hoard-auto-allow.md:63 — "the skill's own instruction
+#     not to write one is the only thing in front of it". `the skill` is
+#     in the regex. Defensible: that paragraph is reasoning about one
+#     specific skill file (skills/stash/SKILL.md) and its point is that
+#     an instruction is not enforcement — it is not standing in for the
+#     base rules, which is what CONTEXT.md reserves the phrase against.
+#   - docs/adr/0005-session-flag-off-switch.md:5, :49, :62 — three more
+#     `the skill`, all of them about `/squirrel:off`'s own skill file.
+#     Same shape, same judgement.
+#   - docs/adr/0004-tiered-parity-across-targets.md:3 — "each gets the
+#     deepest integration its host actually supports". This one is NOT
+#     defensible on the same grounds: `host` is exactly the word
+#     CONTEXT.md's Target entry reserves, and this is the reserved word
+#     standing where the canonical name belongs — the same defect as the
+#     README.md regression this whole scan was written against. It is
+#     inside the exemption, so the scan is silent about it. Left standing
+#     rather than corrected here because ADR-0004 belongs to the trail
+#     this file only measures, and a test file is the wrong place to
+#     rewrite a decision record from.
+# So the honest statement of the giveaway is not "an ADR might one day
+# drift": one already has, the exemption is why nothing says so, and the
+# cost of keeping it is that the ADR trail is checked by review alone.
+# These are counts against what those files say today, not a permanent
+# property — re-run the grep if the trail is rewritten.
 
 # GLOSSARY_AVOID_REGEX — [U6 fix] the hand-picked, hand-collision-checked subset of CONTEXT.md's
 # `_Avoid_` vocabulary this scan actually enforces (see exclusion 4 above for exactly which terms
@@ -300,7 +392,12 @@ PIN_SKILLS_ON_HARDOFF='The hard off is `/plugin disable squirrel@squirrel-mode`,
 # multi-word, at both ends by a non-word character or string boundary — "host" cannot match inside
 # "hosted" or "hostile", and "squirrel mode" (a literal space) cannot match "squirrel-mode" (a
 # literal hyphen) regardless of -w, since the two are different characters to begin with.
-GLOSSARY_AVOID_REGEX="host|platform|client|IDE|formatting rules|style rules|the skill|state file|session file|context file|changelog|completed tasks|backlog|icebox|drift detection|focus check|nag|onboarding|wizard|plugin name|package name|squirrel mode"
+#
+# [Hoard docs fix] `memory bank` and `knowledge base` are the two terms CONTEXT.md's hoard entry
+# added that survive the by-hand collision check — see exclusion 4b above for all seven that were
+# checked and the cost of the five that stay out, and 4a for what denylisting the two files that
+# quote the avoid list gives up.
+GLOSSARY_AVOID_REGEX="host|platform|client|IDE|formatting rules|style rules|the skill|state file|session file|context file|changelog|completed tasks|backlog|icebox|drift detection|focus check|nag|onboarding|wizard|plugin name|package name|squirrel mode|memory bank|knowledge base"
 
 # PROFILE_VERBATIM_REGEX — no tracked file may assert that the quoted
 # profile body can spell any line squirrel-mode injects.
@@ -454,10 +551,17 @@ for f in $(git -C "$repo_root" ls-files); do
   # docs/ACCEPTANCE.md is deliberately NOT on this denylist (see exclusion 4 above): its old
   # exemption here had zero real hits to protect against and was never disclosed in this document's
   # own "Note on its own exclusion" section, so it is deleted outright rather than narrowed.
+  #
+  # [Hoard docs fix] docs/specs/* and docs/plans/* are on THIS denylist and NOT on the visibility
+  # scan's a few lines above, and the divergence is deliberate: they carry a copy of the glossary's
+  # own `_Avoid_` vocabulary (a naming table and the task text that specified it), which is the
+  # CONTEXT.md situation exactly, and they have zero visibility hits, which is the ACCEPTANCE.md
+  # situation exactly. Exempting them here protects against something real; exempting them there
+  # would protect against nothing. Exclusion 4a above states what this one costs.
   case "$f" in
     *.md | *.mdc)
       case "$f" in
-        PLAN.md | docs/adr/* | CONTEXT.md | .build-checkpoint.md)
+        PLAN.md | docs/adr/* | CONTEXT.md | .build-checkpoint.md | docs/specs/* | docs/plans/*)
           ;;
         *)
           if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$repo_root/$f" 2>/dev/null; then
@@ -576,6 +680,43 @@ else
   y1_glossary_caught=no
 fi
 assert_eq "yes" "$y1_glossary_caught" "FAILURE PROOF (invariant 7, Y1): with docs/ACCEPTANCE.md's glossary-scan exemption deleted, appending 'The installers write only to the host directories listed above.' to it must be caught"
+
+# [Hoard docs fix] FAILURE PROOFS for the two terms CONTEXT.md's hoard entry added and this fix
+# enforces. Each is appended to a copy of a REAL in-scope file (README.md, whose privacy section is
+# where a memory would most plausibly be miscalled), not to a hand-written fixture, and each mutant
+# is `cmp`-checked first: an append that produced a byte-identical file would leave a proof that
+# reports clean while proving nothing.
+for glossary_new_term in "memory bank" "knowledge base"; do
+  glossary_new_fixture="$glossary_avoid_scratch/README_$(printf '%s' "$glossary_new_term" | tr ' ' '_').md"
+  cp "$repo_root/README.md" "$glossary_new_fixture"
+  printf '\nThe hoard is squirrel-mode'"'"'s %s, and it is read in every future session.\n' "$glossary_new_term" >>"$glossary_new_fixture"
+  if cmp -s "$repo_root/README.md" "$glossary_new_fixture"; then
+    glossary_new_differs=no
+  else
+    glossary_new_differs=yes
+  fi
+  assert_eq "yes" "$glossary_new_differs" "FAILURE PROOF (invariant 7, '$glossary_new_term'), control: the mutant must genuinely differ from README.md"
+  if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$glossary_new_fixture" 2>/dev/null; then
+    glossary_new_caught=yes
+  else
+    glossary_new_caught=no
+  fi
+  assert_eq "yes" "$glossary_new_caught" "FAILURE PROOF (invariant 7): calling the hoard a '$glossary_new_term' in a scratch copy of README.md must be caught — CONTEXT.md's hoard entry reserves both phrases and this scan now enforces them"
+done
+
+# [Hoard docs fix] And the other half of that exemption, asserted rather than asserted-in-a-comment:
+# docs/specs/2026-08-13-hoard-design.md must REALLY match the regex, because its section 3 naming
+# table quotes the avoid list. That is what makes its place on the glossary denylist an exemption
+# protecting something real rather than the empty one docs/ACCEPTANCE.md's used to be — the
+# distinction the exclusion-4a comment draws, kept honest by a check instead of by memory. Delete
+# the denylist entry and the scan reddens here; delete this assertion's subject line from the spec
+# and this assertion reddens instead.
+if grep -qwiE "$GLOSSARY_AVOID_REGEX" "$repo_root/docs/specs/2026-08-13-hoard-design.md" 2>/dev/null; then
+  spec_quotes_avoid_list=yes
+else
+  spec_quotes_avoid_list=no
+fi
+assert_eq "yes" "$spec_quotes_avoid_list" "docs/specs/2026-08-13-hoard-design.md must still contain the avoid-list terms its section 3 naming table quotes — that is the whole justification for its glossary-scan exemption, and an exemption protecting nothing is the one this file already deleted once"
 
 # 7b. No tracked file may assert that the quoted profile body can spell any line squirrel-mode
 #     injects. See PROFILE_VERBATIM_REGEX above for why this is a scan and not a sweep - the

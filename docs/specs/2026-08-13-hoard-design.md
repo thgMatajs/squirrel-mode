@@ -172,8 +172,31 @@ migration, no divergence between a file and its index. Every one of those is a f
 exists only because the index exists.
 
 The cost is a ceiling, and phase 1 measured where it sits. On the author's machine a query costs
-about 44 ms at 500 memories, 79 ms at 1000, and 155 ms at 2000; at 2000, 110 ms of that 155 ms is the
-awk frontmatter pass itself, so the scan this section defends is now most of what a search spends.
+about 44 ms at 500 memories, 79 ms at 1000, and 155 ms at 2000.
+
+**The split inside that total was published wrong, and this is the correction.** This section used to
+say that at 2000, 110 ms of the 155 ms was the awk frontmatter pass, and concluded from it that the
+scan this section defends is most of what a search spends. Re-measured independently on the same
+machine — the real `scripts/hoard-search.sh` run whole, and again cut short after the two `set --`,
+after the prescan, and after awk, so every phase is timed inside one run, in one locale, against one
+fixture — the totals reproduce and the attribution does not. The totals came back 42, 81 and 159 ms
+at the three sizes. At the 2000-memory size the phases are about **41 ms** expanding the two globs,
+**29 ms** in the prescan that keeps a FIFO or a broken symlink away from awk, **84 ms** in awk, and
+about 2 ms in the trailing `sort | head | read` loop. The awk pass is about half of the run, not the 71% the old
+number implied, and the shell's own enumeration of the files is most of the other half.
+
+**Half is not a property of the design either.** On the same fixture, the same run and the same
+machine, `mawk` does that pass in about 53 ms and `gawk` in about 114 ms — a third to two thirds of
+the same 159 ms — so which awk the machine ships decides the share more than the design does.
+(Locale moves it too: the glob expansion is locale-collated, so under `LC_ALL=C` it drops from about
+41 ms to under 2 ms, the total to about 112 ms, and awk's share rises to about 85%. The numbers above
+are from the ambient `pt_BR.UTF-8`, which is the condition the published totals were taken in, with
+the awk macOS ships — version 20200816.) What *is* a property of the design is that every search
+reads every file, so both the enumeration and the parse grow with the number of memories.
+
+The paragraph below is the same kind of correction one level up, and the two are worth reading
+together: the first measurement corrected which *component* dominated, this one corrects the split
+inside what was left. A number nobody re-ran is not a measurement.
 
 That is a correction, not just a number, and the sequence matters. This section originally attributed
 the cost of a search to the no-index scan described above, without having measured either. The first
@@ -198,8 +221,11 @@ hang.
 Measured during phase 1; see README.md. The phase-1 subject is `scripts/hoard-search.sh`, not the
 brief, because the brief does not exist until phase 2. Three sizes on one machine locate the cost at
 those sizes, not the ceiling. If the ceiling is ever reached, an index is a backward-compatible
-addition, because the files remain the source of truth either way — and it is now the awk scan that
-such an index would have to beat, which is the comparison this section always meant to be about.
+addition, because the files remain the source of truth either way — and what such an index would
+have to beat is the **whole per-search cost**, not the awk pass alone. An index replaces the
+enumeration and the prescan as well as the parse, and on the numbers above those two are about 44%
+of the run at 2000. Naming the awk pass as the thing to beat, as this section did before the split
+was re-measured, would have set the bar at roughly half the real one.
 
 ## 6. Lifecycle
 
@@ -545,8 +571,14 @@ in a fresh session, because a green suite that never ran the product proves noth
 Phases are separable and each leaves the repository releasable:
 
 1. **Storage and `stash`/`dig`** — the files, the awk ranking, two commands. ADR-0008's auto-approval
-   lands here too, because without it every `stash` stops to ask for permission and the command is
-   not usable in practice.
+   lands here too, because without it every `stash` stops to ask for permission *on the write itself*
+   and the command is not usable in practice. What it does not remove is the timestamp. Both commands
+   build one by running `date -u +%Y%m%dT%H%M%SZ`, which is a `Bash` call, and `hooks/hooks.json`
+   registers the `PreToolUse` hook for `Write|Edit|Read` only — no hook is invoked for a `Bash` call,
+   so none can auto-approve one. As shipped, a `/squirrel:stash` therefore costs one permission
+   prompt and a `/squirrel:dig` that opens a memory costs two: the search script, which is also a
+   `Bash` call, and the stamp the reinforcement edit needs. The auto-approval makes the writes
+   silent; it does not make the commands silent, and `README.md` publishes both numbers.
 2. **The brief** — `SessionStart` injection, both caps, the `memory` profile field.
 3. **Capture and repetition** — the correction matcher, the inbox, `seen`, `/squirrel:hoard`.
 4. **Rule 17 and the amendments** — the rule, the trailing-line ordering, ADR-0007, and the README

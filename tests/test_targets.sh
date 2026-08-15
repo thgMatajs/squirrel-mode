@@ -2025,6 +2025,172 @@ plan_mutant_line_count=$(printf '%s\n' "$plan_mutant_table" | sed '/^$/d' | wc -
 assert_eq "0" "$plan_mutant_line_count" "FAILURE PROOF (scenario 33, PLAN.md): reverting PLAN.md's table header to the old 'Auto profile' wording in a scratch copy must make the exact-header extractor find no table at all"
 
 # ==========================================================================
+# 33b. The OTHER cross-file table, which scenario 33 never covered.
+#
+#      WHY THIS EXISTS. docs/OTHER-TOOLS.md and PLAN.md Section 3 each
+#      carry a "Which commands port" table, and the two drifted apart in
+#      exactly the way scenario 33 was written to catch for the parity
+#      table - and nothing caught it, because scenario 33 pins only the
+#      table whose header starts "| Target |". docs/OTHER-TOOLS.md gained
+#      a `stash` row and a `dig` row and moved its heading from "the other
+#      four" to "the other six"; PLAN.md kept seven rows and the word
+#      "four". Both copies were wrong about something a reader would act
+#      on, and the suite was green throughout. One unpinned copy of a
+#      pinned kind of table is the whole defect.
+#
+#      WHAT IS PAIRED, AND WHAT DELIBERATELY IS NOT. The first four
+#      columns - the command name and its ✅/❌ for the three targets -
+#      are pinned line for line. The fifth column, "Reason", is NOT: the
+#      two documents legitimately explain the same fact at different
+#      length and for different readers (PLAN.md is the build plan,
+#      docs/OTHER-TOOLS.md is the page a user reads before installing),
+#      and forcing those paragraphs to match byte for byte would be
+#      pinning a writing style rather than a fact. What a reader acts on
+#      is which commands exist and which targets have them; that is what
+#      is pinned. Truncation is by `|` count, which is safe here because
+#      no cell in the first four columns contains a `|` - they hold a
+#      command name in backticks and single characters.
+#
+#      THE HEADING'S NUMBER IS PINNED TWICE, on purpose. Once across the
+#      two files (they must agree), and once against the table itself
+#      (the word must be the number of COMMANDS marked ❌ for both Codex
+#      and Cursor). Cross-file equality alone would pass if both copies
+#      went stale together, which is the more likely next failure now
+#      that one of them is being kept in step by hand. Deriving it from
+#      the table is what makes the heading a claim about the rows rather
+#      than a sentence nobody re-counts.
+#
+#      COMMANDS, NOT ROWS: `off` / `on` is one row naming two commands,
+#      which is why nine rows and six unported commands are both correct
+#      at once. The first cell is split on " / " and each name counted.
+# ==========================================================================
+extract_port_table() {
+  # extract_port_table <file> - prints the "| Command | Claude Code |
+  # Codex | Cursor | Reason |" table with everything from the fifth `|`
+  # onward removed, or nothing if no such table exists in <file>. Same
+  # exact-header discipline as extract_parity_table above, and for the
+  # same reason: a column added to one copy makes this return NOTHING for
+  # that file, and the equality assertion below fails loudly rather than
+  # comparing two tables that happen to share four columns.
+  awk '
+    BEGIN { capture = 0 }
+    /^\| Command \| Claude Code \| Codex \| Cursor \| Reason \|$/ { capture = 1; print; next }
+    capture == 1 && /^\|/ { print; next }
+    capture == 1 { capture = 0 }
+  ' "$1" 2>/dev/null | sed 's/^\(\([^|]*|\)\{5\}\).*$/\1/'
+}
+
+port_heading_word() {
+  # port_heading_word <file> - the number word in that file's "Which
+  # commands port, and why the other <word> cannot" heading. Matched
+  # without anchoring to the surrounding markup, because the two files
+  # render the same sentence differently on purpose: a `##` heading in
+  # docs/OTHER-TOOLS.md, a bolded line ending in a full stop in PLAN.md.
+  grep -o 'Which commands port, and why the other [a-z][a-z]* cannot' "$1" 2>/dev/null \
+    | sed 's/^.*why the other //; s/ cannot$//' | head -n 1
+}
+
+port_unported_command_count() {
+  # port_unported_command_count <file> - how many COMMANDS the table
+  # marks ❌ for both Codex and Cursor. `index()` against the literal
+  # character, not a regex and not a \x escape: the first keeps any awk's
+  # regex engine from having an opinion about a multi-byte character
+  # under any locale, and the second is a non-POSIX awk extension this
+  # file has no reason to depend on when the character itself is already
+  # written literally in the sed patterns below.
+  # Fields: $1 is empty (before the leading `|`), $2 Command, $3 Claude
+  # Code, $4 Codex, $5 Cursor.
+  extract_port_table "$1" | awk -F'|' '
+    NF >= 5 && index($4, "❌") > 0 && index($5, "❌") > 0 {
+      total += split($2, port_cmds, " / ")
+    }
+    END { print total + 0 }
+  '
+}
+
+port_number_word() {
+  case "$1" in
+    1) printf 'one' ;;
+    2) printf 'two' ;;
+    3) printf 'three' ;;
+    4) printf 'four' ;;
+    5) printf 'five' ;;
+    6) printf 'six' ;;
+    7) printf 'seven' ;;
+    8) printf 'eight' ;;
+    9) printf 'nine' ;;
+    10) printf 'ten' ;;
+    *) printf '<%s-has-no-word-here>' "$1" ;;
+  esac
+}
+
+other_tools_port_table=$(extract_port_table "$other_tools_doc")
+plan_port_table=$(extract_port_table "$plan_doc")
+
+# Vacuous-pass guard, the same shape scenario 33 uses: docs/OTHER-TOOLS.md's
+# own port table must yield exactly 11 lines (header + separator + 9 command
+# rows), or "identical" below could be true because nothing parsed on either
+# side.
+other_tools_port_line_count=$(printf '%s\n' "$other_tools_port_table" | sed '/^$/d' | wc -l | awk '{print $1}')
+assert_eq "11" "$other_tools_port_line_count" "parsing docs/OTHER-TOOLS.md's port table must yield exactly 11 lines: header + separator + 9 command rows (vacuous-pass guard for scenario 33b)"
+
+assert_eq "$other_tools_port_table" "$plan_port_table" "PLAN.md Section 3's port table must match docs/OTHER-TOOLS.md's, command for command and ✅/❌ for ✅/❌ (the Reason column is deliberately not compared)"
+
+other_tools_port_word=$(port_heading_word "$other_tools_doc")
+plan_port_word=$(port_heading_word "$plan_doc")
+assert_eq "six" "$other_tools_port_word" "docs/OTHER-TOOLS.md's port heading must name a number word this scenario can read - a heading that stopped matching would make the two comparisons below vacuous"
+assert_eq "$other_tools_port_word" "$plan_port_word" "PLAN.md's 'why the other <N> cannot' heading must name the same number as docs/OTHER-TOOLS.md's"
+
+other_tools_unported=$(port_unported_command_count "$other_tools_doc")
+assert_eq "$(port_number_word "$other_tools_unported")" "$other_tools_port_word" "docs/OTHER-TOOLS.md's heading number must equal the commands its own table marks ❌ for both Codex and Cursor ($other_tools_unported), so the sentence is a claim about the rows rather than one nobody re-counts"
+
+# --- Failure proof (a): a scratch copy of PLAN.md with one ✅/❌ cell of ---
+#     its port table flipped must stop matching docs/OTHER-TOOLS.md's. The
+#     mutant is diffed BEFORE it is trusted: a sed that matched nothing
+#     leaves a byte-identical copy, which the assertion correctly passes,
+#     and this proof would then report clean while proving the opposite.
+port_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-port-mutant.XXXXXX")
+cleanup_dirs="$cleanup_dirs $port_mutant_dir"
+port_cell_mutant="$port_mutant_dir/PLAN-cell.md"
+# shellcheck disable=SC2016 # single-quoted deliberately: the backticks below are
+# literal characters in PLAN.md's own markdown table cell, not command substitution.
+sed 's/^| `stash` | ✅ | ❌ | ❌ |/| `stash` | ✅ | ✅ | ❌ |/' "$plan_doc" >"$port_cell_mutant"
+if cmp -s "$plan_doc" "$port_cell_mutant"; then port_cell_differs=no; else port_cell_differs=yes; fi
+assert_eq "yes" "$port_cell_differs" "FAILURE PROOF (scenario 33b), control: the cell mutation must genuinely change PLAN.md - if it does not, PLAN.md no longer carries the row this proof mutates and the proof below is passing for a reason nobody chose"
+if [ "$(extract_port_table "$port_cell_mutant")" = "$other_tools_port_table" ]; then
+  port_cell_mutant_matches=yes
+else
+  port_cell_mutant_matches=no
+fi
+assert_eq "no" "$port_cell_mutant_matches" "FAILURE PROOF (scenario 33b): flipping one target cell of PLAN.md's port table in a scratch copy must make the line-for-line equality check fail"
+
+# --- Failure proof (b): the exact regression this scenario was written ---
+#     against - PLAN.md's heading left at "four" while the table carries
+#     nine rows - must be caught, both against docs/OTHER-TOOLS.md and
+#     against the table's own ❌/❌ count.
+port_word_mutant="$port_mutant_dir/PLAN-four.md"
+sed 's/why the other six cannot/why the other four cannot/' "$plan_doc" >"$port_word_mutant"
+if cmp -s "$plan_doc" "$port_word_mutant"; then port_word_differs=no; else port_word_differs=yes; fi
+assert_eq "yes" "$port_word_differs" "FAILURE PROOF (scenario 33b), control: the heading mutation must genuinely change PLAN.md"
+assert_eq "four" "$(port_heading_word "$port_word_mutant")" "FAILURE PROOF (scenario 33b): the stale 'why the other four cannot' heading must be readable as such in the mutant"
+if [ "$(port_heading_word "$port_word_mutant")" = "$other_tools_port_word" ]; then
+  port_word_mutant_matches=yes
+else
+  port_word_mutant_matches=no
+fi
+assert_eq "no" "$port_word_mutant_matches" "FAILURE PROOF (scenario 33b): PLAN.md's pre-fix 'four' heading must no longer agree with docs/OTHER-TOOLS.md's"
+
+# --- Failure proof (c): deleting the `dig` row from a scratch copy of ---
+#     docs/OTHER-TOOLS.md must break the derived count, proving the
+#     heading is pinned to the rows and not merely to the other file.
+port_row_mutant="$port_mutant_dir/OTHER-TOOLS-norow.md"
+# shellcheck disable=SC2016 # literal markdown, see above.
+sed '/^| `dig` | ✅ | ❌ | ❌ |/d' "$other_tools_doc" >"$port_row_mutant"
+if cmp -s "$other_tools_doc" "$port_row_mutant"; then port_row_differs=no; else port_row_differs=yes; fi
+assert_eq "yes" "$port_row_differs" "FAILURE PROOF (scenario 33b), control: the row deletion must genuinely change docs/OTHER-TOOLS.md"
+assert_eq "5" "$(port_unported_command_count "$port_row_mutant")" "FAILURE PROOF (scenario 33b): with the \`dig\` row deleted the derived count must fall to 5, so the 'six' in the heading no longer matches the table it describes"
+
+# ==========================================================================
 # 34. [S9, PLAN.md Section 5: "Installs user-scoped; zero files written
 #     inside any project repository"] Running either installer from
 #     INSIDE a project directory -- the realistic case: a developer runs
