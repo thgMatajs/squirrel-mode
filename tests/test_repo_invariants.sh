@@ -217,11 +217,13 @@ scratch_before=$(scratch_snapshot)
 #             either phrase; two-word phrases specific enough that ordinary prose has no reason to.
 #             The GLOSSARY-COST scenario pins that set of three, by file and line, so "nowhere else"
 #             is a check rather than a memory.
-#           - "note" (Memory) — glossary-cost note: 26 hits across 10 in-scope files. Ordinary
+#           - "note" (Memory) — glossary-cost note: 28 hits across 12 in-scope files. Ordinary
 #             English, and none of them is a memory being called a note: README.md's "see the note
 #             at the end of this section", skills/digest/SKILL.md's "a rambling ticket, email,
-#             pasted note" (the digest command's own shipped subject list), and 14 lines of
-#             docs/ACCEPTANCE.md using the ordinary word. NOT CAUGHT, therefore: a document that
+#             pasted note" (the digest command's own shipped subject list), 14 lines of
+#             docs/ACCEPTANCE.md using the ordinary word, and the Cursor-generated
+#             targets/cursor/skills/squirrel-off/SKILL.md and squirrel-on/SKILL.md copies of
+#             "PENDING note" / "CLEAR note". NOT CAUGHT, therefore: a document that
 #             calls a hoard memory "a note".
 #           - "entry" (Memory) — glossary-cost entry: 24 hits across 5 in-scope files, and the
 #             collisions are this project's own vocabulary for other things entirely:
