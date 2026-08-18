@@ -143,7 +143,7 @@ for cmd in "$@"; do
 done
 
 # ==========================================================================
-# 3. Cursor skills dir ships digest, plan, init, and tune.
+# 3. Cursor skills dir ships digest, plan, init, tune, and pickup.
 # ==========================================================================
 cursor_skills_dir="$repo_root/targets/cursor/skills"
 cursor_skill_count=0
@@ -153,10 +153,11 @@ for d in "$cursor_skills_dir"/*; do
   cursor_skill_count=$((cursor_skill_count + 1))
   cursor_skill_names="$cursor_skill_names $(basename "$d")"
 done
-assert_eq "4" "$cursor_skill_count" "targets/cursor/skills/ must contain exactly 4 skills (squirrel-digest, squirrel-plan, squirrel-init, squirrel-tune); do not assert 10 skills yet"
+assert_eq "5" "$cursor_skill_count" "targets/cursor/skills/ must contain exactly 5 skills (squirrel-digest, squirrel-plan, squirrel-init, squirrel-tune, squirrel-pickup); do not assert 10 skills yet"
 assert_contains "$cursor_skill_names" "squirrel-digest" "targets/cursor/skills/ must include squirrel-digest"
 assert_contains "$cursor_skill_names" "squirrel-plan" "targets/cursor/skills/ must include squirrel-plan"
 assert_contains "$cursor_skill_names" "squirrel-init" "targets/cursor/skills/ must include squirrel-init"
 assert_contains "$cursor_skill_names" "squirrel-tune" "targets/cursor/skills/ must include squirrel-tune"
+assert_contains "$cursor_skill_names" "squirrel-pickup" "targets/cursor/skills/ must include squirrel-pickup"
 
 assert_report
