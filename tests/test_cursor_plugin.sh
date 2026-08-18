@@ -143,7 +143,7 @@ for cmd in "$@"; do
 done
 
 # ==========================================================================
-# 3. Cursor skills dir ships digest, plan, init, tune, and pickup.
+# 3. Cursor skills dir ships digest, plan, init, tune, pickup, stash, dig.
 # ==========================================================================
 cursor_skills_dir="$repo_root/targets/cursor/skills"
 cursor_skill_count=0
@@ -153,11 +153,15 @@ for d in "$cursor_skills_dir"/*; do
   cursor_skill_count=$((cursor_skill_count + 1))
   cursor_skill_names="$cursor_skill_names $(basename "$d")"
 done
-assert_eq "5" "$cursor_skill_count" "targets/cursor/skills/ must contain exactly 5 skills (squirrel-digest, squirrel-plan, squirrel-init, squirrel-tune, squirrel-pickup); do not assert 10 skills yet"
-assert_contains "$cursor_skill_names" "squirrel-digest" "targets/cursor/skills/ must include squirrel-digest"
-assert_contains "$cursor_skill_names" "squirrel-plan" "targets/cursor/skills/ must include squirrel-plan"
-assert_contains "$cursor_skill_names" "squirrel-init" "targets/cursor/skills/ must include squirrel-init"
-assert_contains "$cursor_skill_names" "squirrel-tune" "targets/cursor/skills/ must include squirrel-tune"
-assert_contains "$cursor_skill_names" "squirrel-pickup" "targets/cursor/skills/ must include squirrel-pickup"
+assert_eq "7" "$cursor_skill_count" "targets/cursor/skills/ must contain exactly 7 skills (squirrel-digest, squirrel-plan, squirrel-init, squirrel-tune, squirrel-pickup, squirrel-stash, squirrel-dig); do not assert 10 skills yet"
+# Trailing space on the haystack so "squirrel-dig" cannot match as a
+# prefix of "squirrel-digest".
+assert_contains "$cursor_skill_names " " squirrel-digest " "targets/cursor/skills/ must include squirrel-digest"
+assert_contains "$cursor_skill_names " " squirrel-plan " "targets/cursor/skills/ must include squirrel-plan"
+assert_contains "$cursor_skill_names " " squirrel-init " "targets/cursor/skills/ must include squirrel-init"
+assert_contains "$cursor_skill_names " " squirrel-tune " "targets/cursor/skills/ must include squirrel-tune"
+assert_contains "$cursor_skill_names " " squirrel-pickup " "targets/cursor/skills/ must include squirrel-pickup"
+assert_contains "$cursor_skill_names " " squirrel-stash " "targets/cursor/skills/ must include squirrel-stash"
+assert_contains "$cursor_skill_names " " squirrel-dig " "targets/cursor/skills/ must include squirrel-dig"
 
 assert_report
