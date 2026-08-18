@@ -1,10 +1,10 @@
 #!/bin/sh
 # Coverage for S3: scripts/build.sh and the four BASE-RULES-DERIVED generated
 # artifacts it produces (output-styles/squirrel-mode.md, skills/rules/SKILL.md,
-# targets/codex/AGENTS.md, targets/cursor/squirrel-mode.mdc) -- four of the eighteen
-# total artifacts build.sh generates. The other fourteen (the ported Codex
+# targets/codex/AGENTS.md, targets/cursor/squirrel-mode.mdc) -- four of the twenty
+# total artifacts build.sh generates. The other sixteen (the ported Codex
 # skills, Cursor commands, Cursor Agent Skills, and Cursor hooks.json) are a separate source
-# (skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md, not rules/base-rules.md) and are
+# (skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md, not rules/base-rules.md) and are
 # covered by tests/test_targets.sh instead, not duplicated here.
 #
 # This is where S3 is actually verified: idempotence, drift-from-source,
@@ -129,15 +129,15 @@ read_file() {
 }
 
 # make_build_scratch: creates a throwaway directory containing
-# scripts/build.sh, rules/base-rules.md, AND the seven real
-# skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md sources (build.sh resolves
+# scripts/build.sh, rules/base-rules.md, AND the nine real
+# skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md sources (build.sh resolves
 # its own repo root as the parent of its own script_dir, so a copy
 # running from scratch/scripts/build.sh reads scratch/rules/base-rules.md
 # and scratch/skills/*/SKILL.md, and writes into scratch/output-styles,
 # scratch/skills/rules, scratch/targets/* -- never touching the real
 # repo). Prints the scratch dir path.
 #
-# The seven skills/*/SKILL.md copies are NOT optional (S7's B1 fix):
+# The nine skills/*/SKILL.md copies are NOT optional (S7's B1 fix):
 # build.sh used to tolerate a missing skills/<name>/SKILL.md as a
 # silent per-artifact skip, specifically so this fixture could omit
 # skills/ entirely and still build the four rules-derived artifacts.
@@ -159,7 +159,7 @@ make_build_scratch() {
   cp "$build_script" "$scratch/scripts/build.sh"
   chmod +x "$scratch/scripts/build.sh"
   cp "$base_rules_file" "$scratch/rules/base-rules.md"
-  for cmd_name in digest plan init tune pickup stash dig; do
+  for cmd_name in digest plan init tune pickup stash dig off on; do
     mkdir -p "$scratch/skills/$cmd_name"
     cp "$repo_root/skills/$cmd_name/SKILL.md" "$scratch/skills/$cmd_name/SKILL.md"
   done
@@ -169,7 +169,7 @@ make_build_scratch() {
 # --- NO SCENARIO IN THIS FILE MAY INVOKE THE REAL REPO'S build.sh -------
 #
 # build.sh derives its own repo_root from its own location, so running
-# "$build_script" (the repo's own copy) WRITES all eighteen generated
+# "$build_script" (the repo's own copy) WRITES all twenty generated
 # artifacts into the working tree under test. Scenarios 2, 13 and 13b
 # used to do exactly that, and the consequence was not theoretical: a
 # real drift -- e.g. a hand-edited `alwaysApply: false` in the committed
@@ -184,7 +184,7 @@ make_build_scratch() {
 # make_build_scratch above and runs "$scratch/scripts/build.sh". The
 # repository working tree is READ ONLY for the whole of this file, and
 # the repo_generated_* tripwire at the bottom asserts that outright.
-repo_generated_rel_paths="output-styles/squirrel-mode.md skills/rules/SKILL.md targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/skills/squirrel-init/SKILL.md targets/cursor/skills/squirrel-tune/SKILL.md targets/cursor/skills/squirrel-pickup/SKILL.md targets/cursor/skills/squirrel-stash/SKILL.md targets/cursor/skills/squirrel-dig/SKILL.md targets/cursor/hooks/hooks.json"
+repo_generated_rel_paths="output-styles/squirrel-mode.md skills/rules/SKILL.md targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/skills/squirrel-init/SKILL.md targets/cursor/skills/squirrel-tune/SKILL.md targets/cursor/skills/squirrel-pickup/SKILL.md targets/cursor/skills/squirrel-stash/SKILL.md targets/cursor/skills/squirrel-dig/SKILL.md targets/cursor/skills/squirrel-off/SKILL.md targets/cursor/skills/squirrel-on/SKILL.md targets/cursor/hooks/hooks.json"
 repo_generated_snapshot() {
   # Prints one cksum line per generated artifact, with the volatile
   # absolute path stripped, so the result compares equal across two
@@ -950,6 +950,8 @@ assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-tune/SKILL.md
 assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-pickup/SKILL.md" "atomicity fixture: the first (baseline) build must produce targets/cursor/skills/squirrel-pickup/SKILL.md"
 assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-stash/SKILL.md" "atomicity fixture: the first (baseline) build must produce targets/cursor/skills/squirrel-stash/SKILL.md"
 assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-dig/SKILL.md" "atomicity fixture: the first (baseline) build must produce targets/cursor/skills/squirrel-dig/SKILL.md"
+assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-off/SKILL.md" "atomicity fixture: the first (baseline) build must produce targets/cursor/skills/squirrel-off/SKILL.md"
+assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-on/SKILL.md" "atomicity fixture: the first (baseline) build must produce targets/cursor/skills/squirrel-on/SKILL.md"
 if [ -f "$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" ]; then
   cp "$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" "$atomic_snapshot_dir/cursor-skill-init.md"
 fi
@@ -964,6 +966,12 @@ if [ -f "$atomic_scratch/targets/cursor/skills/squirrel-stash/SKILL.md" ]; then
 fi
 if [ -f "$atomic_scratch/targets/cursor/skills/squirrel-dig/SKILL.md" ]; then
   cp "$atomic_scratch/targets/cursor/skills/squirrel-dig/SKILL.md" "$atomic_snapshot_dir/cursor-skill-dig.md"
+fi
+if [ -f "$atomic_scratch/targets/cursor/skills/squirrel-off/SKILL.md" ]; then
+  cp "$atomic_scratch/targets/cursor/skills/squirrel-off/SKILL.md" "$atomic_snapshot_dir/cursor-skill-off.md"
+fi
+if [ -f "$atomic_scratch/targets/cursor/skills/squirrel-on/SKILL.md" ]; then
+  cp "$atomic_scratch/targets/cursor/skills/squirrel-on/SKILL.md" "$atomic_snapshot_dir/cursor-skill-on.md"
 fi
 assert_file_exists "$atomic_scratch/targets/cursor/hooks/hooks.json" "atomicity fixture: the first (baseline) build must produce targets/cursor/hooks/hooks.json"
 if [ -f "$atomic_scratch/targets/cursor/hooks/hooks.json" ]; then
@@ -1004,11 +1012,11 @@ else
 fi
 assert_eq "yes" "$atomic_build2_failed" "build.sh must exit non-zero when it cannot write one target artifact (read-only targets/codex/ directory) -- got exit $atomic_build2_exit, output: $atomic_build2_output"
 
-for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cursor.mdc:$atomic_cursor" "codex-skill-digest.md:$atomic_scratch/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$atomic_scratch/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$atomic_scratch/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$atomic_scratch/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$atomic_scratch/targets/cursor/commands/digest.md" "cursor-command-plan.md:$atomic_scratch/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$atomic_scratch/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$atomic_scratch/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-skill-init.md:$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" "cursor-skill-tune.md:$atomic_scratch/targets/cursor/skills/squirrel-tune/SKILL.md" "cursor-skill-pickup.md:$atomic_scratch/targets/cursor/skills/squirrel-pickup/SKILL.md" "cursor-skill-stash.md:$atomic_scratch/targets/cursor/skills/squirrel-stash/SKILL.md" "cursor-skill-dig.md:$atomic_scratch/targets/cursor/skills/squirrel-dig/SKILL.md" "cursor-hooks.json:$atomic_scratch/targets/cursor/hooks/hooks.json"; do
+for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cursor.mdc:$atomic_cursor" "codex-skill-digest.md:$atomic_scratch/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$atomic_scratch/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$atomic_scratch/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$atomic_scratch/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$atomic_scratch/targets/cursor/commands/digest.md" "cursor-command-plan.md:$atomic_scratch/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$atomic_scratch/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$atomic_scratch/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-skill-init.md:$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" "cursor-skill-tune.md:$atomic_scratch/targets/cursor/skills/squirrel-tune/SKILL.md" "cursor-skill-pickup.md:$atomic_scratch/targets/cursor/skills/squirrel-pickup/SKILL.md" "cursor-skill-stash.md:$atomic_scratch/targets/cursor/skills/squirrel-stash/SKILL.md" "cursor-skill-dig.md:$atomic_scratch/targets/cursor/skills/squirrel-dig/SKILL.md" "cursor-skill-off.md:$atomic_scratch/targets/cursor/skills/squirrel-off/SKILL.md" "cursor-skill-on.md:$atomic_scratch/targets/cursor/skills/squirrel-on/SKILL.md" "cursor-hooks.json:$atomic_scratch/targets/cursor/hooks/hooks.json"; do
   snap_name=${pair%%:*}
   live_path=${pair#*:}
   if [ ! -f "$atomic_snapshot_dir/$snap_name" ]; then
-    assert_eq "unchanged" "CHANGED: snapshot missing $snap_name" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all eighteen artifacts"
+    assert_eq "unchanged" "CHANGED: snapshot missing $snap_name" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all twenty artifacts"
     continue
   fi
   if atomic_diff=$(diff -u "$atomic_snapshot_dir/$snap_name" "$live_path" 2>&1); then
@@ -1016,7 +1024,7 @@ for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cur
   else
     atomic_status="CHANGED: $atomic_diff"
   fi
-  assert_eq "unchanged" "$atomic_status" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all eighteen artifacts"
+  assert_eq "unchanged" "$atomic_status" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all twenty artifacts"
 done
 
 # The failing target itself must also be unchanged (still the baseline
@@ -1169,6 +1177,8 @@ assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-tune/SKILL.md"
 assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-pickup/SKILL.md" "signal-test fixture 16a: baseline build must produce targets/cursor/skills/squirrel-pickup/SKILL.md"
 assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-stash/SKILL.md" "signal-test fixture 16a: baseline build must produce targets/cursor/skills/squirrel-stash/SKILL.md"
 assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-dig/SKILL.md" "signal-test fixture 16a: baseline build must produce targets/cursor/skills/squirrel-dig/SKILL.md"
+assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-off/SKILL.md" "signal-test fixture 16a: baseline build must produce targets/cursor/skills/squirrel-off/SKILL.md"
+assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-on/SKILL.md" "signal-test fixture 16a: baseline build must produce targets/cursor/skills/squirrel-on/SKILL.md"
 if [ -f "$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" ]; then
   cp "$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" "$sig_a_snapshot/cursor-skill-init.md"
 fi
@@ -1183,6 +1193,12 @@ if [ -f "$sig_scratch_a/targets/cursor/skills/squirrel-stash/SKILL.md" ]; then
 fi
 if [ -f "$sig_scratch_a/targets/cursor/skills/squirrel-dig/SKILL.md" ]; then
   cp "$sig_scratch_a/targets/cursor/skills/squirrel-dig/SKILL.md" "$sig_a_snapshot/cursor-skill-dig.md"
+fi
+if [ -f "$sig_scratch_a/targets/cursor/skills/squirrel-off/SKILL.md" ]; then
+  cp "$sig_scratch_a/targets/cursor/skills/squirrel-off/SKILL.md" "$sig_a_snapshot/cursor-skill-off.md"
+fi
+if [ -f "$sig_scratch_a/targets/cursor/skills/squirrel-on/SKILL.md" ]; then
+  cp "$sig_scratch_a/targets/cursor/skills/squirrel-on/SKILL.md" "$sig_a_snapshot/cursor-skill-on.md"
 fi
 assert_file_exists "$sig_scratch_a/targets/cursor/hooks/hooks.json" "signal-test fixture 16a: baseline build must produce targets/cursor/hooks/hooks.json"
 if [ -f "$sig_scratch_a/targets/cursor/hooks/hooks.json" ]; then
@@ -1225,7 +1241,7 @@ assert_eq "143" "$sig_a_exit" "SIGTERM during the write phase must make build.sh
 sig_a_leftover_tmp=$(find "$sig_scratch_a" -name '.*.tmp.*' 2>/dev/null || true)
 assert_eq "" "$sig_a_leftover_tmp" "no .tmp temp files must remain after a SIGTERM during the write phase"
 
-for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "skill.md:$sig_scratch_a/skills/rules/SKILL.md" "codex.md:$sig_scratch_a/targets/codex/AGENTS.md" "cursor.mdc:$sig_scratch_a/targets/cursor/squirrel-mode.mdc" "codex-skill-digest.md:$sig_scratch_a/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$sig_scratch_a/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$sig_scratch_a/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$sig_scratch_a/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$sig_scratch_a/targets/cursor/commands/digest.md" "cursor-command-plan.md:$sig_scratch_a/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$sig_scratch_a/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$sig_scratch_a/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-skill-init.md:$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" "cursor-skill-tune.md:$sig_scratch_a/targets/cursor/skills/squirrel-tune/SKILL.md" "cursor-skill-pickup.md:$sig_scratch_a/targets/cursor/skills/squirrel-pickup/SKILL.md" "cursor-skill-stash.md:$sig_scratch_a/targets/cursor/skills/squirrel-stash/SKILL.md" "cursor-skill-dig.md:$sig_scratch_a/targets/cursor/skills/squirrel-dig/SKILL.md" "cursor-hooks.json:$sig_scratch_a/targets/cursor/hooks/hooks.json"; do
+for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "skill.md:$sig_scratch_a/skills/rules/SKILL.md" "codex.md:$sig_scratch_a/targets/codex/AGENTS.md" "cursor.mdc:$sig_scratch_a/targets/cursor/squirrel-mode.mdc" "codex-skill-digest.md:$sig_scratch_a/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$sig_scratch_a/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$sig_scratch_a/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$sig_scratch_a/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$sig_scratch_a/targets/cursor/commands/digest.md" "cursor-command-plan.md:$sig_scratch_a/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$sig_scratch_a/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$sig_scratch_a/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-skill-init.md:$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" "cursor-skill-tune.md:$sig_scratch_a/targets/cursor/skills/squirrel-tune/SKILL.md" "cursor-skill-pickup.md:$sig_scratch_a/targets/cursor/skills/squirrel-pickup/SKILL.md" "cursor-skill-stash.md:$sig_scratch_a/targets/cursor/skills/squirrel-stash/SKILL.md" "cursor-skill-dig.md:$sig_scratch_a/targets/cursor/skills/squirrel-dig/SKILL.md" "cursor-skill-off.md:$sig_scratch_a/targets/cursor/skills/squirrel-off/SKILL.md" "cursor-skill-on.md:$sig_scratch_a/targets/cursor/skills/squirrel-on/SKILL.md" "cursor-hooks.json:$sig_scratch_a/targets/cursor/hooks/hooks.json"; do
   snap_name=${pair%%:*}
   live_path=${pair#*:}
   if [ ! -f "$sig_a_snapshot/$snap_name" ]; then
@@ -1304,7 +1320,7 @@ else
   sig_b_reference_exit=$?
 fi
 assert_eq "0" "$sig_b_reference_exit" "signal test 16b reference build (uninterrupted, same default sources) must succeed -- output: $sig_b_reference_output"
-for rel in "targets/codex/skills/digest/SKILL.md" "targets/codex/skills/plan/SKILL.md" "targets/codex/skills/init/SKILL.md" "targets/codex/skills/tune/SKILL.md" "targets/cursor/commands/digest.md" "targets/cursor/commands/plan.md" "targets/cursor/skills/squirrel-digest/SKILL.md" "targets/cursor/skills/squirrel-plan/SKILL.md" "targets/cursor/skills/squirrel-init/SKILL.md" "targets/cursor/skills/squirrel-tune/SKILL.md" "targets/cursor/skills/squirrel-pickup/SKILL.md" "targets/cursor/skills/squirrel-stash/SKILL.md" "targets/cursor/skills/squirrel-dig/SKILL.md" "targets/cursor/hooks/hooks.json"; do
+for rel in "targets/codex/skills/digest/SKILL.md" "targets/codex/skills/plan/SKILL.md" "targets/codex/skills/init/SKILL.md" "targets/codex/skills/tune/SKILL.md" "targets/cursor/commands/digest.md" "targets/cursor/commands/plan.md" "targets/cursor/skills/squirrel-digest/SKILL.md" "targets/cursor/skills/squirrel-plan/SKILL.md" "targets/cursor/skills/squirrel-init/SKILL.md" "targets/cursor/skills/squirrel-tune/SKILL.md" "targets/cursor/skills/squirrel-pickup/SKILL.md" "targets/cursor/skills/squirrel-stash/SKILL.md" "targets/cursor/skills/squirrel-dig/SKILL.md" "targets/cursor/skills/squirrel-off/SKILL.md" "targets/cursor/skills/squirrel-on/SKILL.md" "targets/cursor/hooks/hooks.json"; do
   if [ ! -f "$sig_b_reference/$rel" ] || [ ! -f "$sig_scratch_b/$rel" ]; then
     sig_b_ported_status="DIFFERS: missing $rel in reference or interrupted build"
   elif sig_b_ported_diff=$(diff -u "$sig_b_reference/$rel" "$sig_scratch_b/$rel" 2>&1); then

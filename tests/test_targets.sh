@@ -103,18 +103,18 @@ make_temp_home() {
 make_full_scratch() {
   # make_full_scratch - creates a throwaway directory containing
   # scripts/build.sh, rules/base-rules.md, AND
-  # skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md - the same ingredients
+  # skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md - the same ingredients
   # tests/test_build.sh's own make_build_scratch() now also copies (S7's
   # B1 fix removed build.sh's tolerance for a missing skills/<name>/SKILL.md,
   # so every scratch fixture in this repo must supply real sources now,
   # not omit them). A copy running from scratch/scripts/build.sh therefore
-  # regenerates all eighteen artifacts, never touching the real repo.
+  # regenerates all twenty artifacts, never touching the real repo.
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-full-scratch.XXXXXX")
   mkdir -p "$scratch/scripts" "$scratch/rules" "$scratch/skills"
   cp "$build_script" "$scratch/scripts/build.sh"
   chmod +x "$scratch/scripts/build.sh"
   cp "$repo_root/rules/base-rules.md" "$scratch/rules/base-rules.md"
-  for cmd_name in digest plan init tune pickup stash dig; do
+  for cmd_name in digest plan init tune pickup stash dig off on; do
     mkdir -p "$scratch/skills/$cmd_name"
     cp "$repo_root/skills/$cmd_name/SKILL.md" "$scratch/skills/$cmd_name/SKILL.md"
   done
@@ -142,9 +142,9 @@ make_full_scratch() {
 # hand-edit to any one (say, deleting its disable-model-invocation
 # line, which is the whole reason it behaves as a slash command rather
 # than something Cursor fires on its own) has to fail this file.
-generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/skills/squirrel-init/SKILL.md targets/cursor/skills/squirrel-tune/SKILL.md targets/cursor/skills/squirrel-pickup/SKILL.md targets/cursor/skills/squirrel-stash/SKILL.md targets/cursor/skills/squirrel-dig/SKILL.md targets/cursor/hooks/hooks.json"
+generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/skills/squirrel-init/SKILL.md targets/cursor/skills/squirrel-tune/SKILL.md targets/cursor/skills/squirrel-pickup/SKILL.md targets/cursor/skills/squirrel-stash/SKILL.md targets/cursor/skills/squirrel-dig/SKILL.md targets/cursor/skills/squirrel-off/SKILL.md targets/cursor/skills/squirrel-on/SKILL.md targets/cursor/hooks/hooks.json"
 
-# The seven Cursor Agent Skills, as "<source command name>:<folder name>"
+# The nine Cursor Agent Skills, as "<source command name>:<folder name>"
 # pairs. Cursor requires a skill's frontmatter `name` to match its parent
 # folder EXACTLY, and the folder carries a "squirrel-" prefix because
 # Cursor has no command namespace - so every assertion below that touches
@@ -153,7 +153,7 @@ generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode
 # a separate digest/plan-only list: Task 8, not this one, stops copying
 # skills into ~/.cursor/skills/, so install.sh's cursor_skill_names
 # stays digest/plan until then.
-cursor_skill_pairs="digest:squirrel-digest plan:squirrel-plan init:squirrel-init tune:squirrel-tune pickup:squirrel-pickup stash:squirrel-stash dig:squirrel-dig"
+cursor_skill_pairs="digest:squirrel-digest plan:squirrel-plan init:squirrel-init tune:squirrel-tune pickup:squirrel-pickup stash:squirrel-stash dig:squirrel-dig off:squirrel-off on:squirrel-on"
 cursor_installed_skill_pairs="digest:squirrel-digest plan:squirrel-plan"
 
 repo_generated_snapshot() {
@@ -220,10 +220,10 @@ extract_frontmatter_line() {
 
 # ==========================================================================
 # 1. build.sh generates exactly the four Codex skills, two Cursor
-#    commands, and seven Cursor Agent Skills. pickup/stash/dig are Cursor
-#    Agent Skill only (not Codex, not a project command). off/on are
-#    absent from BOTH targets. init/tune/pickup/stash/dig port to Cursor
-#    as Agent Skills only - never as project commands.
+#    commands, and nine Cursor Agent Skills. pickup/stash/dig/off/on are
+#    Cursor Agent Skill only (not Codex, not a project command).
+#    init/tune/pickup/stash/dig/off/on port to Cursor as Agent Skills
+#    only - never as project commands. Project commands stay digest/plan.
 # ==========================================================================
 for cmd_name in digest plan init tune; do
   assert_file_exists "$repo_root/targets/codex/skills/$cmd_name/SKILL.md" "targets/codex/skills/$cmd_name/SKILL.md must exist"
@@ -239,10 +239,7 @@ for cmd_name in pickup stash dig off on; do
   assert_file_absent "$repo_root/targets/codex/skills/$cmd_name/SKILL.md" "targets/codex/skills/$cmd_name/SKILL.md must NOT exist ($cmd_name is not ported to Codex - see PLAN.md's parity table)"
   assert_file_absent "$repo_root/targets/cursor/commands/$cmd_name.md" "targets/cursor/commands/$cmd_name.md must NOT exist ($cmd_name is not a Cursor project command)"
 done
-for cmd_name in off on; do
-  assert_file_absent "$repo_root/targets/cursor/skills/squirrel-$cmd_name/SKILL.md" "targets/cursor/skills/squirrel-$cmd_name/SKILL.md must NOT exist ($cmd_name needs a lifecycle hook Cursor does not have)"
-done
-for cmd_name in init tune pickup stash dig; do
+for cmd_name in init tune pickup stash dig off on; do
   assert_file_absent "$repo_root/targets/cursor/commands/$cmd_name.md" "targets/cursor/commands/$cmd_name.md must NOT exist ($cmd_name is a Cursor Agent Skill, not a project command)"
 done
 
@@ -253,7 +250,7 @@ cursor_command_count=$(find "$repo_root/targets/cursor/commands" -maxdepth 1 -ty
 assert_eq "2" "$cursor_command_count" "targets/cursor/commands/ must contain exactly 2 command files (digest and plan only; init/tune are skills, not commands)"
 
 cursor_skill_dir_count=$(find "$repo_root/targets/cursor/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "7" "$cursor_skill_dir_count" "targets/cursor/skills/ must contain exactly 7 skill directories"
+assert_eq "9" "$cursor_skill_dir_count" "targets/cursor/skills/ must contain exactly 9 skill directories"
 
 # ==========================================================================
 # 2. Every generated artifact carries the GENERATED marker, naming
@@ -319,13 +316,29 @@ for pair in $cursor_skill_pairs; do
   folder=${pair#*:}
   content=$(read_file "$repo_root/targets/cursor/skills/$folder/SKILL.md")
   for term in $forbidden_terms; do
-    assert_not_contains "$content" "$term" "Cursor $folder skill must not mention '$term' (a mechanism Cursor lacks)"
+    # Off/on still write PENDING./CLEAR. sentinels; they must not say
+    # "hook". Rewrite uses "off check" / "sentinel claim" instead.
+    case "$folder:$term" in
+      squirrel-off:sentinel|squirrel-off:PENDING|squirrel-off:CLEAR|squirrel-on:sentinel|squirrel-on:PENDING|squirrel-on:CLEAR) ;;
+      *)
+        assert_not_contains "$content" "$term" "Cursor $folder skill must not mention '$term' (a mechanism Cursor lacks)"
+        ;;
+    esac
   done
-  assert_not_contains "$content" "$off_flag_dir_needle" "Cursor $folder skill must not mention the off-flag directory"
-  # Pickup/stash/dig read injected checkpoint and hoard lines; digest/plan/
+  case "$folder" in
+    squirrel-off|squirrel-on) ;;
+    *)
+      assert_not_contains "$content" "$off_flag_dir_needle" "Cursor $folder skill must not mention the off-flag directory"
+      ;;
+  esac
+  # Pickup/stash/dig read injected checkpoint and hoard lines; off/on
+  # read the injected off-token and working directory. digest/plan/
   # init/tune still must not mention them.
   case "$folder" in
     squirrel-pickup|squirrel-stash|squirrel-dig) ;;
+    squirrel-off|squirrel-on)
+      assert_not_contains "$content" "Project checkpoint path" "Cursor $folder skill must not mention the injected 'Project checkpoint path:' line"
+      ;;
     *)
       assert_not_contains "$content" "Session working directory" "Cursor $folder skill must not mention the injected 'Session working directory:' line"
       assert_not_contains "$content" "Project checkpoint path" "Cursor $folder skill must not mention the injected 'Project checkpoint path:' line"
@@ -467,6 +480,70 @@ claude_dig_content=$(read_file "$repo_root/skills/dig/SKILL.md")
 assert_contains "$claude_dig_content" "/squirrel:dig" "canonical skills/dig/SKILL.md must stay the Claude source (still names /squirrel:dig)"
 
 # ==========================================================================
+# 4e. Cursor off and on are Agent Skills only. They still write
+#     PENDING.<token> / CLEAR.<token> under ~/.squirrel/off/ using the
+#     injected Session off-token and Session working directory lines,
+#     refuse anon- tokens, and apply the formatting change from this
+#     turn (not the next message). Hard off names Customize / uninstall
+#     the plugin, not /plugin disable. Canonical Claude sources keep
+#     /squirrel:off, /squirrel:on, and "next message". Codex does not
+#     get off or on. Project commands stay digest/plan only.
+# ==========================================================================
+cursor_off_this_turn_sentence="squirrel-mode is off from this turn, including this reply."
+cursor_on_this_turn_sentence="squirrel-mode is on from this turn, including this reply."
+cursor_anon_off_sentence="This session cannot be turned off: squirrel-mode was not given a session id for it. A new session restores /squirrel-off."
+cursor_anon_on_sentence="This session cannot be turned back on: squirrel-mode was not given a session id for it. A new session restores /squirrel-on."
+cursor_hard_off_sentence="uninstall the squirrel-mode plugin or turn off its rule in Customize"
+
+cursor_off_content=$(read_file "$repo_root/targets/cursor/skills/squirrel-off/SKILL.md")
+assert_contains "$cursor_off_content" "name: squirrel-off" "Cursor off skill frontmatter must set name: squirrel-off"
+dmi_off_count=$(printf '%s\n' "$cursor_off_content" | grep -c -F "disable-model-invocation: true" || true)
+assert_eq "1" "$dmi_off_count" "Cursor squirrel-off skill must contain disable-model-invocation: true exactly once"
+assert_contains "$cursor_off_content" "# squirrel-mode off (Cursor)" "Cursor off skill title must carry the (Cursor) suffix"
+assert_contains "$cursor_off_content" "$off_flag_dir_needle" "Cursor off skill must still write under ~/.squirrel/off/"
+assert_contains "$cursor_off_content" "PENDING." "Cursor off skill must still instruct writing PENDING.<token>"
+assert_contains "$cursor_off_content" "Session off-token:" "Cursor off skill must use the injected Session off-token: line"
+assert_contains "$cursor_off_content" "Session working directory:" "Cursor off skill must use the injected Session working directory: line"
+assert_contains "$cursor_off_content" "$cursor_anon_off_sentence" "Cursor off skill must refuse anon- tokens with the cannot-be-turned-off sentence"
+assert_contains "$cursor_off_content" "$cursor_off_this_turn_sentence" "Cursor off confirmation must say the rules are ignored from this turn, including this reply"
+assert_contains "$cursor_off_content" "$cursor_hard_off_sentence" "Cursor off hard-off path must name uninstalling the plugin or Customize, not /plugin disable"
+assert_contains "$cursor_off_content" "the next prompt's off check, if it runs" "Cursor off skill must describe the claiming path as the next prompt's off check, if it runs"
+assert_not_contains "$cursor_off_content" "next message" "Cursor off skill must not say the change waits for the next message"
+assert_not_contains "$cursor_off_content" "/plugin disable" "Cursor off skill must not name /plugin disable"
+assert_not_contains "$cursor_off_content" "/squirrel:" "Cursor off skill must not contain /squirrel:"
+assert_not_contains "$cursor_off_content" "CLAUDE_PLUGIN_ROOT" "Cursor off skill must not contain CLAUDE_PLUGIN_ROOT"
+assert_not_contains "$cursor_off_content" "SessionStart" "Cursor off skill must not contain SessionStart"
+assert_not_contains "$cursor_off_content" "UserPromptSubmit" "Cursor off skill must not contain UserPromptSubmit"
+assert_not_contains "$cursor_off_content" "PreToolUse" "Cursor off skill must not contain PreToolUse"
+claude_off_content=$(read_file "$repo_root/skills/off/SKILL.md")
+assert_contains "$claude_off_content" "/squirrel:off" "canonical skills/off/SKILL.md must stay the Claude source (still names /squirrel:off)"
+assert_contains "$claude_off_content" "next message" "canonical skills/off/SKILL.md must keep Claude's next-message confirmation"
+
+cursor_on_content=$(read_file "$repo_root/targets/cursor/skills/squirrel-on/SKILL.md")
+assert_contains "$cursor_on_content" "name: squirrel-on" "Cursor on skill frontmatter must set name: squirrel-on"
+dmi_on_count=$(printf '%s\n' "$cursor_on_content" | grep -c -F "disable-model-invocation: true" || true)
+assert_eq "1" "$dmi_on_count" "Cursor squirrel-on skill must contain disable-model-invocation: true exactly once"
+assert_contains "$cursor_on_content" "# squirrel-mode on (Cursor)" "Cursor on skill title must carry the (Cursor) suffix"
+assert_contains "$cursor_on_content" "$off_flag_dir_needle" "Cursor on skill must still write under ~/.squirrel/off/"
+assert_contains "$cursor_on_content" "CLEAR." "Cursor on skill must still instruct writing CLEAR.<token>"
+assert_contains "$cursor_on_content" "Session off-token:" "Cursor on skill must use the injected Session off-token: line"
+assert_contains "$cursor_on_content" "Session working directory:" "Cursor on skill must use the injected Session working directory: line"
+assert_contains "$cursor_on_content" "$cursor_anon_on_sentence" "Cursor on skill must refuse anon- tokens with the cannot-be-turned-back-on sentence"
+assert_contains "$cursor_on_content" "$cursor_on_this_turn_sentence" "Cursor on confirmation must say the rules apply from this turn, including this reply"
+assert_contains "$cursor_on_content" "$cursor_hard_off_sentence" "Cursor on hard-off path must name uninstalling the plugin or Customize, not /plugin disable"
+assert_contains "$cursor_on_content" "the next prompt's off check, if it runs" "Cursor on skill must describe the claiming path as the next prompt's off check, if it runs"
+assert_not_contains "$cursor_on_content" "next message" "Cursor on skill must not say the change waits for the next message"
+assert_not_contains "$cursor_on_content" "/plugin disable" "Cursor on skill must not name /plugin disable"
+assert_not_contains "$cursor_on_content" "/squirrel:" "Cursor on skill must not contain /squirrel:"
+assert_not_contains "$cursor_on_content" "CLAUDE_PLUGIN_ROOT" "Cursor on skill must not contain CLAUDE_PLUGIN_ROOT"
+assert_not_contains "$cursor_on_content" "SessionStart" "Cursor on skill must not contain SessionStart"
+assert_not_contains "$cursor_on_content" "UserPromptSubmit" "Cursor on skill must not contain UserPromptSubmit"
+assert_not_contains "$cursor_on_content" "PreToolUse" "Cursor on skill must not contain PreToolUse"
+claude_on_content=$(read_file "$repo_root/skills/on/SKILL.md")
+assert_contains "$claude_on_content" "/squirrel:on" "canonical skills/on/SKILL.md must stay the Claude source (still names /squirrel:on)"
+assert_contains "$claude_on_content" "next message" "canonical skills/on/SKILL.md must keep Claude's next-message confirmation"
+
+# ==========================================================================
 # 5. Codex skill frontmatter has name + description. Cursor command
 #    files carry NO frontmatter at all - verified against Cursor's own
 #    documented format: plain Markdown, filename is the command name.
@@ -503,7 +580,8 @@ done
 #       - `description` is required.
 #       - `disable-model-invocation: true` is what makes these behave as
 #         the explicit /squirrel-digest, /squirrel-plan, /squirrel-init,
-#         /squirrel-tune, /squirrel-pickup, /squirrel-stash and /squirrel-dig slash commands
+#         /squirrel-tune, /squirrel-pickup, /squirrel-stash, /squirrel-dig,
+#         /squirrel-off and /squirrel-on slash commands
 #         rather than something the model may fire on its own. Cursor
 #         Agent Skills have NO alwaysApply equivalent, so this field is
 #         the only control over when they run, and it is pinned exactly.
@@ -791,7 +869,7 @@ chmod +x "$dmi_scratch/scripts/build.sh"
 # shellcheck disable=SC2016 # same reasoning as the strip above: a
 # literal needle for grep -F, never an expression to expand here.
 dmi_remaining_calls=$(grep -c -F 'check_no_claude_only_syntax "$(cat ' "$dmi_scratch/scripts/build.sh" || true)
-assert_eq "10" "$dmi_remaining_calls" "fixture sanity: stripping the six Codex-skill and Cursor-command call sites must leave exactly ten check_no_claude_only_syntax call sites (AGENTS.md, the .mdc, the seven Cursor Agent Skills, and Cursor hooks.json)"
+assert_eq "12" "$dmi_remaining_calls" "fixture sanity: stripping the six Codex-skill and Cursor-command call sites must leave exactly twelve check_no_claude_only_syntax call sites (AGENTS.md, the .mdc, the nine Cursor Agent Skills, and Cursor hooks.json)"
 
 printf '\nA sentence mentioning disable-model-invocation in ordinary prose.\n' >>"$dmi_scratch/skills/digest/SKILL.md"
 if dmi_out=$("$dmi_scratch/scripts/build.sh" 2>&1); then

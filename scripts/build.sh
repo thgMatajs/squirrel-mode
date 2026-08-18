@@ -1,6 +1,6 @@
 #!/bin/sh
 # build.sh - generates every squirrel-mode artifact from rules/base-rules.md
-# and from the seven ported command skills under skills/.
+# and from the nine ported command skills under skills/.
 #
 # rules/base-rules.md is the ONLY place the 16 base rules exist (see
 # .build-checkpoint.md invariant 1). This script parses it and writes:
@@ -10,7 +10,7 @@
 #   - targets/cursor/squirrel-mode.mdc (15 rules, targets: cursor)
 #
 # It additionally ports four of the Claude Code command skills to
-# Codex, and seven of them to Cursor, per PLAN.md's "Which commands
+# Codex, and nine of them to Cursor, per PLAN.md's "Which commands
 # port" table (ADR-0004). Each ported artifact is generated from ONE
 # source, the corresponding skills/<name>/SKILL.md - never hand-copied:
 #   - targets/codex/skills/digest/SKILL.md   <- skills/digest/SKILL.md
@@ -26,13 +26,14 @@
 #   - targets/cursor/skills/squirrel-pickup/SKILL.md <- skills/pickup/SKILL.md
 #   - targets/cursor/skills/squirrel-stash/SKILL.md  <- skills/stash/SKILL.md
 #   - targets/cursor/skills/squirrel-dig/SKILL.md    <- skills/dig/SKILL.md
+#   - targets/cursor/skills/squirrel-off/SKILL.md    <- skills/off/SKILL.md
+#   - targets/cursor/skills/squirrel-on/SKILL.md     <- skills/on/SKILL.md
 # pickup, stash, and dig port to Cursor as Agent Skills only (sessionStart
 # injects the checkpoint path and the hoard directory/search command;
 # Cursor now has that hook). Codex does not get pickup, stash, or dig.
-# off and on are deliberately NOT ported to either target yet: each
-# depends on a lifecycle hook (UserPromptSubmit's sentinel-claiming)
-# neither host has a complete equivalent for, and there is no
-# host-appropriate way to fake that.
+# off and on port to Cursor as Agent Skills only: they still write
+# PENDING./CLEAR. sentinels, and the model ignores or resumes squirrel
+# rules from this turn. Codex does not get off or on.
 #
 # Cursor gets digest and plan TWICE, in two different mechanisms, because
 # Cursor has two and they are not interchangeable:
@@ -41,9 +42,9 @@
 #   - targets/cursor/skills/squirrel-<name>/SKILL.md - a Cursor Agent
 #     Skill, auto-discovered from ~/.cursor/skills/ for EVERY project on
 #     the machine, which is what targets/cursor/install.sh installs.
-# Cursor init, tune, pickup, stash, and dig are Agent Skills only - never
-# project commands - so the machine-wide plugin covers calibration, resume,
-# and the hoard. The skill folder names
+# Cursor init, tune, pickup, stash, dig, off, and on are Agent Skills
+# only - never project commands - so the machine-wide plugin covers
+# calibration, resume, the hoard, and session off/on. The skill folder names
 # carry a "squirrel-" prefix because Cursor has no command namespace
 # (Claude Code's "/squirrel:" has no equivalent), so a
 # bare "digest" would collide with a skill of the user's own; Cursor
@@ -72,7 +73,7 @@
 # (S10 review cycle 2, AC2 - a targets:all rule ships verbatim into every
 # target's generated artifact, so a numbered reference to a rule absent
 # from one of them would be a dangling citation there); or if any of
-# skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md is missing or lacks a
+# skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md is missing or lacks a
 # well-formed single-line double-quoted frontmatter "description" field.
 # All validation happens before any output file is written, so malformed
 # input can never produce a half-empty generated artifact.
@@ -351,10 +352,10 @@ fi
 # one word on any non-comment line of this file.
 hoard_search_skill=$(printf '%s%s' di g)
 
-# --- Availability and validation of the seven ported command sources ------
+# --- Availability and validation of the nine ported command sources -------
 #
-# skills/<name>/SKILL.md is committed and present for all seven ported
-# commands (digest, plan, init, tune, pickup, stash, dig) in this repository. A MISSING
+# skills/<name>/SKILL.md is committed and present for all nine ported
+# commands (digest, plan, init, tune, pickup, stash, dig, off, on) in this repository. A MISSING
 # source file is now a LOUD, WHOLE-BUILD FAILURE, exactly like a
 # malformed rules/base-rules.md above - never a silent skip of that one
 # artifact. An earlier version of this script tolerated absence (to let
@@ -366,12 +367,12 @@ hoard_search_skill=$(printf '%s%s' di g)
 # it, because regenerating with the same skipped source reproduces the
 # same stale artifact. The fixture problem is fixed in the fixture, not
 # here: tests/test_build.sh's make_build_scratch() now copies the seven
-# real skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md into its scratch tree
+# real skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md into its scratch tree
 # too, so it no longer needs this script to tolerate their absence.
 validate_source_skill() {
   name=$1
   file="$repo_root/skills/$name/SKILL.md"
-  [ -f "$file" ] || fail "skills/$name/SKILL.md not found at $file - this is one of the ported command skills (digest, plan, init, tune, pickup, stash, $hoard_search_skill); a missing source is a build failure, never a silently skipped artifact."
+  [ -f "$file" ] || fail "skills/$name/SKILL.md not found at $file - this is one of the ported command skills (digest, plan, init, tune, pickup, stash, $hoard_search_skill, off, on); a missing source is a build failure, never a silently skipped artifact."
   # Leading frontmatter only. skills/stash/SKILL.md (and any future
   # example YAML fence) repeats --- in the body; those are not extra
   # frontmatter. The file must open with --- and close that block with
@@ -387,7 +388,7 @@ validate_source_skill() {
   [ -n "$desc_line" ] || fail "skills/$name/SKILL.md's frontmatter 'description' field could not be found (expected a single double-quoted line starting 'description: \"')"
 }
 
-for ported_name in digest plan init tune pickup stash "$hoard_search_skill"; do
+for ported_name in digest plan init tune pickup stash "$hoard_search_skill" off on; do
   validate_source_skill "$ported_name"
 done
 
@@ -398,7 +399,7 @@ done
 # `awk -v name=value`, where the awk implementation itself, not this
 # script, silently turns "\n", "\t", "\\", etc. inside that value into
 # their escape-sequence meaning before the awk program ever sees the
-# literal text. No source text in skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md
+# literal text. No source text in skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md
 # contains a backslash today, so this is LATENT, not yet triggered - but
 # it can never be caught by the drift check, because the corruption
 # would be a deterministic function of the source: both the committed
@@ -412,7 +413,7 @@ done
 # this guard).
 check_no_backslash_in_source_skills() {
   hit=""
-  for name in digest plan init tune pickup stash "$hoard_search_skill"; do
+  for name in digest plan init tune pickup stash "$hoard_search_skill" off on; do
     file="$repo_root/skills/$name/SKILL.md"
     # shellcheck disable=SC1003 # this single quote correctly contains
     # one literal backslash character - the pattern grep -F is meant to
@@ -711,7 +712,7 @@ BANNER
 # non-Claude-Code host. It deliberately does NOT run against
 # output-styles/squirrel-mode.md or skills/rules/SKILL.md - the two
 # Claude Code artifacts, where "Claude" and "/squirrel:" are correct.
-# Any edit to skills/digest|plan|init|tune|pickup|stash|dig/SKILL.md that changes one of
+# Any edit to skills/digest|plan|init|tune|pickup|stash|dig|off|on/SKILL.md that changes one of
 # the sentences named below must update the matching substitution here,
 # or the build stops rather than emitting broken instructions.
 # ===========================================================================
@@ -874,7 +875,7 @@ check_no_claude_only_syntax() {
   # of a Codex or Cursor artifact, read back from that artifact's own
   # temp file right before it is mv'd into place (see "Write every
   # artifact" near the bottom of this file for every call site: the
-  # thirteen ported command artifacts AND targets/codex/AGENTS.md and
+  # fifteen ported command artifacts AND targets/codex/AGENTS.md and
   # targets/cursor/squirrel-mode.mdc) - still contains any syntax or
   # reference that only makes sense on Claude Code. Never called against
   # output-styles/squirrel-mode.md or skills/rules/SKILL.md - the two
@@ -897,18 +898,18 @@ check_no_claude_only_syntax() {
   # meaning - the skill is never applied by the model on its own and is
   # only included when the user types its slash command - and the
   # targets/cursor/skills/squirrel-*/SKILL.md artifacts set it
-  # deliberately. For those seven, and only those seven, the third argument
+  # deliberately. For those nine, and only those nine, the third argument
   # is "yes" and ONE occurrence is permitted.
   #
   # The allowance is the narrowest one that works, so this guard keeps
-  # catching a real leak in those seven artifacts as thoroughly as in the
+  # catching a real leak in those nine artifacts as thoroughly as in the
   # other nine. The permitted occurrence must be the EXACT full line
   # held in CURSOR_SKILL_INVOCATION_LINE, must appear EXACTLY once in
   # the whole artifact, and must sit inside that artifact's own leading
   # YAML frontmatter block - never in the body, where a mention could
   # only have arrived from a source skill's prose. A second occurrence,
   # another spelling, or one below the frontmatter still fails the
-  # build. Nothing else is skipped for these seven: the one permitted line
+  # build. Nothing else is skipped for these nine: the one permitted line
   # is REMOVED from the text, and every check below then runs over the
   # remainder exactly as it does everywhere else.
   text=$1
@@ -1148,6 +1149,12 @@ ported_skill_description() {
     "$hoard_search_skill")
       desc=$(literal_replace "$desc" "Only for an explicit /squirrel:${hoard_search_skill} invocation." "Only for an explicit /squirrel-${hoard_search_skill} invocation.")
       ;;
+    off)
+      desc=$(literal_replace "$desc" "Only for an explicit /squirrel:off invocation." "Only for an explicit /squirrel-off invocation.")
+      ;;
+    on)
+      desc=$(literal_replace "$desc" "after /squirrel:off. Only for an explicit /squirrel:on invocation." "after /squirrel-off. Only for an explicit /squirrel-on invocation.")
+      ;;
   esac
   # G5/G6 (S7 review cycle 3): check_no_claude_only_syntax does NOT run
   # here. This description is only ONE ingredient of the artifact
@@ -1319,8 +1326,8 @@ cursor_skill_folder_name() {
   # bare "digest" would sit in the user's global skill namespace under a
   # name anyone else's skill could plausibly want. The "squirrel-"
   # prefix is what keeps /squirrel-digest, /squirrel-plan,
-  # /squirrel-init, /squirrel-tune, /squirrel-pickup, /squirrel-stash
-  # and /squirrel-dig unmistakably
+  # /squirrel-init, /squirrel-tune, /squirrel-pickup, /squirrel-stash,
+  # /squirrel-dig, /squirrel-off and /squirrel-on unmistakably
   # squirrel-mode's.
   printf 'squirrel-%s\n' "$1"
 }
@@ -1403,11 +1410,43 @@ cursor_skill_body_substitutions() {
       body=$(literal_replace "$body" "only \`Read\`, \`Write\` and \`Edit\` carry the auto-approval for this directory." "only \`Read\` and \`Write\` carry the auto-approval for this directory.")
       body=$(literal_replace "$body" "With the \`Edit\` tool, set that file's \`uses\` to its current value plus one and its \`last_used\` to the value \`date -u +%Y%m%dT%H%M%SZ\` returns." "With the \`Write\` tool, set that file's \`uses\` to its current value plus one and its \`last_used\` to the value \`date -u +%Y%m%dT%H%M%SZ\` returns (run that date command through the \`Shell\` tool).")
       ;;
+    off)
+      # Cursor-only: Codex does not get off. Still write PENDING.<token>
+      # so a later off check can claim it; the model ignores squirrel
+      # rules from this turn. Rewrite UserPromptSubmit / hook / next
+      # message / /plugin disable. Do not name Claude events. "hook" is
+      # a Cursor-forbidden term: say "off check" / "sentinel claim".
+      body=$(literal_replace "$body" "/squirrel:off suppresses squirrel-mode's base rules for the rest of the current session only." "This skill suppresses squirrel-mode's base rules for the rest of the current session only.")
+      body=$(literal_replace "$body" "A running skill has no way to learn this session's own session id - Claude Code hands that value to hooks on every prompt, never to a skill. So this skill cannot name the one file that would suppress this exact session; it can only leave a note for the hook that runs on the next prompt, and let that hook - which does see the real session id - claim it." "A running skill has no way to learn this session's own session id. So this skill cannot name the one file that would suppress this exact session; it leaves a PENDING note for the next prompt's off check, if it runs, and that off check - which does see the real session id - can claim it. Independently of that claim, ignore squirrel-mode's base rules from this turn, including this reply.")
+      body=$(literal_replace "$body" "the \`UserPromptSubmit\` hook recomputes the same value from the session id it receives on stdin, and a token you invent is one it cannot match." "the next prompt's off check, if it runs, recomputes the same value from the session id, and a token you invent is one it cannot match.")
+      body=$(literal_replace "$body" "the one the claiming hook compares against on the legacy path" "the one the sentinel claim compares against on the legacy path")
+      body=$(literal_replace "$body" "This session cannot be turned off: squirrel-mode was not given a session id for it. A new session restores /squirrel:off." "This session cannot be turned off: squirrel-mode was not given a session id for it. A new session restores /squirrel-off.")
+      body=$(literal_replace "$body" "the \`UserPromptSubmit\` hook that claims sentinels recomputes the token from that same session id" "the next prompt's off check, if it runs, recomputes the token from that same session id")
+      body=$(literal_replace "$body" "a second \`/squirrel:off\` run, in a different session, silently overwrite the first one's request before either reaches a hook that can claim it." "a second \`/squirrel-off\` run, in a different session, silently overwrite the first one's request before either reaches an off check that can claim it.")
+      body=$(literal_replace "$body" "4. Confirm in exactly one line that the change starts with the user's next message - for example: \"squirrel-mode will turn off starting with your next message.\" Do not say it is already off: the flag only takes effect once a \`UserPromptSubmit\` hook claims the sentinel on the next prompt, and this skill cannot confirm that happened." "4. Confirm in exactly one line that squirrel-mode is off from this turn - for example: \"squirrel-mode is off from this turn, including this reply.\" Do not wait for another user message. Still write the PENDING sentinel so the next prompt's off check, if it runs, can claim it; do not depend on that claim for the formatting change.")
+      body=$(literal_replace "$body" "Nothing changes for the message you are answering right now. Starting with your *next* message in this session, a \`UserPromptSubmit\` hook claims the sentinel written above (by matching the token to this session's own id) and begins injecting a counter-instruction on every prompt, overriding squirrel-mode's formatting for the rest of this session. \`/squirrel:on\` reverses it, in this same session only." "From this turn, including this reply, ignore squirrel-mode's base rules. Later replies in this chat stay that way until squirrel-on. The next prompt's off check, if it runs, may still claim the sentinel written above (by matching the token to this session's own id). squirrel-on reverses it, in this same session only.")
+      body=$(literal_replace "$body" "This is a soft off: the base rules stay loaded, and a per-prompt check keeps overriding them for the rest of this session once the sentinel is claimed. For a hard off that removes the rules from the system prompt entirely, run \`/plugin disable squirrel@squirrel-mode\`, then start a new session." "This is a soft off: the base rules stay loaded, and this chat ignores them from this turn. For a hard off that removes the rules from the system prompt entirely, uninstall the squirrel-mode plugin or turn off its rule in Customize.")
+      ;;
+    on)
+      # Cursor-only: Codex does not get on. Still write CLEAR.<token>;
+      # the model follows squirrel rules from this turn. Same rewrites
+      # as off for UserPromptSubmit / hook / next message / plugin path.
+      body=$(literal_replace "$body" "/squirrel:on reverses \`/squirrel:off\` for the current session." "This skill reverses squirrel-off for the current session.")
+      body=$(literal_replace "$body" "Exactly the same problem \`/squirrel:off\` has: this skill has no way to learn this session's own session id, so it cannot name the one file it would need to remove. It leaves a note for the \`UserPromptSubmit\` hook - which does see the real session id on the next prompt - and lets that hook clear the flag." "Exactly the same problem squirrel-off has: this skill has no way to learn this session's own session id, so it cannot name the one file it would need to remove. It leaves a CLEAR note for the next prompt's off check, if it runs - which does see the real session id - and lets that off check clear the flag. Independently of that claim, follow squirrel-mode's base rules from this turn, including this reply.")
+      body=$(literal_replace "$body" "the \`UserPromptSubmit\` hook recomputes the same value from the session id it receives on stdin, and a token you invent is one it cannot match." "the next prompt's off check, if it runs, recomputes the same value from the session id, and a token you invent is one it cannot match.")
+      body=$(literal_replace "$body" "the one the claiming hook compares against on the legacy path" "the one the sentinel claim compares against on the legacy path")
+      body=$(literal_replace "$body" "This session cannot be turned back on: squirrel-mode was not given a session id for it. A new session restores /squirrel:on." "This session cannot be turned back on: squirrel-mode was not given a session id for it. A new session restores /squirrel-on.")
+      body=$(literal_replace "$body" "the \`UserPromptSubmit\` hook that claims sentinels recomputes the token from that same session id" "the next prompt's off check, if it runs, recomputes the token from that same session id")
+      body=$(literal_replace "$body" "Such a session cannot have been turned off by \`/squirrel:off\` either" "Such a session cannot have been turned off by squirrel-off either")
+      body=$(literal_replace "$body" "4. Confirm in exactly one line that the change starts with the user's next message - for example: \"squirrel-mode will turn back on starting with your next message.\" Say this whether or not the session was actually off; the end state is identical either way. Do not say it is already back on: the clear only takes effect once a \`UserPromptSubmit\` hook claims this sentinel on the next prompt, and this skill cannot confirm that happened." "4. Confirm in exactly one line that squirrel-mode is on from this turn - for example: \"squirrel-mode is on from this turn, including this reply.\" Say this whether or not the session was actually off; the end state is identical either way. Do not wait for another user message. Still write the CLEAR sentinel so the next prompt's off check, if it runs, can claim it; do not depend on that claim for the formatting change.")
+      body=$(literal_replace "$body" "Nothing changes for the message you are answering right now. Starting with your *next* message in this session, a \`UserPromptSubmit\` hook claims the sentinel written above (by matching the token to this session's own id), removes this session's suppression flag if one exists, and squirrel-mode's rules resume." "From this turn, including this reply, follow squirrel-mode's base rules again. The next prompt's off check, if it runs, may still claim the sentinel written above (by matching the token to this session's own id) and remove this session's suppression flag if one exists.")
+      body=$(literal_replace "$body" "The hard off is \`/plugin disable squirrel@squirrel-mode\`, then a new session. Running \`/plugin enable squirrel@squirrel-mode\`, then a new session, restores squirrel-mode from that state; \`/squirrel:on\` is unrelated to that path and only ever matters after a \`/squirrel:off\` in the same session." "The hard off is to uninstall the squirrel-mode plugin or turn off its rule in Customize. Installing the plugin or turning its rule back on in Customize restores squirrel-mode from that state; squirrel-on is unrelated to that path and only ever matters after squirrel-off in the same session.")
+      ;;
   esac
   # Cursor tool names: Edit is not a Cursor matcher sibling of Write,
   # and date belongs on Shell rather than Bash. Backtick-quoted only,
   # so prose such as "edits one field" is left alone. No-ops on today's
-  # digest/plan/init/tune/pickup/stash/dig sources once the per-name
+  # digest/plan/init/tune/pickup/stash/dig/off/on sources once the per-name
   # Cursor substitutions above have already rewritten tool lists.
   body=$(literal_replace "$body" "\`Edit\`" "\`Write\`")
   body=$(literal_replace "$body" "\`Bash\`" "\`Shell\`")
@@ -1431,10 +1470,12 @@ write_cursor_skill() {
   #   - a Cursor AGENT SKILL (this function) is auto-discovered from
   #     ~/.cursor/skills/, once, for every project on the machine, which
   #     is what targets/cursor/install.sh installs.
-  # Init, tune, pickup, stash, and dig ship through this function only: they
-  # are never project commands. Init/tune write the machine-wide profile;
-  # pickup reads sessionStart-injected checkpoint paths; stash/dig use the
-  # injected hoard directory and search command.
+  # Init, tune, pickup, stash, dig, off, and on ship through this function
+  # only: they are never project commands. Init/tune write the machine-wide
+  # profile; pickup reads sessionStart-injected checkpoint paths; stash/dig
+  # use the injected hoard directory and search command; off/on write
+  # PENDING./CLEAR. sentinels and ignore or resume squirrel rules from
+  # this turn.
   #
   # THE "skill" -> "command" SWAP IS DELIBERATELY NOT APPLIED HERE.
   # write_cursor_command runs `literal_replace "$body" "skill"
@@ -1607,31 +1648,33 @@ mkdir -p "$repo_root/output-styles" "$repo_root/skills/rules" \
   "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name tune)" \
   "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name pickup)" \
   "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name stash)" \
-  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name "$hoard_search_skill")"
+  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name "$hoard_search_skill")" \
+  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name off)" \
+  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name on)"
 
 # Atomicity, honestly stated: each artifact is first written to a
 # hidden temp file in the SAME DIRECTORY as its final target - never
 # /tmp, since the repo could be on a different filesystem/mount and mv
 # (rename(2)) is only atomic within one filesystem - and only mv'd into
-# place once every one of the eighteen temp writes below has already
+# place once every one of the twenty temp writes below has already
 # succeeded. That covers the WRITE phase completely: a failure partway
-# through the eighteen writes (a full disk, a read-only target directory, a
+# through the twenty writes (a full disk, a read-only target directory, a
 # signal - see the traps below) leaves every real artifact exactly as it
 # was, never a mix of freshly regenerated and stale files, because no mv
 # has run yet at that point.
 #
 # The MV PHASE is a narrower, different story, and this comment used to
-# overstate it. Eighteen independent rename(2) calls, one per fixed
+# overstate it. Twenty independent rename(2) calls, one per fixed
 # committed path, cannot be made atomic AS A GROUP under POSIX sh - there
 # is no multi-file rename primitive available here. Two things narrow
 # that window as far as this shell can narrow it: each mv is individually
 # atomic (so no single artifact is ever observed half-written, only "old"
 # or "new", never a mix within one file), and HUP/INT/TERM are ignored for
-# the short duration of the eighteen mv's (see the trap right before them),
+# the short duration of the twenty mv's (see the trap right before them),
 # so a signal arriving mid-sequence cannot land between two of them.
 #
 # What neither defense reaches is SIGKILL or power loss: either can still
-# stop the process between mv 1 and mv 18, leaving some artifacts
+# stop the process between mv 1 and mv 20, leaving some artifacts
 # regenerated and others stale. That residual is real, not hypothetical,
 # and is not eliminated here - it cannot be, in POSIX sh, against those
 # two failure modes specifically. It is not silent forever, though: the
@@ -1650,12 +1693,12 @@ tmp_skill="$repo_root/skills/rules/.SKILL.md.tmp.$$"
 tmp_codex="$repo_root/targets/codex/.AGENTS.md.tmp.$$"
 tmp_cursor="$repo_root/targets/cursor/.squirrel-mode.mdc.tmp.$$"
 
-# The thirteen ported command artifacts (see the "Ported command artifacts"
-# section above) plus the Cursor hooks.json. Every one of the eighteen
+# The fifteen ported command artifacts (see the "Ported command artifacts"
+# section above) plus the Cursor hooks.json. Every one of the twenty
 # final_*/tmp_* paths below is now
 # written and moved UNCONDITIONALLY - validate_source_skill above
-# already guaranteed, before this point, that all seven
-# skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md sources exist and are
+# already guaranteed, before this point, that all nine
+# skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md sources exist and are
 # well-formed, so there is no absent-source case left to skip.
 cursor_skill_dir_digest="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name digest)"
 cursor_skill_dir_plan="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name plan)"
@@ -1664,6 +1707,8 @@ cursor_skill_dir_tune="$repo_root/targets/cursor/skills/$(cursor_skill_folder_na
 cursor_skill_dir_pickup="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name pickup)"
 cursor_skill_dir_stash="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name stash)"
 cursor_skill_dir_dig="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name "$hoard_search_skill")"
+cursor_skill_dir_off="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name off)"
+cursor_skill_dir_on="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name on)"
 
 final_codex_skill_digest="$repo_root/targets/codex/skills/digest/SKILL.md"
 final_codex_skill_plan="$repo_root/targets/codex/skills/plan/SKILL.md"
@@ -1678,6 +1723,8 @@ final_cursor_skill_tune="$cursor_skill_dir_tune/SKILL.md"
 final_cursor_skill_pickup="$cursor_skill_dir_pickup/SKILL.md"
 final_cursor_skill_stash="$cursor_skill_dir_stash/SKILL.md"
 final_cursor_skill_dig="$cursor_skill_dir_dig/SKILL.md"
+final_cursor_skill_off="$cursor_skill_dir_off/SKILL.md"
+final_cursor_skill_on="$cursor_skill_dir_on/SKILL.md"
 final_cursor_hooks="$repo_root/targets/cursor/hooks/hooks.json"
 
 tmp_codex_skill_digest="$repo_root/targets/codex/skills/digest/.SKILL.md.tmp.$$"
@@ -1693,12 +1740,14 @@ tmp_cursor_skill_tune="$cursor_skill_dir_tune/.SKILL.md.tmp.$$"
 tmp_cursor_skill_pickup="$cursor_skill_dir_pickup/.SKILL.md.tmp.$$"
 tmp_cursor_skill_stash="$cursor_skill_dir_stash/.SKILL.md.tmp.$$"
 tmp_cursor_skill_dig="$cursor_skill_dir_dig/.SKILL.md.tmp.$$"
+tmp_cursor_skill_off="$cursor_skill_dir_off/.SKILL.md.tmp.$$"
+tmp_cursor_skill_on="$cursor_skill_dir_on/.SKILL.md.tmp.$$"
 tmp_cursor_hooks="$repo_root/targets/cursor/hooks/.hooks.json.tmp.$$"
 
 cleanup_build_tmp() {
   # rm -f is a silent no-op on a path that was never created (e.g. if
   # the script failed before reaching that particular write) - safe to
-  # list every one of the eighteen temp paths unconditionally.
+  # list every one of the twenty temp paths unconditionally.
   rm -f "$tmp_output_style" "$tmp_skill" "$tmp_codex" "$tmp_cursor" \
     "$tmp_codex_skill_digest" "$tmp_codex_skill_plan" \
     "$tmp_codex_skill_init" "$tmp_codex_skill_tune" \
@@ -1708,6 +1757,8 @@ cleanup_build_tmp() {
     "$tmp_cursor_skill_pickup" \
     "$tmp_cursor_skill_stash" \
     "$tmp_cursor_skill_dig" \
+    "$tmp_cursor_skill_off" \
+    "$tmp_cursor_skill_on" \
     "$tmp_cursor_hooks"
 }
 
@@ -1746,12 +1797,12 @@ write_skill >"$tmp_skill"
 write_codex_agents >"$tmp_codex"
 write_cursor_mdc >"$tmp_cursor"
 
-# The thirteen ported command artifacts - written UNCONDITIONALLY.
+# The fifteen ported command artifacts - written UNCONDITIONALLY.
 # validate_source_skill already guaranteed every one of
-# skills/{digest,plan,init,tune,pickup,stash,dig}/SKILL.md exists and is well-formed
+# skills/{digest,plan,init,tune,pickup,stash,dig,off,on}/SKILL.md exists and is well-formed
 # before this point (see the "Availability" comment above it) - there
 # is no absent-source case left to guard against here, and a fixture
-# that wants build.sh to succeed without these thirteen writes must supply
+# that wants build.sh to succeed without these fifteen writes must supply
 # real skills/ sources instead (tests/test_build.sh's
 # make_build_scratch() does exactly that).
 write_codex_skill digest >"$tmp_codex_skill_digest"
@@ -1767,6 +1818,8 @@ write_cursor_skill tune >"$tmp_cursor_skill_tune"
 write_cursor_skill pickup >"$tmp_cursor_skill_pickup"
 write_cursor_skill stash >"$tmp_cursor_skill_stash"
 write_cursor_skill "$hoard_search_skill" >"$tmp_cursor_skill_dig"
+write_cursor_skill off >"$tmp_cursor_skill_off"
+write_cursor_skill on >"$tmp_cursor_skill_on"
 write_cursor_hooks >"$tmp_cursor_hooks"
 
 # G5/G6 (S7 review cycle 3): check_no_claude_only_syntax runs HERE,
@@ -1775,12 +1828,12 @@ write_cursor_hooks >"$tmp_cursor_hooks"
 # (frontmatter, the GENERATED banner, add_title_suffix, and - for
 # Cursor - the skill-to-command word swap) has already been applied,
 # never against an isolated ingredient (a bare description or body)
-# before that composition happens. Deliberately placed AFTER all eighteen
+# before that composition happens. Deliberately placed AFTER all twenty
 # temp writes above but BEFORE the first `mv` below: a failure here
 # still leaves every real artifact untouched (the cleanup trap removes
 # the temp files; no `mv` has run yet), so the file header's "All
 # validation happens before any output file is written" stays true.
-# Covers the thirteen ported command artifacts (G5's own fix) AND the two
+# Covers the fifteen ported command artifacts (G5's own fix) AND the two
 # base-rules-derived artifacts, targets/codex/AGENTS.md and
 # targets/cursor/squirrel-mode.mdc, which this check never reached
 # before at all - a future rules/base-rules.md edit mentioning
@@ -1790,7 +1843,7 @@ write_cursor_hooks >"$tmp_cursor_hooks"
 # artifacts, where "Claude" and "/squirrel:" are correct and must keep
 # passing.
 #
-# The seven Cursor Agent Skills pass "yes" as the third argument, and are
+# The nine Cursor Agent Skills pass "yes" as the third argument, and are
 # the only call sites that ever do: their frontmatter carries Cursor's
 # own documented disable-model-invocation field, which the pattern list
 # otherwise rejects outright. Every other check still runs on them
@@ -1812,11 +1865,13 @@ check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_tune")" "targets/cursor/sk
 check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_pickup")" "targets/cursor/skills/$(cursor_skill_folder_name pickup)/SKILL.md" "yes"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_stash")" "targets/cursor/skills/$(cursor_skill_folder_name stash)/SKILL.md" "yes"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_dig")" "targets/cursor/skills/$(cursor_skill_folder_name "$hoard_search_skill")/SKILL.md" "yes"
+check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_off")" "targets/cursor/skills/$(cursor_skill_folder_name off)/SKILL.md" "yes"
+check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_on")" "targets/cursor/skills/$(cursor_skill_folder_name on)/SKILL.md" "yes"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_hooks")" "targets/cursor/hooks/hooks.json"
 
 # All writes above succeeded (set -e would otherwise have aborted
 # already, triggering the cleanup trap and leaving every final_* path
-# untouched). Each of the eighteen mv's below is a rename(2) within one
+# untouched). Each of the twenty mv's below is a rename(2) within one
 # directory, hence individually atomic; only now, with known-good
 # content already fully written to disk under every temp name, do the
 # real targets get replaced.
@@ -1828,11 +1883,11 @@ check_no_claude_only_syntax "$(cat "$tmp_cursor_hooks")" "targets/cursor/hooks/h
 # signal from during this window - by the time the real handlers are
 # back, there is nothing left pending to deliver. Ignoring rather than
 # leaving the real handlers active is deliberate, not an oversight:
-# on_hup/on_int/on_term calling `exit` between two of these eighteen mv's is
+# on_hup/on_int/on_term calling `exit` between two of these twenty mv's is
 # exactly the half-applied state the comment above is about, so this is
 # the one place those handlers must NOT run.
 #
-# Restoring happens on every path out of this block. If all eighteen mv's
+# Restoring happens on every path out of this block. If all twenty mv's
 # succeed, the three `trap` calls immediately below always run next,
 # unconditionally. If any mv fails instead, `set -e` ends the script
 # right there without ever reaching those `trap` calls - but the ignored
@@ -1859,6 +1914,8 @@ mv "$tmp_cursor_skill_tune" "$final_cursor_skill_tune"
 mv "$tmp_cursor_skill_pickup" "$final_cursor_skill_pickup"
 mv "$tmp_cursor_skill_stash" "$final_cursor_skill_stash"
 mv "$tmp_cursor_skill_dig" "$final_cursor_skill_dig"
+mv "$tmp_cursor_skill_off" "$final_cursor_skill_off"
+mv "$tmp_cursor_skill_on" "$final_cursor_skill_on"
 mv "$tmp_cursor_hooks" "$final_cursor_hooks"
 trap on_hup HUP
 trap on_int INT
