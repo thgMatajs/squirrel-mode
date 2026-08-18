@@ -229,15 +229,17 @@ scratch_before=$(scratch_snapshot)
 #             already have" (shipped, correct, about the checkpoint), the Cursor-generated
 #             targets/cursor/skills/squirrel-pickup/SKILL.md copy of those same sentences,
 #             and docs/RESEARCH.md's citation entries. NOT CAUGHT: "entry" used for a memory.
-#           - "fact" (Memory) — glossary-cost fact: 9 hits across 3 in-scope files, and the decisive
+#           - "fact" (Memory) — glossary-cost fact: 13 hits across 4 in-scope files, and the decisive
 #             ones are shipped skill text: skills/stash/SKILL.md's `reference` type is DEFINED as "A
 #             fact, a state, or a pointer", and its "When a fact changed, supersede instead of
-#             editing" heading is the supersede rule's own name. Banning the word would fail on the
-#             file that teaches it. NOT CAUGHT: "fact" used as a synonym for the memory rather than
-#             for what it records.
-#           - "record" (Memory) — glossary-cost record: 32 hits across 8 in-scope files, the worst
+#             editing" heading is the supersede rule's own name. The Cursor-generated
+#             targets/cursor/skills/squirrel-stash/SKILL.md copy carries those same four lines.
+#             Banning the word would fail on the file that teaches it. NOT CAUGHT: "fact" used as a
+#             synonym for the memory rather than for what it records.
+#           - "record" (Memory) — glossary-cost record: 33 hits across 9 in-scope files, the worst
 #             of the five, because it is a VERB in shipped product text: skills/stash/SKILL.md's
-#             frontmatter description opens "Record one durable memory", and rules/base-rules.md
+#             frontmatter description opens "Record one durable memory" (and the Cursor
+#             squirrel-stash copy of that same line), and rules/base-rules.md
 #             (plus every artifact scripts/build.sh generates from it — output-styles/,
 #             targets/codex/AGENTS.md, targets/cursor/*.mdc) says "a checkpoint, a plan, or any
 #             other record". NOT CAUGHT: "record" used as a noun for a memory.

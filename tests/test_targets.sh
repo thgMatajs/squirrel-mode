@@ -435,6 +435,12 @@ assert_not_contains "$cursor_stash_content" "UserPromptSubmit" "Cursor stash ski
 assert_not_contains "$cursor_stash_content" "PreToolUse" "Cursor stash skill must not contain PreToolUse"
 assert_not_contains "$cursor_stash_content" "skills/dig/SKILL.md" "Cursor stash skill must not point at the Claude path skills/dig/SKILL.md"
 assert_contains "$cursor_stash_content" "the dig skill" "Cursor stash skill must cross-reference the sibling dig skill, not a Claude path"
+stash_example_open=$(printf '%s\n' "$cursor_stash_content" | awk 'p=="---" && $0=="type: feedback" { found=1; exit } { p=$0 } END { print found ? "yes" : "no" }')
+assert_eq "yes" "$stash_example_open" "Cursor squirrel-stash must keep the example memory's opening --- fence immediately before type: feedback - source_skill_body must copy body --- lines, or a model copying that shape writes a file hoard-search silently drops"
+stash_example_close=$(printf '%s\n' "$cursor_stash_content" | awk 'p=="title: never commit without running the test suite" && $0=="---" { found=1; exit } { p=$0 } END { print found ? "yes" : "no" }')
+assert_eq "yes" "$stash_example_close" "Cursor squirrel-stash must keep the example memory's closing --- fence immediately after the title line - both fences of the pair, not only one"
+stash_delim_count=$(printf '%s\n' "$cursor_stash_content" | grep -c '^---$' || true)
+assert_eq "4" "$stash_delim_count" "Cursor squirrel-stash must contain exactly four --- lines (skill frontmatter pair plus the example memory pair)"
 claude_stash_content=$(read_file "$repo_root/skills/stash/SKILL.md")
 assert_contains "$claude_stash_content" "/squirrel:stash" "canonical skills/stash/SKILL.md must stay the Claude source (still names /squirrel:stash)"
 

@@ -55,6 +55,7 @@ There is no `session` type. Session state is what the checkpoint holds; a memory
 The file's exact shape, with every key present and in this order - the reader assumes it:
 
 ```
+---
 type: feedback
 importance: 4
 tags: git, tests
@@ -64,6 +65,7 @@ uses: 0
 status: active
 superseded_by:
 title: never commit without running the test suite
+---
 
 Two releases went out with a broken suite. Run the suite first; a green
 run is the only evidence that a commit is safe.

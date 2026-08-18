@@ -736,9 +736,17 @@ CURSOR_PROFILE_NEW_CHAT_SENTENCE="Start a new chat for the profile to take effec
 source_skill_body() {
   # source_skill_body <name>: prints skills/<name>/SKILL.md's body -
   # every line after the frontmatter's closing "---" line, verbatim.
+  # Only the leading delimiter pair is skipped; later --- lines (example
+  # YAML fences in skills/stash/SKILL.md) stay in the body.
   name=$1
   awk '
-    /^---$/ { c++; if (c == 2) { in_body = 1 }; next }
+    /^---$/ {
+      c++
+      if (c <= 2) {
+        if (c == 2) in_body = 1
+        next
+      }
+    }
     in_body { print }
   ' "$repo_root/skills/$name/SKILL.md"
 }
