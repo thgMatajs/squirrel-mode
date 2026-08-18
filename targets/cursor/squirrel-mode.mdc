@@ -8,7 +8,7 @@ alwaysApply: true
 
 # squirrel-mode base rules (Cursor)
 
-Cursor has no profile mechanism, so the defaults below apply as-is and cannot be personalized automatically. To hand-tune them, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
+If ~/.squirrel/profile.md exists, squirrel-mode projects it to ~/.cursor/rules/squirrel-profile.mdc with alwaysApply so those field values override the defaults below. If no profile exists yet, the defaults apply as-is. To hand-tune them, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
 
 ## Defaults
 

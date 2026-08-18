@@ -178,6 +178,13 @@ extract_ctx() {
   printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null || printf '<jq error>'
 }
 
+extract_additional_context() {
+  # Top-level Cursor sibling of hookSpecificOutput.additionalContext.
+  # A parse miss is the same distinctive sentinel extract_ctx uses, so a
+  # missing key is never mistaken for a real empty string.
+  printf '%s' "$1" | jq -r '.additional_context' 2>/dev/null || printf '<jq error>'
+}
+
 extract_checkpoint_path_line() {
   # extract_checkpoint_path_line <additionalContext text> - the
   # resolved path load-profile.sh reported, per tech-lead Decision 1.
@@ -7416,9 +7423,9 @@ assert_eq "" "$out_fpP3a" "FAILURE PROOF (P3-3): a mutant that returns empty whe
 # command would be useless without the branch).
 fpP3b_script=$(make_script_scratch "$load_profile_script")
 # shellcheck disable=SC2016
-fpP3b_line=$(line_of "$fpP3b_script" '  UserPromptSubmit)')
+fpP3b_line=$(line_of "$fpP3b_script" '  UserPromptSubmit | beforeSubmitPrompt)')
 [ -n "$fpP3b_line" ] || fpP3b_line=0
-replace_line "$fpP3b_script" "$fpP3b_line" '  UserPromptSubmitNeverMatch)'
+replace_line "$fpP3b_script" "$fpP3b_line" '  UserPromptSubmitNeverMatch | beforeSubmitPrompt)'
 
 home_fpP3b=$(new_home)
 mkdir -p "$home_fpP3b/.squirrel"
@@ -11657,6 +11664,196 @@ upsH21cout=$(capture_stdout_with_path "$fpH21c_script" "$homeH21c" "$noawk_pathH
 assert_contains "$upsH21cout" "squirrel-mode: cannot bound the profile for reinjection" "FAILURE PROOF (HOARD-21c), control: the mutant still SAYS what went wrong - the mutation moves the stamp, it does not restore the silence, which is what makes the two halves separable"
 assert_eq "yes" "$([ -f "$homeH21c/.squirrel/profile-seen/sH21" ] && echo yes || echo no)" "FAILURE PROOF (HOARD-21c): stamping before the body is prepared marks the session as having seen a profile it was never shown"
 assert_not_contains "$(capture_stdout "$fpH21c_script" "$homeH21c" "$stdinH21")" "PB_H21_BODY_MARKER" "FAILURE PROOF (HOARD-21c): so the next prompt, with awk back on PATH, reinjects NOTHING - the profile is gone for the rest of that session. This is what HOARD-21's recovery assertion is measuring"
+
+# ==========================================================================
+# Cursor adapter (conversation_id / workspace_roots / additional_context
+# / beforeSubmitPrompt / profile projection). New scenarios beside the
+# Claude ones above; none of those Claude asserts are replaced.
+# ==========================================================================
+PROJECTION_BANNER='<!-- GENERATED FILE. Source: ~/.squirrel/profile.md (squirrel-profile projection) -->'
+
+# C1. Claude payload with only session_id + cwd still emits both context
+#     keys, equal to each other, and extract_ctx still reads the nested
+#     Claude field (a sibling additional_context must not break it).
+homeC1=$(new_home)
+mkdir -p "$homeC1/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: CURSOR_ADAPTER_PROFILE_C1' >"$homeC1/.squirrel/profile.md"
+cwdC1="$homeC1/project-cursor-adapter"
+stdinC1_claude=$(jq -n --arg sid "sess-cursor-c1" --arg cwd "$cwdC1" \
+  '{session_id:$sid, cwd:$cwd, hook_event_name:"SessionStart"}')
+outC1_claude=$(capture_stdout "$load_profile_script" "$homeC1" "$stdinC1_claude")
+exitC1_claude=$(capture_exit "$load_profile_script" "$homeC1" "$stdinC1_claude")
+assert_eq "0" "$exitC1_claude" "C1: Claude session_id+cwd SessionStart must still exit 0"
+ctxC1_claude=$(extract_ctx "$outC1_claude")
+extraC1_claude=$(extract_additional_context "$outC1_claude")
+assert_eq "$ctxC1_claude" "$extraC1_claude" "C1: nested hookSpecificOutput.additionalContext and top-level additional_context must be equal on a Claude payload"
+assert_contains "$ctxC1_claude" "CURSOR_ADAPTER_PROFILE_C1" "C1: extract_ctx must still read .hookSpecificOutput.additionalContext after the sibling key is added"
+eventC1_claude=$(printf '%s' "$outC1_claude" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || eventC1_claude=""
+assert_eq "SessionStart" "$eventC1_claude" "C1: nested hookEventName stays SessionStart (Claude contract), even when additional_context is also emitted"
+
+# C2. Cursor payload with conversation_id + workspace_roots (no
+#     session_id, no cwd) produces the same checkpoint path and off-token
+#     as the equivalent session_id + cwd Claude payload.
+homeC2=$(new_home)
+mkdir -p "$homeC2/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: CURSOR_ADAPTER_PROFILE_C2' >"$homeC2/.squirrel/profile.md"
+cwdC2="$homeC2/project-cursor-equiv"
+stdinC2_claude=$(jq -n --arg sid "sess-cursor-c2" --arg cwd "$cwdC2" \
+  '{session_id:$sid, cwd:$cwd, hook_event_name:"SessionStart"}')
+stdinC2_cursor=$(jq -n --arg cid "sess-cursor-c2" --arg root "$cwdC2" \
+  '{conversation_id:$cid, workspace_roots:[$root], hook_event_name:"sessionStart"}')
+outC2_claude=$(capture_stdout "$load_profile_script" "$homeC2" "$stdinC2_claude")
+outC2_cursor=$(capture_stdout "$load_profile_script" "$homeC2" "$stdinC2_cursor")
+ctxC2_claude=$(extract_ctx "$outC2_claude")
+ctxC2_cursor=$(extract_ctx "$outC2_cursor")
+extraC2_cursor=$(extract_additional_context "$outC2_cursor")
+assert_eq "$ctxC2_cursor" "$extraC2_cursor" "C2: sessionStart stdout JSON must contain both .hookSpecificOutput.additionalContext and top-level .additional_context, equal"
+pathC2_claude=$(extract_checkpoint_path_line "$ctxC2_claude")
+pathC2_cursor=$(extract_checkpoint_path_line "$ctxC2_cursor")
+assert_eq "$pathC2_claude" "$pathC2_cursor" "C2: conversation_id+workspace_roots must resolve the same Project checkpoint path as session_id+cwd"
+tokenC2_claude=$(printf '%s\n' "$ctxC2_claude" | sed -n 's/^Session off-token: //p' | tail -n 1)
+tokenC2_cursor=$(printf '%s\n' "$ctxC2_cursor" | sed -n 's/^Session off-token: //p' | tail -n 1)
+assert_eq "$tokenC2_claude" "$tokenC2_cursor" "C2: conversation_id+workspace_roots must emit the same Session off-token as session_id+cwd"
+eventC2_cursor=$(printf '%s' "$outC2_cursor" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || eventC2_cursor=""
+assert_eq "SessionStart" "$eventC2_cursor" "C2: sessionStart still emits nested hookEventName SessionStart (Claude stdout contract)"
+
+# C2b. Prefer session_id over conversation_id, and cwd over workspace_roots,
+#      when both spellings are present with different values.
+homeC2b=$(new_home)
+mkdir -p "$homeC2b/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: en' >"$homeC2b/.squirrel/profile.md"
+cwdC2b_preferred="$homeC2b/preferred-cwd"
+cwdC2b_other="$homeC2b/other-workspace"
+stdinC2b_mixed=$(jq -n --arg sid "sess-preferred" --arg cid "conv-other" \
+  --arg cwd "$cwdC2b_preferred" --arg root "$cwdC2b_other" \
+  '{session_id:$sid, conversation_id:$cid, cwd:$cwd, workspace_roots:[$root], hook_event_name:"SessionStart"}')
+stdinC2b_preferred=$(jq -n --arg sid "sess-preferred" --arg cwd "$cwdC2b_preferred" \
+  '{session_id:$sid, cwd:$cwd, hook_event_name:"SessionStart"}')
+outC2b_mixed=$(capture_stdout "$load_profile_script" "$homeC2b" "$stdinC2b_mixed")
+outC2b_preferred=$(capture_stdout "$load_profile_script" "$homeC2b" "$stdinC2b_preferred")
+assert_eq "$(extract_checkpoint_path_line "$(extract_ctx "$outC2b_preferred")")" \
+  "$(extract_checkpoint_path_line "$(extract_ctx "$outC2b_mixed")")" \
+  "C2b: when both spellings are present, session_id and cwd win for the checkpoint path"
+tokenC2b_mixed=$(printf '%s\n' "$(extract_ctx "$outC2b_mixed")" | sed -n 's/^Session off-token: //p' | tail -n 1)
+tokenC2b_preferred=$(printf '%s\n' "$(extract_ctx "$outC2b_preferred")" | sed -n 's/^Session off-token: //p' | tail -n 1)
+assert_eq "$tokenC2b_preferred" "$tokenC2b_mixed" "C2b: when both spellings are present, session_id wins for the off-token"
+
+# C2c. Same checkpoint/off-token equality with jq absent (no-jq
+#      workspace_roots[0] / conversation_id fallback).
+nojq_pathC2c=$(make_tool_path "jq")
+homeC2c=$(new_home)
+mkdir -p "$homeC2c/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: en' >"$homeC2c/.squirrel/profile.md"
+cwdC2c="$homeC2c/project-no-jq"
+stdinC2c_claude=$(printf '{"session_id":"sess-cursor-c2c","cwd":"%s","hook_event_name":"SessionStart"}' "$cwdC2c")
+stdinC2c_cursor=$(printf '{"conversation_id":"sess-cursor-c2c","workspace_roots":["%s"],"hook_event_name":"sessionStart"}' "$cwdC2c")
+outC2c_claude=$(capture_stdout_with_path "$load_profile_script" "$homeC2c" "$nojq_pathC2c" "$stdinC2c_claude")
+outC2c_cursor=$(capture_stdout_with_path "$load_profile_script" "$homeC2c" "$nojq_pathC2c" "$stdinC2c_cursor")
+ctxC2c_claude=$(extract_ctx "$outC2c_claude")
+ctxC2c_cursor=$(extract_ctx "$outC2c_cursor")
+assert_eq "$(extract_checkpoint_path_line "$ctxC2c_claude")" "$(extract_checkpoint_path_line "$ctxC2c_cursor")" \
+  "C2c: conversation_id+workspace_roots must match session_id+cwd for the checkpoint path with jq absent"
+tokenC2c_claude=$(printf '%s\n' "$ctxC2c_claude" | sed -n 's/^Session off-token: //p' | tail -n 1)
+tokenC2c_cursor=$(printf '%s\n' "$ctxC2c_cursor" | sed -n 's/^Session off-token: //p' | tail -n 1)
+assert_eq "$tokenC2c_claude" "$tokenC2c_cursor" "C2c: conversation_id+workspace_roots must match session_id+cwd for the off-token with jq absent"
+extraC2c=$(extract_additional_context "$outC2c_cursor")
+assert_eq "$ctxC2c_cursor" "$extraC2c" "C2c: no-jq emit_json fallback must still emit additional_context equal to additionalContext"
+
+# C3. check-off-flag.sh: Cursor conversation_id + workspace_roots claims
+#     the same PENDING sentinel as session_id + cwd, including on
+#     beforeSubmitPrompt, and still prints the Claude counter-instruction.
+homeC3=$(new_home)
+mkdir -p "$homeC3/.squirrel/off"
+cwdC3="$homeC3/project-off-cursor"
+pendingC3="$homeC3/.squirrel/off/PENDING.sess-cursor-c3"
+printf '%s\n' "$cwdC3" >"$pendingC3"
+stdinC3=$(jq -n --arg cid "sess-cursor-c3" --arg root "$cwdC3" \
+  '{conversation_id:$cid, workspace_roots:[$root], hook_event_name:"beforeSubmitPrompt"}')
+if outC3=$(printf '%s' "$stdinC3" | HOME="$homeC3" "$check_off_flag_script" 2>/dev/null); then
+  exitC3=0
+else
+  exitC3=$?
+fi
+assert_eq "0" "$exitC3" "C3: check-off-flag.sh must exit 0 when claiming a PENDING sentinel from a Cursor beforeSubmitPrompt payload"
+assert_contains "$outC3" "squirrel-mode is OFF" "C3: the Claude counter-instruction must still fire on beforeSubmitPrompt when a matching PENDING sentinel is claimed"
+assert_file_exists "$homeC3/.squirrel/off/sess-cursor-c3" "C3: conversation_id must claim PENDING.<id> the same way session_id does"
+assert_file_absent "$pendingC3" "C3: the original PENDING sentinel must be renamed away after the Cursor payload claims it"
+
+# C4. hook_event_name beforeSubmitPrompt takes the plain-text
+#     reinjection path, same as UserPromptSubmit — not SessionStart JSON.
+homeC4=$(new_home)
+mkdir -p "$homeC4/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: CURSOR_ADAPTER_PROFILE_C4' >"$homeC4/.squirrel/profile.md"
+cwdC4="$homeC4/proj-c4"
+stdinC4_ups=$(jq -n --arg sid "sess-cursor-c4" --arg cwd "$cwdC4" \
+  '{session_id:$sid, cwd:$cwd, hook_event_name:"UserPromptSubmit"}')
+stdinC4_bsp=$(jq -n --arg cid "sess-cursor-c4b" --arg root "$cwdC4" \
+  '{conversation_id:$cid, workspace_roots:[$root], hook_event_name:"beforeSubmitPrompt"}')
+outC4_ups=$(capture_stdout "$load_profile_script" "$homeC4" "$stdinC4_ups")
+outC4_bsp=$(capture_stdout "$load_profile_script" "$homeC4" "$stdinC4_bsp")
+assert_contains "$outC4_ups" "CURSOR_ADAPTER_PROFILE_C4" "C4 control: UserPromptSubmit still reinjects the profile as plain text"
+assert_contains "$outC4_bsp" "CURSOR_ADAPTER_PROFILE_C4" "C4: beforeSubmitPrompt must take the plain-text reinjection path"
+assert_contains "$outC4_bsp" "OVERRIDE" "C4: beforeSubmitPrompt must use the same OVERRIDE framing as UserPromptSubmit"
+case "$outC4_bsp" in
+  \{*) c4_bsp_json=yes ;;
+  *) c4_bsp_json=no ;;
+esac
+assert_eq "no" "$c4_bsp_json" "C4: beforeSubmitPrompt reinjection must be plain text, not SessionStart JSON"
+assert_not_contains "$outC4_bsp" "Session off-token:" "C4: beforeSubmitPrompt must not re-emit off-token"
+assert_not_contains "$outC4_bsp" "Project checkpoint path:" "C4: beforeSubmitPrompt must not re-emit checkpoint path"
+
+# C5. Profile projection: scratch HOME + profile.md, after SessionStart,
+#     $HOME/.cursor/rules/squirrel-profile.mdc exists with the frozen
+#     banner, alwaysApply: true, and the profile body. Never written
+#     into the project cwd.
+homeC5=$(new_home)
+mkdir -p "$homeC5/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: CURSOR_PROJECTION_BODY_C5' >"$homeC5/.squirrel/profile.md"
+cwdC5="$homeC5/a-real-project"
+mkdir -p "$cwdC5"
+stdinC5=$(jq -n --arg sid "sess-cursor-c5" --arg cwd "$cwdC5" \
+  '{session_id:$sid, cwd:$cwd, hook_event_name:"SessionStart"}')
+outC5=$(capture_stdout "$load_profile_script" "$homeC5" "$stdinC5")
+exitC5=$(capture_exit "$load_profile_script" "$homeC5" "$stdinC5")
+assert_eq "0" "$exitC5" "C5: SessionStart must exit 0 after a successful profile projection"
+assert_contains "$(extract_ctx "$outC5")" "CURSOR_PROJECTION_BODY_C5" "C5: SessionStart must still emit the profile in additionalContext when projection succeeds"
+projC5="$homeC5/.cursor/rules/squirrel-profile.mdc"
+assert_file_exists "$projC5" "C5: SessionStart must write \$HOME/.cursor/rules/squirrel-profile.mdc when profile.md exists"
+assert_file_absent "$cwdC5/squirrel-profile.mdc" "C5: the projection must not be written inside the project cwd"
+if [ -f "$projC5" ]; then
+  projC5_body=$(cat "$projC5")
+else
+  projC5_body=""
+fi
+projC5_banner_lines=$(printf '%s\n' "$projC5_body" | grep -c -F -x "$PROJECTION_BANNER" || true)
+assert_eq "1" "$projC5_banner_lines" "C5: the projection must contain the exact full-line banner (frozen for Task 8 uninstall)"
+assert_contains "$projC5_body" "alwaysApply: true" "C5: the projection must set alwaysApply: true"
+assert_contains "$projC5_body" "CURSOR_PROJECTION_BODY_C5" "C5: the projection must contain the profile body"
+assert_contains "$projC5_body" "OVERRIDE" "C5: the projection must frame the profile body as field overrides of squirrel-mode defaults"
+
+# C6. No profile.md → no projection file created.
+homeC6=$(new_home)
+cwdC6="$homeC6/project-no-profile"
+stdinC6=$(jq -n --arg sid "sess-cursor-c6" --arg cwd "$cwdC6" \
+  '{session_id:$sid, cwd:$cwd, hook_event_name:"SessionStart"}')
+exitC6=$(capture_exit "$load_profile_script" "$homeC6" "$stdinC6")
+assert_eq "0" "$exitC6" "C6: SessionStart with no profile.md must still exit 0"
+assert_file_absent "$homeC6/.cursor/rules/squirrel-profile.mdc" "C6: no profile.md means no projection file is created"
+
+# C7. Projection failure is best-effort: hook still exits 0 and still
+#     emits context.
+homeC7=$(new_home)
+mkdir -p "$homeC7/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: CURSOR_PROJECTION_FAIL_C7' >"$homeC7/.squirrel/profile.md"
+# A file at ~/.cursor makes mkdir of ~/.cursor/rules fail.
+printf 'not-a-directory\n' >"$homeC7/.cursor"
+cwdC7="$homeC7/project-proj-fail"
+stdinC7=$(jq -n --arg sid "sess-cursor-c7" --arg cwd "$cwdC7" \
+  '{session_id:$sid, cwd:$cwd, hook_event_name:"SessionStart"}')
+outC7=$(capture_stdout "$load_profile_script" "$homeC7" "$stdinC7")
+exitC7=$(capture_exit "$load_profile_script" "$homeC7" "$stdinC7")
+assert_eq "0" "$exitC7" "C7: when projection cannot be written, load-profile.sh must still exit 0"
+assert_contains "$(extract_ctx "$outC7")" "CURSOR_PROJECTION_FAIL_C7" "C7: when projection fails, SessionStart must still emit profile context"
 
 # ==========================================================================
 # SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.

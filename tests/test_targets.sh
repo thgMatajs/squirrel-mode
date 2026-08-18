@@ -108,7 +108,7 @@ make_full_scratch() {
   # build.sh's tolerance for a missing skills/<name>/SKILL.md, so every
   # scratch fixture in this repo must supply real sources now, not omit
   # them). A copy running from scratch/scripts/build.sh therefore
-  # regenerates all twelve artifacts, never touching the real repo.
+  # regenerates all thirteen artifacts, never touching the real repo.
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-full-scratch.XXXXXX")
   mkdir -p "$scratch/scripts" "$scratch/rules" "$scratch/skills"
   cp "$build_script" "$scratch/scripts/build.sh"
@@ -124,7 +124,7 @@ make_full_scratch() {
 # --- NO SCENARIO IN THIS FILE MAY INVOKE THE REAL REPO'S build.sh -------
 #
 # build.sh derives its own repo_root from its own location, so running
-# "$build_script" (the repo's own copy) WRITES all twelve generated
+# "$build_script" (the repo's own copy) WRITES all thirteen generated
 # artifacts into the working tree under test. Scenario 6's idempotence
 # half used to do exactly that; see its own comment for what that cost.
 # Every build.sh invocation in this file goes through make_full_scratch
@@ -133,14 +133,16 @@ make_full_scratch() {
 #
 # generated_target_rel_paths is every generated file under targets/ -
 # the two derived from rules/base-rules.md AND the eight ported from
-# skills/*/SKILL.md - and is used both by scenario 6's drift check and
-# by the tripwire at the bottom of this file. The last two entries are
+# skills/*/SKILL.md AND the Cursor hooks.json - and is used both by
+# scenario 6's drift check and
+# by the tripwire at the bottom of this file. The last two skill
+# entries are
 # the Cursor Agent Skills, which are generated exactly like every other
 # entry here and must therefore be drift-checked exactly like them: a
 # hand-edit to either one (say, deleting its disable-model-invocation
 # line, which is the whole reason it behaves as a slash command rather
 # than something Cursor fires on its own) has to fail this file.
-generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md"
+generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/hooks/hooks.json"
 
 # The two Cursor Agent Skills, as "<source command name>:<folder name>"
 # pairs. Cursor requires a skill's frontmatter `name` to match its parent
@@ -425,7 +427,7 @@ cursor_command_plan_body=$(read_file "$repo_root/targets/cursor/commands/plan.md
 assert_contains "$cursor_command_plan_body" "$cursor_command_opener_plan" "the Cursor plan COMMAND must still carry the swapped wording - the swap is not disabled globally, only skipped for the Agent Skills"
 
 # ==========================================================================
-# 6. Idempotence and drift for ALL TEN generated artifacts under
+# 6. Idempotence and drift for ALL ELEVEN generated artifacts under
 #    targets/.
 #
 #    TWO defects were fixed here, and both are load-bearing:
@@ -437,13 +439,13 @@ assert_contains "$cursor_command_plan_body" "$cursor_command_opener_plan" "the C
 #       A hand-edit to either of those - e.g. flipping the .mdc's
 #       `alwaysApply: true` to `false` - passed this whole file clean.
 #       The list below is now every generated file under targets/,
-#       whichever source it derives from - which as of the Cursor Agent
-#       Skills is ten files, not eight.
+#       whichever source it derives from - which as of Cursor hooks.json
+#       is eleven files, not ten.
 #
 #    b) THE TEST MUST NOT WRITE INTO THE TREE IT IS TESTING. The
 #       idempotence half used to invoke "$build_script" - the REPO's own
 #       copy - and build.sh derives its repo_root from its own location,
-#       so that run regenerated all twelve artifacts straight into the
+#       so that run regenerated all thirteen artifacts straight into the
 #       working tree under test. A genuine drift was therefore
 #       reportable exactly ONCE: the same run that reported it had
 #       already rewritten the file back to canonical, `git status
@@ -469,8 +471,14 @@ assert_eq "0" "$idem_build_exit" "scripts/build.sh (first run, scratch) must exi
 
 snap_before=""
 for rel in $generated_target_rel_paths; do
-  snap_before="$snap_before
+  assert_file_exists "$idem_scratch/$rel" "scratch build must produce $rel"
+  if [ -f "$idem_scratch/$rel" ]; then
+    snap_before="$snap_before
 $rel $(cksum <"$idem_scratch/$rel")"
+  else
+    snap_before="$snap_before
+$rel MISSING"
+  fi
 done
 
 if idem_build2_out=$("$idem_scratch/scripts/build.sh" 2>&1); then
@@ -482,10 +490,15 @@ assert_eq "0" "$idem_build2_exit" "scripts/build.sh (second run, same scratch) m
 
 snap_after=""
 for rel in $generated_target_rel_paths; do
-  snap_after="$snap_after
+  if [ -f "$idem_scratch/$rel" ]; then
+    snap_after="$snap_after
 $rel $(cksum <"$idem_scratch/$rel")"
+  else
+    snap_after="$snap_after
+$rel MISSING"
+  fi
 done
-assert_eq "$snap_before" "$snap_after" "all ten generated targets/ artifacts must be byte-identical across two consecutive build.sh runs (idempotence)"
+assert_eq "$snap_before" "$snap_after" "all eleven generated targets/ artifacts must be byte-identical across two consecutive build.sh runs (idempotence)"
 
 drift_scratch=$(make_full_scratch)
 cleanup_dirs="$cleanup_dirs $drift_scratch"
@@ -497,7 +510,9 @@ fi
 assert_eq "0" "$drift_build_exit" "regenerating the targets/ artifacts into a full scratch directory must succeed -- output: $drift_build_out"
 
 for rel in $generated_target_rel_paths; do
-  if drift_diff=$(diff -u "$repo_root/$rel" "$drift_scratch/$rel" 2>&1); then
+  if [ ! -f "$repo_root/$rel" ] || [ ! -f "$drift_scratch/$rel" ]; then
+    drift_status="DRIFT DETECTED: missing $rel in committed tree or scratch regeneration"
+  elif drift_diff=$(diff -u "$repo_root/$rel" "$drift_scratch/$rel" 2>&1); then
     drift_status=identical
   else
     drift_status="DRIFT DETECTED: $drift_diff"
@@ -615,9 +630,11 @@ rm -rf "$cursor_swap_word_scratch"
 #     the build before the Cursor Agent Skill is ever checked - so a
 #     plain injection proves nothing about the allowance itself. The
 #     scratch build.sh below therefore has exactly those earlier call
-#     sites deleted (never the Agent Skill ones), leaving the Cursor
-#     Agent Skill check as the only thing that can catch the injection.
-#     If the allowance were a blanket exemption, that build would exit 0.
+#     sites deleted (never the Agent Skill ones, and never the Cursor
+#     hooks.json site which cannot see a skill-body injection), leaving
+#     five check_no_claude_only_syntax call sites. The Cursor Agent Skill
+#     check is then the one that can catch the injection. If the
+#     allowance were a blanket exemption, that build would exit 0.
 # ==========================================================================
 dmi_scratch=$(make_full_scratch)
 cleanup_dirs="$cleanup_dirs $dmi_scratch"
@@ -631,7 +648,7 @@ chmod +x "$dmi_scratch/scripts/build.sh"
 # shellcheck disable=SC2016 # same reasoning as the strip above: a
 # literal needle for grep -F, never an expression to expand here.
 dmi_remaining_calls=$(grep -c -F 'check_no_claude_only_syntax "$(cat ' "$dmi_scratch/scripts/build.sh" || true)
-assert_eq "4" "$dmi_remaining_calls" "fixture sanity: stripping the six Codex-skill and Cursor-command call sites must leave exactly four check_no_claude_only_syntax call sites (AGENTS.md, the .mdc, and the two Cursor Agent Skills)"
+assert_eq "5" "$dmi_remaining_calls" "fixture sanity: stripping the six Codex-skill and Cursor-command call sites must leave exactly five check_no_claude_only_syntax call sites (AGENTS.md, the .mdc, the two Cursor Agent Skills, and Cursor hooks.json)"
 
 printf '\nA sentence mentioning disable-model-invocation in ordinary prose.\n' >>"$dmi_scratch/skills/digest/SKILL.md"
 if dmi_out=$("$dmi_scratch/scripts/build.sh" 2>&1); then

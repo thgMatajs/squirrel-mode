@@ -1411,13 +1411,42 @@ FRONTMATTER
   cat <<'BODY'
 # squirrel-mode base rules (Cursor)
 
-Cursor has no profile mechanism, so the defaults below apply as-is and cannot be personalized automatically. To hand-tune them, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
+If ~/.squirrel/profile.md exists, squirrel-mode projects it to ~/.cursor/rules/squirrel-profile.mdc with alwaysApply so those field values override the defaults below. If no profile exists yet, the defaults apply as-is. To hand-tune them, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
 BODY
   printf '\n'
   print_defaults_section
   printf '\n## Rules\n\n'
   print_rules_section cursor
   printf '\n'
+}
+
+write_cursor_hooks() {
+  cat <<'EOF'
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/load-profile.sh"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/check-off-flag.sh"
+      },
+      {
+        "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/load-profile.sh"
+      }
+    ],
+    "preToolUse": [
+      {
+        "matcher": "Write|Read",
+        "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/allow-checkpoint.sh"
+      }
+    ]
+  }
+}
+EOF
 }
 
 # --- Write every artifact --------------------------------------------
@@ -1428,7 +1457,7 @@ mkdir -p "$repo_root/output-styles" "$repo_root/skills/rules" \
   "$repo_root/targets/codex" "$repo_root/targets/cursor" \
   "$repo_root/targets/codex/skills/digest" "$repo_root/targets/codex/skills/plan" \
   "$repo_root/targets/codex/skills/init" "$repo_root/targets/codex/skills/tune" \
-  "$repo_root/targets/cursor/commands" \
+  "$repo_root/targets/cursor/commands" "$repo_root/targets/cursor/hooks" \
   "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name digest)" \
   "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name plan)"
 
@@ -1436,25 +1465,25 @@ mkdir -p "$repo_root/output-styles" "$repo_root/skills/rules" \
 # hidden temp file in the SAME DIRECTORY as its final target - never
 # /tmp, since the repo could be on a different filesystem/mount and mv
 # (rename(2)) is only atomic within one filesystem - and only mv'd into
-# place once every one of the twelve temp writes below has already
+# place once every one of the thirteen temp writes below has already
 # succeeded. That covers the WRITE phase completely: a failure partway
-# through the twelve writes (a full disk, a read-only target directory, a
+# through the thirteen writes (a full disk, a read-only target directory, a
 # signal - see the traps below) leaves every real artifact exactly as it
 # was, never a mix of freshly regenerated and stale files, because no mv
 # has run yet at that point.
 #
 # The MV PHASE is a narrower, different story, and this comment used to
-# overstate it. Twelve independent rename(2) calls, one per fixed
+# overstate it. Thirteen independent rename(2) calls, one per fixed
 # committed path, cannot be made atomic AS A GROUP under POSIX sh - there
 # is no multi-file rename primitive available here. Two things narrow
 # that window as far as this shell can narrow it: each mv is individually
 # atomic (so no single artifact is ever observed half-written, only "old"
 # or "new", never a mix within one file), and HUP/INT/TERM are ignored for
-# the short duration of the twelve mv's (see the trap right before them),
+# the short duration of the thirteen mv's (see the trap right before them),
 # so a signal arriving mid-sequence cannot land between two of them.
 #
 # What neither defense reaches is SIGKILL or power loss: either can still
-# stop the process between mv 1 and mv 12, leaving some artifacts
+# stop the process between mv 1 and mv 13, leaving some artifacts
 # regenerated and others stale. That residual is real, not hypothetical,
 # and is not eliminated here - it cannot be, in POSIX sh, against those
 # two failure modes specifically. It is not silent forever, though: the
@@ -1474,7 +1503,8 @@ tmp_codex="$repo_root/targets/codex/.AGENTS.md.tmp.$$"
 tmp_cursor="$repo_root/targets/cursor/.squirrel-mode.mdc.tmp.$$"
 
 # The eight ported command artifacts (see the "Ported command artifacts"
-# section above). Every one of the twelve final_*/tmp_* paths below is now
+# section above) plus the Cursor hooks.json. Every one of the thirteen
+# final_*/tmp_* paths below is now
 # written and moved UNCONDITIONALLY - validate_source_skill above
 # already guaranteed, before this point, that all four
 # skills/{digest,plan,init,tune}/SKILL.md sources exist and are
@@ -1490,6 +1520,7 @@ final_cursor_command_digest="$repo_root/targets/cursor/commands/digest.md"
 final_cursor_command_plan="$repo_root/targets/cursor/commands/plan.md"
 final_cursor_skill_digest="$cursor_skill_dir_digest/SKILL.md"
 final_cursor_skill_plan="$cursor_skill_dir_plan/SKILL.md"
+final_cursor_hooks="$repo_root/targets/cursor/hooks/hooks.json"
 
 tmp_codex_skill_digest="$repo_root/targets/codex/skills/digest/.SKILL.md.tmp.$$"
 tmp_codex_skill_plan="$repo_root/targets/codex/skills/plan/.SKILL.md.tmp.$$"
@@ -1499,16 +1530,18 @@ tmp_cursor_command_digest="$repo_root/targets/cursor/commands/.digest.md.tmp.$$"
 tmp_cursor_command_plan="$repo_root/targets/cursor/commands/.plan.md.tmp.$$"
 tmp_cursor_skill_digest="$cursor_skill_dir_digest/.SKILL.md.tmp.$$"
 tmp_cursor_skill_plan="$cursor_skill_dir_plan/.SKILL.md.tmp.$$"
+tmp_cursor_hooks="$repo_root/targets/cursor/hooks/.hooks.json.tmp.$$"
 
 cleanup_build_tmp() {
   # rm -f is a silent no-op on a path that was never created (e.g. if
   # the script failed before reaching that particular write) - safe to
-  # list every one of the twelve temp paths unconditionally.
+  # list every one of the thirteen temp paths unconditionally.
   rm -f "$tmp_output_style" "$tmp_skill" "$tmp_codex" "$tmp_cursor" \
     "$tmp_codex_skill_digest" "$tmp_codex_skill_plan" \
     "$tmp_codex_skill_init" "$tmp_codex_skill_tune" \
     "$tmp_cursor_command_digest" "$tmp_cursor_command_plan" \
-    "$tmp_cursor_skill_digest" "$tmp_cursor_skill_plan"
+    "$tmp_cursor_skill_digest" "$tmp_cursor_skill_plan" \
+    "$tmp_cursor_hooks"
 }
 
 # A signal handler that only cleans up and never calls `exit` does not
@@ -1562,6 +1595,7 @@ write_cursor_command digest >"$tmp_cursor_command_digest"
 write_cursor_command plan >"$tmp_cursor_command_plan"
 write_cursor_skill digest >"$tmp_cursor_skill_digest"
 write_cursor_skill plan >"$tmp_cursor_skill_plan"
+write_cursor_hooks >"$tmp_cursor_hooks"
 
 # G5/G6 (S7 review cycle 3): check_no_claude_only_syntax runs HERE,
 # against each artifact's own FULLY COMPOSED text - read back from the
@@ -1569,7 +1603,7 @@ write_cursor_skill plan >"$tmp_cursor_skill_plan"
 # (frontmatter, the GENERATED banner, add_title_suffix, and - for
 # Cursor - the skill-to-command word swap) has already been applied,
 # never against an isolated ingredient (a bare description or body)
-# before that composition happens. Deliberately placed AFTER all ten
+# before that composition happens. Deliberately placed AFTER all thirteen
 # temp writes above but BEFORE the first `mv` below: a failure here
 # still leaves every real artifact untouched (the cleanup trap removes
 # the temp files; no `mv` has run yet), so the file header's "All
@@ -1601,10 +1635,11 @@ check_no_claude_only_syntax "$(cat "$tmp_cursor_command_digest")" "targets/curso
 check_no_claude_only_syntax "$(cat "$tmp_cursor_command_plan")" "targets/cursor/commands/plan.md"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_digest")" "targets/cursor/skills/$(cursor_skill_folder_name digest)/SKILL.md" "yes"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_plan")" "targets/cursor/skills/$(cursor_skill_folder_name plan)/SKILL.md" "yes"
+check_no_claude_only_syntax "$(cat "$tmp_cursor_hooks")" "targets/cursor/hooks/hooks.json"
 
 # All writes above succeeded (set -e would otherwise have aborted
 # already, triggering the cleanup trap and leaving every final_* path
-# untouched). Each of the twelve mv's below is a rename(2) within one
+# untouched). Each of the thirteen mv's below is a rename(2) within one
 # directory, hence individually atomic; only now, with known-good
 # content already fully written to disk under every temp name, do the
 # real targets get replaced.
@@ -1616,11 +1651,11 @@ check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_plan")" "targets/cursor/sk
 # signal from during this window - by the time the real handlers are
 # back, there is nothing left pending to deliver. Ignoring rather than
 # leaving the real handlers active is deliberate, not an oversight:
-# on_hup/on_int/on_term calling `exit` between two of these twelve mv's is
+# on_hup/on_int/on_term calling `exit` between two of these thirteen mv's is
 # exactly the half-applied state the comment above is about, so this is
 # the one place those handlers must NOT run.
 #
-# Restoring happens on every path out of this block. If all twelve mv's
+# Restoring happens on every path out of this block. If all thirteen mv's
 # succeed, the three `trap` calls immediately below always run next,
 # unconditionally. If any mv fails instead, `set -e` ends the script
 # right there without ever reaching those `trap` calls - but the ignored
@@ -1642,6 +1677,7 @@ mv "$tmp_cursor_command_digest" "$final_cursor_command_digest"
 mv "$tmp_cursor_command_plan" "$final_cursor_command_plan"
 mv "$tmp_cursor_skill_digest" "$final_cursor_skill_digest"
 mv "$tmp_cursor_skill_plan" "$final_cursor_skill_plan"
+mv "$tmp_cursor_hooks" "$final_cursor_hooks"
 trap on_hup HUP
 trap on_int INT
 trap on_term TERM

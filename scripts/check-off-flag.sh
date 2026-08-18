@@ -342,6 +342,118 @@ extract_field() {
   extract_top_level_string "$json" "$key"
 }
 
+# extract_top_level_array_first_string / extract_workspace_roots_0 /
+# extract_session_id / extract_cwd: DUPLICATED, DELIBERATELY, from
+# scripts/load-profile.sh. Same no-source rule as extract_field.
+extract_top_level_array_first_string() {
+  printf '%s\n' "$1" | SQUIRREL_JSON_KEY="$2" LC_ALL=C awk '
+    function take_raw(   s, seg, bs, closed) {
+      s = ""
+      while (i <= m) {
+        seg = part[i]
+        bs = 0
+        if (match(seg, /\\+$/)) { bs = RLENGTH }
+        closed = (i < m)
+        i = i + 1
+        if (closed == 0) { unterminated = 1; return s seg }
+        if (bs % 2 == 1) { s = s seg "\""; continue }
+        return s seg
+      }
+      unterminated = 1
+      return s
+    }
+    function decode(s,   out, p, nx) {
+      if (index(s, "\\") == 0) { return s }
+      out = ""
+      while (1) {
+        p = index(s, "\\")
+        if (p == 0) { return out s }
+        out = out substr(s, 1, p - 1)
+        nx = substr(s, p + 1, 1)
+        if (nx == "n") { out = out "\n" }
+        else if (nx == "t") { out = out "\t" }
+        else if (nx == "r") { out = out "\r" }
+        else if (nx == "b") { out = out sprintf("%c", 8) }
+        else if (nx == "f") { out = out sprintf("%c", 12) }
+        else if (nx == "\"") { out = out "\"" }
+        else if (nx == "\\") { out = out "\\" }
+        else if (nx == "/") { out = out "/" }
+        else { out = out "\\" nx }
+        s = substr(s, p + 2)
+      }
+    }
+    { buf = buf $0 "\n" }
+    END {
+      key = ENVIRON["SQUIRREL_JSON_KEY"]
+      m = split(buf, part, "[\"]")
+      depth = 0
+      found = 0
+      val = ""
+      have_prev = 0
+      prev_str = ""
+      prev_depth = 0
+      want_first = 0
+      unterminated = 0
+      i = 1
+      while (i <= m) {
+        o = part[i]
+        gsub(/[ \t\r\n]/, "", o)
+        if (have_prev == 1 && substr(o, 1, 1) == ":") {
+          if (prev_depth == 1 && prev_str == key && index(o, ":[") == 1 && index(o, ":[]") != 1) {
+            want_first = 1
+          }
+        }
+        have_prev = 0
+        t = o
+        opens = gsub(/[{[]/, "", t)
+        t = o
+        closes = gsub(/[]}]/, "", t)
+        depth = depth + opens - closes
+        i = i + 1
+        if (i > m) { break }
+        raw = take_raw()
+        if (unterminated == 1) { break }
+        if (want_first == 1) { found = 1; val = decode(raw); want_first = 0 }
+        else { prev_str = raw; prev_depth = depth; have_prev = 1 }
+      }
+      if (found == 1) { printf "%s", val }
+    }
+  ' 2>/dev/null || true
+}
+
+extract_workspace_roots_0() {
+  json=$1
+  if command -v jq >/dev/null 2>&1; then
+    if val=$(printf '%s' "$json" | jq -r '(.workspace_roots[0] | strings) // empty' 2>/dev/null); then
+      if [ "$val" != "null" ] && [ -n "$val" ]; then
+        printf '%s' "$val"
+        return 0
+      fi
+    fi
+  fi
+  extract_top_level_array_first_string "$json" "workspace_roots"
+}
+
+extract_session_id() {
+  json=$1
+  val=$(extract_field "$json" "session_id")
+  if [ -n "$val" ]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  extract_field "$json" "conversation_id"
+}
+
+extract_cwd() {
+  json=$1
+  val=$(extract_field "$json" "cwd")
+  if [ -n "$val" ]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  extract_workspace_roots_0 "$json"
+}
+
 # sanitize_session_id <raw>: prints <raw> and returns 0 only if it is a
 # plausible session id - non-empty, composed solely of letters, digits,
 # underscore, and hyphen (which by construction excludes "/" and "."
@@ -723,8 +835,8 @@ decide() {
   # Step 1: extract both fields this hook needs. `cwd` is available to
   # UserPromptSubmit the same way it already is to SessionStart (see
   # load-profile.sh's own extract_field use of the same key).
-  raw_session_id=$(extract_field "$input" "session_id")
-  cwd=$(extract_field "$input" "cwd")
+  raw_session_id=$(extract_session_id "$input")
+  cwd=$(extract_cwd "$input")
 
   # Step 2: sanitise session_id. On failure, return immediately, before
   # off_dir is even computed - nothing under off/ is touched, so every

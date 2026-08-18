@@ -578,6 +578,126 @@ extract_field() {
   extract_top_level_string "$json" "$key"
 }
 
+# extract_top_level_array_first_string <json> <key>: first STRING element
+# of the top-level array named <key>. Used for Cursor's
+# workspace_roots[0] when jq is absent. Same quote-split scanner as
+# extract_top_level_string; duplicated here rather than shared, for the
+# same no-source rule that keeps extract_field copied per script.
+extract_top_level_array_first_string() {
+  printf '%s\n' "$1" | SQUIRREL_JSON_KEY="$2" LC_ALL=C awk '
+    function take_raw(   s, seg, bs, closed) {
+      s = ""
+      while (i <= m) {
+        seg = part[i]
+        bs = 0
+        if (match(seg, /\\+$/)) { bs = RLENGTH }
+        closed = (i < m)
+        i = i + 1
+        if (closed == 0) { unterminated = 1; return s seg }
+        if (bs % 2 == 1) { s = s seg "\""; continue }
+        return s seg
+      }
+      unterminated = 1
+      return s
+    }
+    function decode(s,   out, p, nx) {
+      if (index(s, "\\") == 0) { return s }
+      out = ""
+      while (1) {
+        p = index(s, "\\")
+        if (p == 0) { return out s }
+        out = out substr(s, 1, p - 1)
+        nx = substr(s, p + 1, 1)
+        if (nx == "n") { out = out "\n" }
+        else if (nx == "t") { out = out "\t" }
+        else if (nx == "r") { out = out "\r" }
+        else if (nx == "b") { out = out sprintf("%c", 8) }
+        else if (nx == "f") { out = out sprintf("%c", 12) }
+        else if (nx == "\"") { out = out "\"" }
+        else if (nx == "\\") { out = out "\\" }
+        else if (nx == "/") { out = out "/" }
+        else { out = out "\\" nx }
+        s = substr(s, p + 2)
+      }
+    }
+    { buf = buf $0 "\n" }
+    END {
+      key = ENVIRON["SQUIRREL_JSON_KEY"]
+      m = split(buf, part, "[\"]")
+      depth = 0
+      found = 0
+      val = ""
+      have_prev = 0
+      prev_str = ""
+      prev_depth = 0
+      want_first = 0
+      unterminated = 0
+      i = 1
+      while (i <= m) {
+        o = part[i]
+        gsub(/[ \t\r\n]/, "", o)
+        if (have_prev == 1 && substr(o, 1, 1) == ":") {
+          if (prev_depth == 1 && prev_str == key && index(o, ":[") == 1 && index(o, ":[]") != 1) {
+            want_first = 1
+          }
+        }
+        have_prev = 0
+        t = o
+        opens = gsub(/[{[]/, "", t)
+        t = o
+        closes = gsub(/[]}]/, "", t)
+        depth = depth + opens - closes
+        i = i + 1
+        if (i > m) { break }
+        raw = take_raw()
+        if (unterminated == 1) { break }
+        if (want_first == 1) { found = 1; val = decode(raw); want_first = 0 }
+        else { prev_str = raw; prev_depth = depth; have_prev = 1 }
+      }
+      if (found == 1) { printf "%s", val }
+    }
+  ' 2>/dev/null || true
+}
+
+# extract_workspace_roots_0 <json>: first string in the top-level
+# workspace_roots array. jq path is .workspace_roots[0]; the awk path
+# above is the no-jq fallback.
+extract_workspace_roots_0() {
+  json=$1
+  if command -v jq >/dev/null 2>&1; then
+    if val=$(printf '%s' "$json" | jq -r '(.workspace_roots[0] | strings) // empty' 2>/dev/null); then
+      if [ "$val" != "null" ] && [ -n "$val" ]; then
+        printf '%s' "$val"
+        return 0
+      fi
+    fi
+  fi
+  extract_top_level_array_first_string "$json" "workspace_roots"
+}
+
+# Thin aliases for Cursor stdin. Prefer the Claude field when both
+# spellings are present. Duplicated next to extract_field in
+# check-off-flag.sh; not extracted into a shared lib.
+extract_session_id() {
+  json=$1
+  val=$(extract_field "$json" "session_id")
+  if [ -n "$val" ]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  extract_field "$json" "conversation_id"
+}
+
+extract_cwd() {
+  json=$1
+  val=$(extract_field "$json" "cwd")
+  if [ -n "$val" ]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  extract_workspace_roots_0 "$json"
+}
+
 # --- Project slug (tech-lead Decision 1 support) ---------------------
 #
 # ALGORITHM: `<sanitized-basename>-<hash-of-full-path>`.
@@ -2305,7 +2425,7 @@ emit_json() {
     # non-empty object whose hookSpecificOutput.hookEventName is
     # exactly SessionStart before trusting the jq path; anything else
     # falls through to json_escape.
-    if out=$(jq -n --arg ctx "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null) \
+    if out=$(jq -n --arg ctx "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}, additional_context: $ctx}' 2>/dev/null) \
       && [ -n "$out" ] \
       && [ "$out" != "null" ]; then
       case "$out" in
@@ -2314,9 +2434,12 @@ emit_json() {
           # a non-object value there, or any hookEventName other than
           # SessionStart must NOT be trusted. A shim that ignores stdin
           # and reprints garbage fails this the same way - event will
-          # not equal the literal SessionStart.
+          # not equal the literal SessionStart. additional_context must
+          # equal the nested additionalContext (Cursor sibling key).
           event=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName // empty' 2>/dev/null) || event=""
-          if [ "$event" = "SessionStart" ]; then
+          nested=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null) || nested=""
+          extra=$(printf '%s' "$out" | jq -r '.additional_context // empty' 2>/dev/null) || extra=""
+          if [ "$event" = "SessionStart" ] && [ "$nested" = "$extra" ]; then
             printf '%s\n' "$out"
             return 0
           fi
@@ -2325,7 +2448,7 @@ emit_json() {
     fi
   fi
   escaped=$(json_escape "$ctx")
-  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$escaped"
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"},"additional_context":"%s"}\n' "$escaped" "$escaped"
   return 0
 }
 
@@ -2959,6 +3082,47 @@ format_profile_framing() {
   printf 'A squirrel-mode profile exists at %s. These field values OVERRIDE the defaults already given to you in the squirrel-mode output style, field by field.\n\n%s' "$profile_file" "$profile_body"
 }
 
+# project_cursor_profile <home_dir> <profile_file>: best-effort write of
+# $HOME/.cursor/rules/squirrel-profile.mdc, a projection of profile.md
+# (never source of truth). Mitigates the Cursor sessionStart race.
+# Failure must not change this hook's exit status or the JSON it emits.
+# Atomic: temp file in the same directory, then mv.
+CURSOR_PROFILE_PROJECTION_BANNER='<!-- GENERATED FILE. Source: ~/.squirrel/profile.md (squirrel-profile projection) -->'
+
+project_cursor_profile() {
+  home_dir=$1
+  profile_file=$2
+  [ -n "$home_dir" ] || return 0
+  [ -f "$profile_file" ] || return 0
+  dest_dir="$home_dir/.cursor/rules"
+  dest="$dest_dir/squirrel-profile.mdc"
+  mkdir -p "$dest_dir" >/dev/null 2>&1 || return 0
+  tmp="$dest_dir/.squirrel-profile.mdc.tmp.$$"
+  profile_body=$(cat "$profile_file" 2>/dev/null) || {
+    rm -f "$tmp"
+    return 0
+  }
+  if ! {
+    printf '%s\n' '---'
+    printf '%s\n' 'alwaysApply: true'
+    printf '%s\n' '---'
+    printf '\n'
+    printf '%s\n' "$CURSOR_PROFILE_PROJECTION_BANNER"
+    printf '\n'
+    printf '%s\n' 'These field values OVERRIDE the squirrel-mode defaults, field by field.'
+    printf '\n'
+    printf '%s\n' "$profile_body"
+  } >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 0
+  fi
+  mv "$tmp" "$dest" 2>/dev/null || {
+    rm -f "$tmp"
+    return 0
+  }
+  return 0
+}
+
 # touch_profile_seen <home_dir> <raw_session_id>: after a real profile
 # inject, record that this session has seen the current profile.md.
 # Returns 0 if and only if the stamp is now ON DISK; returns non-zero,
@@ -3105,7 +3269,7 @@ PROFILE_CAP_UNAVAILABLE_NOTICE="squirrel-mode: cannot bound the profile for rein
 # Never emits SessionStart JSON. Never nags /init. Never prunes.
 handle_user_prompt_submit() {
   input=$1
-  raw_session_id=$(extract_field "$input" "session_id")
+  raw_session_id=$(extract_session_id "$input")
   session_id=$(sanitize_session_id "$raw_session_id") || { printf ''; return 0; }
   [ -n "$session_id" ] || { printf ''; return 0; }
 
@@ -3337,8 +3501,8 @@ squash_one_break() {
 # --- Context assembly -------------------------------------------------
 build_context() {
   input=$1
-  cwd=$(extract_field "$input" "cwd")
-  raw_session_id=$(extract_field "$input" "session_id")
+  cwd=$(extract_cwd "$input")
+  raw_session_id=$(extract_session_id "$input")
 
   home_dir="${HOME:-}"
   squirrel_dir="$home_dir/.squirrel"
@@ -3397,6 +3561,8 @@ build_context() {
 
   injected_real_profile=0
   if [ -n "$home_dir" ] && [ -f "$profile_file" ]; then
+    # Best-effort Cursor projection. Failure must not skip the inject.
+    project_cursor_profile "$home_dir" "$profile_file" || true
     profile_body=$(cat "$profile_file" 2>/dev/null) || profile_body=""
     profile_body=$(cap_profile_body "$profile_body")
     context=$(format_profile_framing "$profile_file" "$profile_body")
@@ -3552,14 +3718,14 @@ Resume available - run /squirrel:pickup"
 
 # --- Entry ------------------------------------------------------------
 #
-# Read stdin once. UserPromptSubmit takes the P3 plain-text path;
-# SessionStart (and missing/other hook_event_name) keep today's
-# emit_json SessionStart contract.
+# Read stdin once. UserPromptSubmit and Cursor beforeSubmitPrompt take
+# the P3 plain-text path; SessionStart / sessionStart (and missing/other
+# hook_event_name) keep today's emit_json SessionStart contract.
 input=$(cat)
 hook_event_name=$(extract_field "$input" "hook_event_name")
 
 case "$hook_event_name" in
-  UserPromptSubmit)
+  UserPromptSubmit | beforeSubmitPrompt)
     if output=$(handle_user_prompt_submit "$input" 2>/dev/null); then
       :
     else
@@ -3591,6 +3757,6 @@ fi
 if json_out=$(emit_json "$context" 2>/dev/null); then
   printf '%s\n' "$json_out"
 else
-  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"squirrel-mode: no profile found yet. Suggest /squirrel:init once, briefly."}}\n'
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"squirrel-mode: no profile found yet. Suggest /squirrel:init once, briefly."},"additional_context":"squirrel-mode: no profile found yet. Suggest /squirrel:init once, briefly."}\n'
 fi
 exit 0
