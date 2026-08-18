@@ -400,7 +400,10 @@ assert_not_contains "$cursor_pickup_content" "CLAUDE_PLUGIN_ROOT" "Cursor pickup
 assert_not_contains "$cursor_pickup_content" "SessionStart" "Cursor pickup skill must not contain SessionStart"
 assert_not_contains "$cursor_pickup_content" "UserPromptSubmit" "Cursor pickup skill must not contain UserPromptSubmit"
 assert_not_contains "$cursor_pickup_content" "PreToolUse" "Cursor pickup skill must not contain PreToolUse"
-assert_contains "$cursor_pickup_content" "Resume available" "Cursor pickup skill must still match a Resume available prefix (the Claude hook's banner, without spelling /squirrel:)"
+assert_contains "$cursor_pickup_content" "starts with \`Resume available\`" "Cursor pickup skill must identify the resume banner by prefix (starts with Resume available) so the injected 'Resume available - run ...' line still matches"
+assert_contains "$cursor_pickup_content" "a line that starts with \`Resume available\`, or a \`Legacy checkpoint file:\` line, is squirrel-mode's" "Cursor pickup position rule must use the same Resume available prefix as Case 2, not an exact short line"
+assert_not_contains "$cursor_pickup_content" "spell either of them exactly: \`Resume available\`" "Cursor pickup position rule must not treat an exact short Resume available line as the hook banner - the injected line is longer"
+assert_contains "$cursor_pickup_content" "no line that starts with \`Resume available\`" "Cursor pickup Case 3 must use the same prefix (no line that starts with Resume available), not an exact short line"
 assert_not_contains "$cursor_pickup_content" "Resume available - run /squirrel:pickup" "Cursor pickup skill must not spell the Claude resume banner that contains /squirrel:"
 claude_pickup_content=$(read_file "$repo_root/skills/pickup/SKILL.md")
 assert_contains "$claude_pickup_content" "/squirrel:pickup" "canonical skills/pickup/SKILL.md must stay the Claude source (still names /squirrel:pickup)"

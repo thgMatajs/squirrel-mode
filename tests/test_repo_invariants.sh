@@ -223,11 +223,12 @@ scratch_before=$(scratch_snapshot)
 #             pasted note" (the digest command's own shipped subject list), and 14 lines of
 #             docs/ACCEPTANCE.md using the ordinary word. NOT CAUGHT, therefore: a document that
 #             calls a hoard memory "a note".
-#           - "entry" (Memory) — glossary-cost entry: 21 hits across 4 in-scope files, and the
+#           - "entry" (Memory) — glossary-cost entry: 24 hits across 5 in-scope files, and the
 #             collisions are this project's own vocabulary for other things entirely:
 #             skills/pickup/SKILL.md's "Done log entries" / "drop an entry that repeats one you
-#             already have" (shipped, correct, about the checkpoint), and docs/RESEARCH.md's
-#             citation entries. NOT CAUGHT: "entry" used for a memory.
+#             already have" (shipped, correct, about the checkpoint), the Cursor-generated
+#             targets/cursor/skills/squirrel-pickup/SKILL.md copy of those same sentences,
+#             and docs/RESEARCH.md's citation entries. NOT CAUGHT: "entry" used for a memory.
 #           - "fact" (Memory) — glossary-cost fact: 9 hits across 3 in-scope files, and the decisive
 #             ones are shipped skill text: skills/stash/SKILL.md's `reference` type is DEFINED as "A
 #             fact, a state, or a pointer", and its "When a fact changed, supersede instead of
