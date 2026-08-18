@@ -1,8 +1,8 @@
 #!/bin/sh
 # Coverage for S3: scripts/build.sh and the four BASE-RULES-DERIVED generated
 # artifacts it produces (output-styles/squirrel-mode.md, skills/rules/SKILL.md,
-# targets/codex/AGENTS.md, targets/cursor/squirrel-mode.mdc) -- four of the thirteen
-# total artifacts build.sh generates. The other nine (the ported Codex
+# targets/codex/AGENTS.md, targets/cursor/squirrel-mode.mdc) -- four of the fifteen
+# total artifacts build.sh generates. The other eleven (the ported Codex
 # skills, Cursor commands, Cursor Agent Skills, and Cursor hooks.json) are a separate source
 # (skills/{digest,plan,init,tune}/SKILL.md, not rules/base-rules.md) and are
 # covered by tests/test_targets.sh instead, not duplicated here.
@@ -169,7 +169,7 @@ make_build_scratch() {
 # --- NO SCENARIO IN THIS FILE MAY INVOKE THE REAL REPO'S build.sh -------
 #
 # build.sh derives its own repo_root from its own location, so running
-# "$build_script" (the repo's own copy) WRITES all thirteen generated
+# "$build_script" (the repo's own copy) WRITES all fifteen generated
 # artifacts into the working tree under test. Scenarios 2, 13 and 13b
 # used to do exactly that, and the consequence was not theoretical: a
 # real drift -- e.g. a hand-edited `alwaysApply: false` in the committed
@@ -184,7 +184,7 @@ make_build_scratch() {
 # make_build_scratch above and runs "$scratch/scripts/build.sh". The
 # repository working tree is READ ONLY for the whole of this file, and
 # the repo_generated_* tripwire at the bottom asserts that outright.
-repo_generated_rel_paths="output-styles/squirrel-mode.md skills/rules/SKILL.md targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/hooks/hooks.json"
+repo_generated_rel_paths="output-styles/squirrel-mode.md skills/rules/SKILL.md targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/skills/squirrel-init/SKILL.md targets/cursor/skills/squirrel-tune/SKILL.md targets/cursor/hooks/hooks.json"
 repo_generated_snapshot() {
   # Prints one cksum line per generated artifact, with the volatile
   # absolute path stripped, so the result compares equal across two
@@ -934,8 +934,8 @@ cp "$atomic_output_style" "$atomic_snapshot_dir/output-style.md"
 cp "$atomic_skill" "$atomic_snapshot_dir/skill.md"
 cp "$atomic_codex" "$atomic_snapshot_dir/codex.md"
 cp "$atomic_cursor" "$atomic_snapshot_dir/cursor.mdc"
-# B2 (S7 review): snapshot the eight ported artifacts too, so the
-# "unchanged after a failed build" assertion below covers all thirteen, not
+# B2 (S7 review): snapshot the ten ported artifacts too, so the
+# "unchanged after a failed build" assertion below covers all fifteen, not
 # just the original four.
 cp "$atomic_scratch/targets/codex/skills/digest/SKILL.md" "$atomic_snapshot_dir/codex-skill-digest.md"
 cp "$atomic_scratch/targets/codex/skills/plan/SKILL.md" "$atomic_snapshot_dir/codex-skill-plan.md"
@@ -945,6 +945,14 @@ cp "$atomic_scratch/targets/cursor/commands/digest.md" "$atomic_snapshot_dir/cur
 cp "$atomic_scratch/targets/cursor/commands/plan.md" "$atomic_snapshot_dir/cursor-command-plan.md"
 cp "$atomic_scratch/targets/cursor/skills/squirrel-digest/SKILL.md" "$atomic_snapshot_dir/cursor-skill-digest.md"
 cp "$atomic_scratch/targets/cursor/skills/squirrel-plan/SKILL.md" "$atomic_snapshot_dir/cursor-skill-plan.md"
+assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" "atomicity fixture: the first (baseline) build must produce targets/cursor/skills/squirrel-init/SKILL.md"
+assert_file_exists "$atomic_scratch/targets/cursor/skills/squirrel-tune/SKILL.md" "atomicity fixture: the first (baseline) build must produce targets/cursor/skills/squirrel-tune/SKILL.md"
+if [ -f "$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" ]; then
+  cp "$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" "$atomic_snapshot_dir/cursor-skill-init.md"
+fi
+if [ -f "$atomic_scratch/targets/cursor/skills/squirrel-tune/SKILL.md" ]; then
+  cp "$atomic_scratch/targets/cursor/skills/squirrel-tune/SKILL.md" "$atomic_snapshot_dir/cursor-skill-tune.md"
+fi
 assert_file_exists "$atomic_scratch/targets/cursor/hooks/hooks.json" "atomicity fixture: the first (baseline) build must produce targets/cursor/hooks/hooks.json"
 if [ -f "$atomic_scratch/targets/cursor/hooks/hooks.json" ]; then
   cp "$atomic_scratch/targets/cursor/hooks/hooks.json" "$atomic_snapshot_dir/cursor-hooks.json"
@@ -984,11 +992,11 @@ else
 fi
 assert_eq "yes" "$atomic_build2_failed" "build.sh must exit non-zero when it cannot write one target artifact (read-only targets/codex/ directory) -- got exit $atomic_build2_exit, output: $atomic_build2_output"
 
-for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cursor.mdc:$atomic_cursor" "codex-skill-digest.md:$atomic_scratch/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$atomic_scratch/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$atomic_scratch/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$atomic_scratch/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$atomic_scratch/targets/cursor/commands/digest.md" "cursor-command-plan.md:$atomic_scratch/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$atomic_scratch/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$atomic_scratch/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-hooks.json:$atomic_scratch/targets/cursor/hooks/hooks.json"; do
+for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cursor.mdc:$atomic_cursor" "codex-skill-digest.md:$atomic_scratch/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$atomic_scratch/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$atomic_scratch/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$atomic_scratch/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$atomic_scratch/targets/cursor/commands/digest.md" "cursor-command-plan.md:$atomic_scratch/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$atomic_scratch/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$atomic_scratch/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-skill-init.md:$atomic_scratch/targets/cursor/skills/squirrel-init/SKILL.md" "cursor-skill-tune.md:$atomic_scratch/targets/cursor/skills/squirrel-tune/SKILL.md" "cursor-hooks.json:$atomic_scratch/targets/cursor/hooks/hooks.json"; do
   snap_name=${pair%%:*}
   live_path=${pair#*:}
   if [ ! -f "$atomic_snapshot_dir/$snap_name" ]; then
-    assert_eq "unchanged" "CHANGED: snapshot missing $snap_name" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all thirteen artifacts"
+    assert_eq "unchanged" "CHANGED: snapshot missing $snap_name" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all fifteen artifacts"
     continue
   fi
   if atomic_diff=$(diff -u "$atomic_snapshot_dir/$snap_name" "$live_path" 2>&1); then
@@ -996,7 +1004,7 @@ for pair in "output-style.md:$atomic_output_style" "skill.md:$atomic_skill" "cur
   else
     atomic_status="CHANGED: $atomic_diff"
   fi
-  assert_eq "unchanged" "$atomic_status" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all thirteen artifacts"
+  assert_eq "unchanged" "$atomic_status" "$live_path must be UNCHANGED after a failed build caused by one unwritable target (atomicity: no partial regeneration) - B2, all fifteen artifacts"
 done
 
 # The failing target itself must also be unchanged (still the baseline
@@ -1133,9 +1141,9 @@ cp "$sig_scratch_a/skills/rules/SKILL.md" "$sig_a_snapshot/skill.md"
 cp "$sig_scratch_a/targets/codex/AGENTS.md" "$sig_a_snapshot/codex.md"
 cp "$sig_scratch_a/targets/cursor/squirrel-mode.mdc" "$sig_a_snapshot/cursor.mdc"
 # B2 (S7 review): the fixture now carries skills/, so build.sh also
-# regenerates the eight ported command artifacts - snapshotted here too,
+# regenerates the ten ported command artifacts - snapshotted here too,
 # so the "unchanged after a SIGTERM during the write phase" assertion
-# below covers all THIRTEEN artifacts, not just the original four.
+# below covers all FIFTEEN artifacts, not just the original four.
 cp "$sig_scratch_a/targets/codex/skills/digest/SKILL.md" "$sig_a_snapshot/codex-skill-digest.md"
 cp "$sig_scratch_a/targets/codex/skills/plan/SKILL.md" "$sig_a_snapshot/codex-skill-plan.md"
 cp "$sig_scratch_a/targets/codex/skills/init/SKILL.md" "$sig_a_snapshot/codex-skill-init.md"
@@ -1144,6 +1152,14 @@ cp "$sig_scratch_a/targets/cursor/commands/digest.md" "$sig_a_snapshot/cursor-co
 cp "$sig_scratch_a/targets/cursor/commands/plan.md" "$sig_a_snapshot/cursor-command-plan.md"
 cp "$sig_scratch_a/targets/cursor/skills/squirrel-digest/SKILL.md" "$sig_a_snapshot/cursor-skill-digest.md"
 cp "$sig_scratch_a/targets/cursor/skills/squirrel-plan/SKILL.md" "$sig_a_snapshot/cursor-skill-plan.md"
+assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" "signal-test fixture 16a: baseline build must produce targets/cursor/skills/squirrel-init/SKILL.md"
+assert_file_exists "$sig_scratch_a/targets/cursor/skills/squirrel-tune/SKILL.md" "signal-test fixture 16a: baseline build must produce targets/cursor/skills/squirrel-tune/SKILL.md"
+if [ -f "$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" ]; then
+  cp "$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" "$sig_a_snapshot/cursor-skill-init.md"
+fi
+if [ -f "$sig_scratch_a/targets/cursor/skills/squirrel-tune/SKILL.md" ]; then
+  cp "$sig_scratch_a/targets/cursor/skills/squirrel-tune/SKILL.md" "$sig_a_snapshot/cursor-skill-tune.md"
+fi
 assert_file_exists "$sig_scratch_a/targets/cursor/hooks/hooks.json" "signal-test fixture 16a: baseline build must produce targets/cursor/hooks/hooks.json"
 if [ -f "$sig_scratch_a/targets/cursor/hooks/hooks.json" ]; then
   cp "$sig_scratch_a/targets/cursor/hooks/hooks.json" "$sig_a_snapshot/cursor-hooks.json"
@@ -1155,8 +1171,8 @@ fi
 # nothing to change anyway" (same reasoning as scenario 14's atomicity
 # fixture). The SIGTERM here lands well before ANY mv (see
 # line_of_first_write below - it is injected right after the very
-# FIRST write, long before the mv phase even begins), so all THIRTEEN
-# artifacts, including the nine ported/generated-non-rules ones, must be unchanged - there
+# FIRST write, long before the mv phase even begins), so all FIFTEEN
+# artifacts, including the eleven ported/generated-non-rules ones, must be unchanged - there
 # is no mv left to reach any of them.
 rule1_first_body_line_sig_a=$(line_of_first_body_line_for_rule 1 "$sig_scratch_a/rules/base-rules.md")
 insert_line_after "$sig_scratch_a/rules/base-rules.md" "$rule1_first_body_line_sig_a" "This sentence was added only to force a content change for the signal-handling test."
@@ -1185,11 +1201,11 @@ assert_eq "143" "$sig_a_exit" "SIGTERM during the write phase must make build.sh
 sig_a_leftover_tmp=$(find "$sig_scratch_a" -name '.*.tmp.*' 2>/dev/null || true)
 assert_eq "" "$sig_a_leftover_tmp" "no .tmp temp files must remain after a SIGTERM during the write phase"
 
-for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "skill.md:$sig_scratch_a/skills/rules/SKILL.md" "codex.md:$sig_scratch_a/targets/codex/AGENTS.md" "cursor.mdc:$sig_scratch_a/targets/cursor/squirrel-mode.mdc" "codex-skill-digest.md:$sig_scratch_a/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$sig_scratch_a/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$sig_scratch_a/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$sig_scratch_a/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$sig_scratch_a/targets/cursor/commands/digest.md" "cursor-command-plan.md:$sig_scratch_a/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$sig_scratch_a/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$sig_scratch_a/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-hooks.json:$sig_scratch_a/targets/cursor/hooks/hooks.json"; do
+for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "skill.md:$sig_scratch_a/skills/rules/SKILL.md" "codex.md:$sig_scratch_a/targets/codex/AGENTS.md" "cursor.mdc:$sig_scratch_a/targets/cursor/squirrel-mode.mdc" "codex-skill-digest.md:$sig_scratch_a/targets/codex/skills/digest/SKILL.md" "codex-skill-plan.md:$sig_scratch_a/targets/codex/skills/plan/SKILL.md" "codex-skill-init.md:$sig_scratch_a/targets/codex/skills/init/SKILL.md" "codex-skill-tune.md:$sig_scratch_a/targets/codex/skills/tune/SKILL.md" "cursor-command-digest.md:$sig_scratch_a/targets/cursor/commands/digest.md" "cursor-command-plan.md:$sig_scratch_a/targets/cursor/commands/plan.md" "cursor-skill-digest.md:$sig_scratch_a/targets/cursor/skills/squirrel-digest/SKILL.md" "cursor-skill-plan.md:$sig_scratch_a/targets/cursor/skills/squirrel-plan/SKILL.md" "cursor-skill-init.md:$sig_scratch_a/targets/cursor/skills/squirrel-init/SKILL.md" "cursor-skill-tune.md:$sig_scratch_a/targets/cursor/skills/squirrel-tune/SKILL.md" "cursor-hooks.json:$sig_scratch_a/targets/cursor/hooks/hooks.json"; do
   snap_name=${pair%%:*}
   live_path=${pair#*:}
   if [ ! -f "$sig_a_snapshot/$snap_name" ]; then
-    assert_eq "unchanged" "CHANGED: snapshot missing $snap_name" "$live_path must be UNCHANGED after a SIGTERM during the write phase (the mv phase was never reached) - B2, all thirteen artifacts, not just the original four"
+    assert_eq "unchanged" "CHANGED: snapshot missing $snap_name" "$live_path must be UNCHANGED after a SIGTERM during the write phase (the mv phase was never reached) - B2, all fifteen artifacts, not just the original four"
     continue
   fi
   if sig_a_diff=$(diff -u "$sig_a_snapshot/$snap_name" "$live_path" 2>&1); then
@@ -1197,15 +1213,15 @@ for pair in "output-style.md:$sig_scratch_a/output-styles/squirrel-mode.md" "ski
   else
     sig_a_status="CHANGED: $sig_a_diff"
   fi
-  assert_eq "unchanged" "$sig_a_status" "$live_path must be UNCHANGED after a SIGTERM during the write phase (the mv phase was never reached) - B2, all thirteen artifacts, not just the original four"
+  assert_eq "unchanged" "$sig_a_status" "$live_path must be UNCHANGED after a SIGTERM during the write phase (the mv phase was never reached) - B2, all fifteen artifacts, not just the original four"
 done
 rm -rf "$sig_scratch_a"
 
 # --- 16b: SIGTERM landing between mv 1 and mv 2 (the reviewer's exact --
-# repro) must be IGNORED, not honoured: the thirteen mv's are the one
+# repro) must be IGNORED, not honoured: the fifteen mv's are the one
 # window a partial state could reach the working tree, and fix part (b)
 # makes that window uninterruptible by HUP/INT/TERM. The build must run
-# to completion with all thirteen artifacts consistently updated, not stop
+# to completion with all fifteen artifacts consistently updated, not stop
 # partway through.
 sig_scratch_b=$(make_build_scratch)
 if sig_baseline_b_output=$("$sig_scratch_b/scripts/build.sh" 2>&1); then
@@ -1248,13 +1264,13 @@ for rel in "output-styles/squirrel-mode.md" "skills/rules/SKILL.md" "targets/cod
   assert_contains "$sig_b_content" "$sig_b_new_sentence" "$rel must carry the fresh content after a SIGTERM ignored mid-mv - this is exactly the corruption the reviewer reproduced (one artifact fresh, three stale) under the OLD trap that cleaned up but never called exit"
 done
 
-# B2 (S7 review): the eight ported artifacts do not derive from
+# B2 (S7 review): the ten ported artifacts do not derive from
 # rules/base-rules.md, so they carry no equivalent "fresh sentence"
 # signal - instead, assert each one's mv ALSO ran to completion despite
 # the ignored SIGTERM, by comparing it byte-for-byte against a
 # completely separate, uninterrupted reference build from the exact
 # same sources. Before B1 removed build.sh's have_<name> guards, a bug
-# that silently skipped one of these eight mv's specifically during the
+# that silently skipped one of these ten mv's specifically during the
 # ignored-signal window would have shown up as a stale (or missing)
 # artifact here; this closes that gap.
 sig_b_reference=$(make_build_scratch)
@@ -1264,7 +1280,7 @@ else
   sig_b_reference_exit=$?
 fi
 assert_eq "0" "$sig_b_reference_exit" "signal test 16b reference build (uninterrupted, same default sources) must succeed -- output: $sig_b_reference_output"
-for rel in "targets/codex/skills/digest/SKILL.md" "targets/codex/skills/plan/SKILL.md" "targets/codex/skills/init/SKILL.md" "targets/codex/skills/tune/SKILL.md" "targets/cursor/commands/digest.md" "targets/cursor/commands/plan.md" "targets/cursor/skills/squirrel-digest/SKILL.md" "targets/cursor/skills/squirrel-plan/SKILL.md" "targets/cursor/hooks/hooks.json"; do
+for rel in "targets/codex/skills/digest/SKILL.md" "targets/codex/skills/plan/SKILL.md" "targets/codex/skills/init/SKILL.md" "targets/codex/skills/tune/SKILL.md" "targets/cursor/commands/digest.md" "targets/cursor/commands/plan.md" "targets/cursor/skills/squirrel-digest/SKILL.md" "targets/cursor/skills/squirrel-plan/SKILL.md" "targets/cursor/skills/squirrel-init/SKILL.md" "targets/cursor/skills/squirrel-tune/SKILL.md" "targets/cursor/hooks/hooks.json"; do
   if [ ! -f "$sig_b_reference/$rel" ] || [ ! -f "$sig_scratch_b/$rel" ]; then
     sig_b_ported_status="DIFFERS: missing $rel in reference or interrupted build"
   elif sig_b_ported_diff=$(diff -u "$sig_b_reference/$rel" "$sig_scratch_b/$rel" 2>&1); then
@@ -1603,7 +1619,7 @@ rm -rf "$ad2_to_scratch"
 #
 #     This is the counted, always-on form of the "NO SCENARIO IN THIS
 #     FILE MAY INVOKE THE REAL REPO'S build.sh" note at the top. It
-#     compares the thirteen generated artifacts' cksums against the snapshot
+#     compares the fifteen generated artifacts' cksums against the snapshot
 #     taken before scenario 1 ran. Against an already-clean tree it can
 #     only pass (build.sh is idempotent, so even the old repo-targeted
 #     runs left the bytes unchanged); against a DRIFTED tree it is the

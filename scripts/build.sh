@@ -21,6 +21,8 @@
 #   - targets/cursor/commands/plan.md        <- skills/plan/SKILL.md
 #   - targets/cursor/skills/squirrel-digest/SKILL.md <- skills/digest/SKILL.md
 #   - targets/cursor/skills/squirrel-plan/SKILL.md   <- skills/plan/SKILL.md
+#   - targets/cursor/skills/squirrel-init/SKILL.md   <- skills/init/SKILL.md
+#   - targets/cursor/skills/squirrel-tune/SKILL.md   <- skills/tune/SKILL.md
 # pickup, off, and on are deliberately NOT ported to either target: each
 # depends on a lifecycle hook (SessionStart's injected checkpoint path,
 # UserPromptSubmit's sentinel-claiming) neither host has, and there is no
@@ -33,8 +35,10 @@
 #   - targets/cursor/skills/squirrel-<name>/SKILL.md - a Cursor Agent
 #     Skill, auto-discovered from ~/.cursor/skills/ for EVERY project on
 #     the machine, which is what targets/cursor/install.sh installs.
-# The skill folder names carry a "squirrel-" prefix because Cursor has no
-# command namespace (Claude Code's "/squirrel:" has no equivalent), so a
+# Cursor init and tune are Agent Skills only - never project commands -
+# so the machine-wide plugin covers calibration. The skill folder names
+# carry a "squirrel-" prefix because Cursor has no command namespace
+# (Claude Code's "/squirrel:" has no equivalent), so a
 # bare "digest" would collide with a skill of the user's own; Cursor
 # requires the frontmatter `name` to match its parent folder exactly, so
 # the two are generated together and can never drift apart.
@@ -702,6 +706,14 @@ BANNER
 # and how narrow it is.
 CURSOR_SKILL_INVOCATION_LINE="disable-model-invocation: true"
 
+# Cursor init/tune closing instruction after a successful Write of
+# ~/.squirrel/profile.md. Cursor has no mid-session profile re-injection,
+# so the current chat must not claim it will pick the new profile up.
+# Held once so write_cursor_skill and the tests that pin this sentence
+# cannot silently diverge if one is edited without the other - the
+# tests copy the literal; this is the generator's copy.
+CURSOR_PROFILE_NEW_CHAT_SENTENCE="Start a new chat for the profile to take effect; this chat will not pick it up."
+
 source_skill_body() {
   # source_skill_body <name>: prints skills/<name>/SKILL.md's body -
   # every line after the frontmatter's closing "---" line, verbatim.
@@ -835,7 +847,7 @@ check_no_claude_only_syntax() {
   # of a Codex or Cursor artifact, read back from that artifact's own
   # temp file right before it is mv'd into place (see "Write every
   # artifact" near the bottom of this file for every call site: the
-  # eight ported command artifacts AND targets/codex/AGENTS.md and
+  # ten ported command artifacts AND targets/codex/AGENTS.md and
   # targets/cursor/squirrel-mode.mdc) - still contains any syntax or
   # reference that only makes sense on Claude Code. Never called against
   # output-styles/squirrel-mode.md or skills/rules/SKILL.md - the two
@@ -856,20 +868,20 @@ check_no_claude_only_syntax() {
   # init's and tune's Codex descriptions say "never run unprompted" in
   # prose instead. Cursor's Agent Skills DO document it, with the same
   # meaning - the skill is never applied by the model on its own and is
-  # only included when the user types its slash command - and the two
+  # only included when the user types its slash command - and the
   # targets/cursor/skills/squirrel-*/SKILL.md artifacts set it
-  # deliberately. For those two, and only those two, the third argument
+  # deliberately. For those four, and only those four, the third argument
   # is "yes" and ONE occurrence is permitted.
   #
   # The allowance is the narrowest one that works, so this guard keeps
-  # catching a real leak in those two artifacts as thoroughly as in the
-  # other eight. The permitted occurrence must be the EXACT full line
+  # catching a real leak in those four artifacts as thoroughly as in the
+  # other nine. The permitted occurrence must be the EXACT full line
   # held in CURSOR_SKILL_INVOCATION_LINE, must appear EXACTLY once in
   # the whole artifact, and must sit inside that artifact's own leading
   # YAML frontmatter block - never in the body, where a mention could
   # only have arrived from a source skill's prose. A second occurrence,
   # another spelling, or one below the frontmatter still fails the
-  # build. Nothing else is skipped for these two: the one permitted line
+  # build. Nothing else is skipped for these four: the one permitted line
   # is REMOVED from the text, and every check below then runs over the
   # remainder exactly as it does everywhere else.
   text=$1
@@ -1124,11 +1136,11 @@ ported_skill_description() {
 # and tune additionally gain one boilerplate paragraph, inserted
 # immediately after their own opening sentence, stating explicitly that
 # they write/edit the exact ~/.squirrel/profile.md path Claude
-# Code and Cursor also read (task requirement: "say so"). This applies
-# unconditionally, with no per-host branch, because init/tune are never
-# composed into a Cursor artifact in the first place (Cursor gets only
-# digest and plan, through both of its mechanisms - see
-# write_cursor_command and write_cursor_skill below).
+# Code and Cursor also read (task requirement: "say so"). The Codex
+# insert currently also says Cursor cannot read that file; write_cursor_skill
+# replaces that Codex-only paragraph (and the mid-session demonstration)
+# in the Cursor artifact, so Codex targets/codex/skills/init|tune stay
+# byte-identical to the shared insert.
 ported_skill_body() {
   name=$1
   body=$(source_skill_body "$name")
@@ -1270,9 +1282,42 @@ cursor_skill_folder_name() {
   # is no Cursor equivalent of Claude Code's "/squirrel:" prefix), so a
   # bare "digest" would sit in the user's global skill namespace under a
   # name anyone else's skill could plausibly want. The "squirrel-"
-  # prefix is what keeps /squirrel-digest and /squirrel-plan
-  # unmistakably squirrel-mode's.
+  # prefix is what keeps /squirrel-digest, /squirrel-plan,
+  # /squirrel-init and /squirrel-tune unmistakably squirrel-mode's.
   printf 'squirrel-%s\n' "$1"
+}
+
+cursor_skill_body_substitutions() {
+  # cursor_skill_body_substitutions <name> <body>: Cursor-only pass on
+  # the already-ported body. Codex artifacts are composed from
+  # ported_skill_body with no call here, so targets/codex/skills/init|tune
+  # stay byte-identical when this function changes. Init/tune's shared
+  # insert currently claims Cursor cannot read ~/.squirrel/profile.md;
+  # that is false for these skills (the Task 2 projection hook reads it
+  # on the next session), so it is replaced here rather than by
+  # rewriting the Codex insert.
+  name=$1
+  body=$2
+  case "$name" in
+    init)
+      body=$(literal_replace "$body" "This writes to \`~/.squirrel/profile.md\`. Claude Code and this skill both read that file automatically. Cursor cannot read it at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository." "This writes to \`~/.squirrel/profile.md\`.")
+      body=$(literal_replace "$body" "the same range the defaults table in \`~/.codex/AGENTS.md\` and the squirrel-mode \`tune\` skill both enforce for this field" "the same range the defaults table in \`~/.cursor/rules/squirrel-mode.mdc\` and the squirrel-mode \`tune\` skill both enforce for this field")
+      body=$(literal_replace "$body" "Once the file is written, confirm in one line and immediately answer the user's very next message using the new profile. The demonstration is part of this skill itself, not a separate step the user has to ask for." "Once the file is written, confirm in one line. $CURSOR_PROFILE_NEW_CHAT_SENTENCE")
+      ;;
+    tune)
+      body=$(literal_replace "$body" "Claude Code and this skill both read \`~/.squirrel/profile.md\` automatically, so a change made here takes effect there right away. Cursor cannot read this file at all - Cursor's rules file has to be hand-edited to match, see docs/OTHER-TOOLS.md in the squirrel-mode repository." "This skill writes \`~/.squirrel/profile.md\`.")
+      body=$(literal_replace "$body" "and treat it as the default for that field shown in the defaults table in \`~/.codex/AGENTS.md\` until the user sets it explicitly through this command." "and treat it as the default for that field shown in the defaults table in \`~/.cursor/rules/squirrel-mode.mdc\` until the user sets it explicitly through this command.")
+      body=$(literal_replace "$body" "Write is non-atomic (ADR-0003 Amendment P3); other open Claude Code sessions pick up the change on their next prompt via profile mtime reinjection - do not invent an installer-style write script." "Write is non-atomic (ADR-0003 Amendment P3); do not invent an installer-style write script.")
+      body=$(literal_replace "$body" "Confirm the change in one line, naming the field and its new value. Do not re-show the whole profile unless asked." "Confirm the change in one line, naming the field and its new value. $CURSOR_PROFILE_NEW_CHAT_SENTENCE Do not re-show the whole profile unless asked.")
+      ;;
+  esac
+  # Cursor tool names: Edit is not a Cursor matcher sibling of Write,
+  # and date belongs on Shell rather than Bash. Backtick-quoted only,
+  # so prose such as "edits one field" is left alone. No-ops on today's
+  # digest/plan/init/tune sources.
+  body=$(literal_replace "$body" "\`Edit\`" "\`Write\`")
+  body=$(literal_replace "$body" "\`Bash\`" "\`Shell\`")
+  printf '%s' "$body"
 }
 
 write_cursor_skill() {
@@ -1281,7 +1326,7 @@ write_cursor_skill() {
   # Agent Skill frontmatter (name + description + the
   # disable-model-invocation line), the GENERATED banner naming
   # skills/<name>/SKILL.md as source, then the ported, title-suffixed
-  # body.
+  # body, then the Cursor-only substitutions above.
   #
   # WHY THIS IS NOT write_cursor_command WITH A DIFFERENT PATH. Cursor
   # has two separate mechanisms and squirrel-mode ships digest and plan
@@ -1292,6 +1337,9 @@ write_cursor_skill() {
   #   - a Cursor AGENT SKILL (this function) is auto-discovered from
   #     ~/.cursor/skills/, once, for every project on the machine, which
   #     is what targets/cursor/install.sh installs.
+  # Init and tune ship through this function only: they write the
+  # machine-wide profile, so a project-scoped command would be the
+  # wrong mechanism.
   #
   # THE "skill" -> "command" SWAP IS DELIBERATELY NOT APPLIED HERE.
   # write_cursor_command runs `literal_replace "$body" "skill"
@@ -1302,10 +1350,9 @@ write_cursor_skill() {
   # the shared body's wording is already correct and rewriting it would
   # make it wrong. check_cursor_skill_swap_is_word_only is therefore not
   # called here either: it exists to prove that ONE blanket substitution
-  # is safe to run, and no substitution runs on this text at all. That
-  # guard stays fully meaningful for the artifact it guards -
-  # write_cursor_command still calls it, on every build, before its own
-  # swap.
+  # is safe to run, and that swap does not run on this text. Cursor-only
+  # substitutions (the Codex caveat, the new-chat closing, Edit/Bash
+  # tool names) run below instead, after add_title_suffix.
   name=$1
   desc=$(ported_skill_description "$name")
   printf '%s\n' "---"
@@ -1318,6 +1365,7 @@ write_cursor_skill() {
   printf '\n'
   body=$(ported_skill_body "$name")
   body=$(add_title_suffix "$body" "(Cursor)")
+  body=$(cursor_skill_body_substitutions "$name" "$body")
   printf '%s\n' "$body"
 }
 
@@ -1459,31 +1507,33 @@ mkdir -p "$repo_root/output-styles" "$repo_root/skills/rules" \
   "$repo_root/targets/codex/skills/init" "$repo_root/targets/codex/skills/tune" \
   "$repo_root/targets/cursor/commands" "$repo_root/targets/cursor/hooks" \
   "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name digest)" \
-  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name plan)"
+  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name plan)" \
+  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name init)" \
+  "$repo_root/targets/cursor/skills/$(cursor_skill_folder_name tune)"
 
 # Atomicity, honestly stated: each artifact is first written to a
 # hidden temp file in the SAME DIRECTORY as its final target - never
 # /tmp, since the repo could be on a different filesystem/mount and mv
 # (rename(2)) is only atomic within one filesystem - and only mv'd into
-# place once every one of the thirteen temp writes below has already
+# place once every one of the fifteen temp writes below has already
 # succeeded. That covers the WRITE phase completely: a failure partway
-# through the thirteen writes (a full disk, a read-only target directory, a
+# through the fifteen writes (a full disk, a read-only target directory, a
 # signal - see the traps below) leaves every real artifact exactly as it
 # was, never a mix of freshly regenerated and stale files, because no mv
 # has run yet at that point.
 #
 # The MV PHASE is a narrower, different story, and this comment used to
-# overstate it. Thirteen independent rename(2) calls, one per fixed
+# overstate it. Fifteen independent rename(2) calls, one per fixed
 # committed path, cannot be made atomic AS A GROUP under POSIX sh - there
 # is no multi-file rename primitive available here. Two things narrow
 # that window as far as this shell can narrow it: each mv is individually
 # atomic (so no single artifact is ever observed half-written, only "old"
 # or "new", never a mix within one file), and HUP/INT/TERM are ignored for
-# the short duration of the thirteen mv's (see the trap right before them),
+# the short duration of the fifteen mv's (see the trap right before them),
 # so a signal arriving mid-sequence cannot land between two of them.
 #
 # What neither defense reaches is SIGKILL or power loss: either can still
-# stop the process between mv 1 and mv 13, leaving some artifacts
+# stop the process between mv 1 and mv 15, leaving some artifacts
 # regenerated and others stale. That residual is real, not hypothetical,
 # and is not eliminated here - it cannot be, in POSIX sh, against those
 # two failure modes specifically. It is not silent forever, though: the
@@ -1502,8 +1552,8 @@ tmp_skill="$repo_root/skills/rules/.SKILL.md.tmp.$$"
 tmp_codex="$repo_root/targets/codex/.AGENTS.md.tmp.$$"
 tmp_cursor="$repo_root/targets/cursor/.squirrel-mode.mdc.tmp.$$"
 
-# The eight ported command artifacts (see the "Ported command artifacts"
-# section above) plus the Cursor hooks.json. Every one of the thirteen
+# The ten ported command artifacts (see the "Ported command artifacts"
+# section above) plus the Cursor hooks.json. Every one of the fifteen
 # final_*/tmp_* paths below is now
 # written and moved UNCONDITIONALLY - validate_source_skill above
 # already guaranteed, before this point, that all four
@@ -1511,6 +1561,8 @@ tmp_cursor="$repo_root/targets/cursor/.squirrel-mode.mdc.tmp.$$"
 # well-formed, so there is no absent-source case left to skip.
 cursor_skill_dir_digest="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name digest)"
 cursor_skill_dir_plan="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name plan)"
+cursor_skill_dir_init="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name init)"
+cursor_skill_dir_tune="$repo_root/targets/cursor/skills/$(cursor_skill_folder_name tune)"
 
 final_codex_skill_digest="$repo_root/targets/codex/skills/digest/SKILL.md"
 final_codex_skill_plan="$repo_root/targets/codex/skills/plan/SKILL.md"
@@ -1520,6 +1572,8 @@ final_cursor_command_digest="$repo_root/targets/cursor/commands/digest.md"
 final_cursor_command_plan="$repo_root/targets/cursor/commands/plan.md"
 final_cursor_skill_digest="$cursor_skill_dir_digest/SKILL.md"
 final_cursor_skill_plan="$cursor_skill_dir_plan/SKILL.md"
+final_cursor_skill_init="$cursor_skill_dir_init/SKILL.md"
+final_cursor_skill_tune="$cursor_skill_dir_tune/SKILL.md"
 final_cursor_hooks="$repo_root/targets/cursor/hooks/hooks.json"
 
 tmp_codex_skill_digest="$repo_root/targets/codex/skills/digest/.SKILL.md.tmp.$$"
@@ -1530,17 +1584,20 @@ tmp_cursor_command_digest="$repo_root/targets/cursor/commands/.digest.md.tmp.$$"
 tmp_cursor_command_plan="$repo_root/targets/cursor/commands/.plan.md.tmp.$$"
 tmp_cursor_skill_digest="$cursor_skill_dir_digest/.SKILL.md.tmp.$$"
 tmp_cursor_skill_plan="$cursor_skill_dir_plan/.SKILL.md.tmp.$$"
+tmp_cursor_skill_init="$cursor_skill_dir_init/.SKILL.md.tmp.$$"
+tmp_cursor_skill_tune="$cursor_skill_dir_tune/.SKILL.md.tmp.$$"
 tmp_cursor_hooks="$repo_root/targets/cursor/hooks/.hooks.json.tmp.$$"
 
 cleanup_build_tmp() {
   # rm -f is a silent no-op on a path that was never created (e.g. if
   # the script failed before reaching that particular write) - safe to
-  # list every one of the thirteen temp paths unconditionally.
+  # list every one of the fifteen temp paths unconditionally.
   rm -f "$tmp_output_style" "$tmp_skill" "$tmp_codex" "$tmp_cursor" \
     "$tmp_codex_skill_digest" "$tmp_codex_skill_plan" \
     "$tmp_codex_skill_init" "$tmp_codex_skill_tune" \
     "$tmp_cursor_command_digest" "$tmp_cursor_command_plan" \
     "$tmp_cursor_skill_digest" "$tmp_cursor_skill_plan" \
+    "$tmp_cursor_skill_init" "$tmp_cursor_skill_tune" \
     "$tmp_cursor_hooks"
 }
 
@@ -1579,12 +1636,12 @@ write_skill >"$tmp_skill"
 write_codex_agents >"$tmp_codex"
 write_cursor_mdc >"$tmp_cursor"
 
-# The eight ported command artifacts - written UNCONDITIONALLY.
+# The ten ported command artifacts - written UNCONDITIONALLY.
 # validate_source_skill already guaranteed every one of
 # skills/{digest,plan,init,tune}/SKILL.md exists and is well-formed
 # before this point (see the "Availability" comment above it) - there
 # is no absent-source case left to guard against here, and a fixture
-# that wants build.sh to succeed without these eight writes must supply
+# that wants build.sh to succeed without these ten writes must supply
 # real skills/ sources instead (tests/test_build.sh's
 # make_build_scratch() does exactly that).
 write_codex_skill digest >"$tmp_codex_skill_digest"
@@ -1595,6 +1652,8 @@ write_cursor_command digest >"$tmp_cursor_command_digest"
 write_cursor_command plan >"$tmp_cursor_command_plan"
 write_cursor_skill digest >"$tmp_cursor_skill_digest"
 write_cursor_skill plan >"$tmp_cursor_skill_plan"
+write_cursor_skill init >"$tmp_cursor_skill_init"
+write_cursor_skill tune >"$tmp_cursor_skill_tune"
 write_cursor_hooks >"$tmp_cursor_hooks"
 
 # G5/G6 (S7 review cycle 3): check_no_claude_only_syntax runs HERE,
@@ -1603,12 +1662,12 @@ write_cursor_hooks >"$tmp_cursor_hooks"
 # (frontmatter, the GENERATED banner, add_title_suffix, and - for
 # Cursor - the skill-to-command word swap) has already been applied,
 # never against an isolated ingredient (a bare description or body)
-# before that composition happens. Deliberately placed AFTER all thirteen
+# before that composition happens. Deliberately placed AFTER all fifteen
 # temp writes above but BEFORE the first `mv` below: a failure here
 # still leaves every real artifact untouched (the cleanup trap removes
 # the temp files; no `mv` has run yet), so the file header's "All
 # validation happens before any output file is written" stays true.
-# Covers the eight ported command artifacts (G5's own fix) AND the two
+# Covers the ten ported command artifacts (G5's own fix) AND the two
 # base-rules-derived artifacts, targets/codex/AGENTS.md and
 # targets/cursor/squirrel-mode.mdc, which this check never reached
 # before at all - a future rules/base-rules.md edit mentioning
@@ -1618,7 +1677,7 @@ write_cursor_hooks >"$tmp_cursor_hooks"
 # artifacts, where "Claude" and "/squirrel:" are correct and must keep
 # passing.
 #
-# The two Cursor Agent Skills pass "yes" as the third argument, and are
+# The four Cursor Agent Skills pass "yes" as the third argument, and are
 # the only call sites that ever do: their frontmatter carries Cursor's
 # own documented disable-model-invocation field, which the pattern list
 # otherwise rejects outright. Every other check still runs on them
@@ -1635,11 +1694,13 @@ check_no_claude_only_syntax "$(cat "$tmp_cursor_command_digest")" "targets/curso
 check_no_claude_only_syntax "$(cat "$tmp_cursor_command_plan")" "targets/cursor/commands/plan.md"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_digest")" "targets/cursor/skills/$(cursor_skill_folder_name digest)/SKILL.md" "yes"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_plan")" "targets/cursor/skills/$(cursor_skill_folder_name plan)/SKILL.md" "yes"
+check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_init")" "targets/cursor/skills/$(cursor_skill_folder_name init)/SKILL.md" "yes"
+check_no_claude_only_syntax "$(cat "$tmp_cursor_skill_tune")" "targets/cursor/skills/$(cursor_skill_folder_name tune)/SKILL.md" "yes"
 check_no_claude_only_syntax "$(cat "$tmp_cursor_hooks")" "targets/cursor/hooks/hooks.json"
 
 # All writes above succeeded (set -e would otherwise have aborted
 # already, triggering the cleanup trap and leaving every final_* path
-# untouched). Each of the thirteen mv's below is a rename(2) within one
+# untouched). Each of the fifteen mv's below is a rename(2) within one
 # directory, hence individually atomic; only now, with known-good
 # content already fully written to disk under every temp name, do the
 # real targets get replaced.
@@ -1651,11 +1712,11 @@ check_no_claude_only_syntax "$(cat "$tmp_cursor_hooks")" "targets/cursor/hooks/h
 # signal from during this window - by the time the real handlers are
 # back, there is nothing left pending to deliver. Ignoring rather than
 # leaving the real handlers active is deliberate, not an oversight:
-# on_hup/on_int/on_term calling `exit` between two of these thirteen mv's is
+# on_hup/on_int/on_term calling `exit` between two of these fifteen mv's is
 # exactly the half-applied state the comment above is about, so this is
 # the one place those handlers must NOT run.
 #
-# Restoring happens on every path out of this block. If all thirteen mv's
+# Restoring happens on every path out of this block. If all fifteen mv's
 # succeed, the three `trap` calls immediately below always run next,
 # unconditionally. If any mv fails instead, `set -e` ends the script
 # right there without ever reaching those `trap` calls - but the ignored
@@ -1677,6 +1738,8 @@ mv "$tmp_cursor_command_digest" "$final_cursor_command_digest"
 mv "$tmp_cursor_command_plan" "$final_cursor_command_plan"
 mv "$tmp_cursor_skill_digest" "$final_cursor_skill_digest"
 mv "$tmp_cursor_skill_plan" "$final_cursor_skill_plan"
+mv "$tmp_cursor_skill_init" "$final_cursor_skill_init"
+mv "$tmp_cursor_skill_tune" "$final_cursor_skill_tune"
 mv "$tmp_cursor_hooks" "$final_cursor_hooks"
 trap on_hup HUP
 trap on_int INT
