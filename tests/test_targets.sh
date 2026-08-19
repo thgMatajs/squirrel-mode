@@ -100,6 +100,24 @@ make_temp_home() {
   mktemp -d "${TMPDIR:-/tmp}/squirrel-target-home.XXXXXX"
 }
 
+cursor_plugin_root_for() {
+  # cursor_plugin_root_for <home>: the repo-shaped local plugin copy.
+  printf '%s/.cursor/plugins/local/squirrel-mode\n' "$1"
+}
+
+cursor_plugin_file() {
+  # cursor_plugin_file <home> <rel>: <rel> is a repo-root-relative path
+  # (e.g. .cursor-plugin/plugin.json) inside that copy.
+  printf '%s/%s\n' "$(cursor_plugin_root_for "$1")" "$2"
+}
+
+# Frozen projection banner (same string as CURSOR_PROFILE_PROJECTION_BANNER
+# in scripts/load-profile.sh). Uninstall matches this as an exact full line.
+cursor_projection_banner='<!-- GENERATED FILE. Source: ~/.squirrel/profile.md (squirrel-profile projection) -->'
+
+cursor_plugin_skill_folders="squirrel-digest squirrel-plan squirrel-init squirrel-tune squirrel-pickup squirrel-stash squirrel-dig squirrel-off squirrel-on squirrel-rules"
+cursor_plugin_scripts="load-profile.sh check-off-flag.sh allow-checkpoint.sh hoard-search.sh"
+
 make_full_scratch() {
   # make_full_scratch - creates a throwaway directory containing
   # scripts/build.sh, rules/base-rules.md, AND
@@ -149,12 +167,10 @@ generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode
 # folder EXACTLY, and the folder carries a "squirrel-" prefix because
 # Cursor has no command namespace - so every assertion below that touches
 # a generated skill derives both halves from this single list rather than
-# spelling the prefix out again per call site. Installer coverage keeps
-# a separate digest/plan-only list: Task 8, not this one, stops copying
-# skills into ~/.cursor/skills/, so install.sh's cursor_skill_names
-# stays digest/plan until then.
+# spelling the prefix out again per call site. The installer copies all
+# ten skills (these nine plus squirrel-rules) into the plugin tree, not
+# into ~/.cursor/skills/.
 cursor_skill_pairs="digest:squirrel-digest plan:squirrel-plan init:squirrel-init tune:squirrel-tune pickup:squirrel-pickup stash:squirrel-stash dig:squirrel-dig off:squirrel-off on:squirrel-on"
-cursor_installed_skill_pairs="digest:squirrel-digest plan:squirrel-plan"
 
 repo_generated_snapshot() {
   # Prints one "<rel> <cksum>" line per generated targets/ artifact,
@@ -1002,8 +1018,8 @@ mkdir -p "$home7d/.codex" "$home7d/.cursor"
 # so "unchanged" below is a claim about a non-empty tree rather than
 # about two empty ones. The cksum in tree_snapshot is what would catch a
 # dry run that rewrote one of these in place.
-mkdir -p "$home7d/.cursor/skills/squirrel-digest"
-printf 'A pre-existing file at one of the managed paths.\n' >"$home7d/.cursor/skills/squirrel-digest/SKILL.md"
+mkdir -p "$home7d/.cursor/plugins/local/squirrel-mode/.cursor-plugin"
+printf 'A pre-existing file at one of the managed paths.\n' >"$home7d/.cursor/plugins/local/squirrel-mode/.cursor-plugin/plugin.json"
 printf 'Pre-existing user content.\n' >"$home7d/.codex/AGENTS.md"
 before7d=$(full_tree_listing "$home7d")
 before7d_contents=$(tree_snapshot "$home7d")
@@ -1092,81 +1108,159 @@ else
 fi
 assert_eq "identical" "$byte_status_10" "uninstall must restore ~/.codex/AGENTS.md byte-identical to its content before squirrel-mode was ever installed"
 
-# Cursor's uninstall: the dedicated file is removed entirely, and an
-# unrelated file already sitting in the same directory survives.
+# Cursor's uninstall: the plugin copy is removed, and an unrelated file
+# already sitting under ~/.cursor/rules survives.
 home10b=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home10b"
 mkdir -p "$home10b/.cursor/rules"
 printf 'unrelated rule, not squirrel-mode' >"$home10b/.cursor/rules/other-rule.mdc"
 HOME="$home10b" "$cursor_install" --yes >/dev/null 2>&1
 HOME="$home10b" "$cursor_install" --uninstall --yes >/dev/null 2>&1
-assert_file_absent "$home10b/.cursor/rules/squirrel-mode.mdc" "cursor uninstall must remove squirrel-mode.mdc"
+assert_file_absent "$(cursor_plugin_root_for "$home10b")" "cursor uninstall must remove the local plugin directory"
+assert_file_absent "$home10b/.cursor/rules/squirrel-mode.mdc" "cursor install must not write the old-layout ~/.cursor/rules/squirrel-mode.mdc payload"
 if [ -f "$home10b/.cursor/rules/other-rule.mdc" ]; then
   other_rule_survived=yes
 else
   other_rule_survived=no
 fi
-assert_eq "yes" "$other_rule_survived" "cursor uninstall must leave an unrelated .mdc file in the same directory untouched"
+assert_eq "yes" "$other_rule_survived" "cursor uninstall must leave an unrelated .mdc file in ~/.cursor/rules untouched"
+if [ -d "$home10b/.cursor" ]; then cursor_home_survived_10b=yes; else cursor_home_survived_10b=no; fi
+assert_eq "yes" "$cursor_home_survived_10b" "cursor uninstall must NEVER remove \$HOME/.cursor itself"
 
 # ==========================================================================
-# 10c. Cursor's AGENT SKILLS: install puts both at the exact documented
-#      user-level paths, and uninstall removes both AND the directories
-#      install itself created - without ever removing ~/.cursor, which
-#      Cursor creates and this installer only ever adds to.
+# 10c. Cursor local plugin copy: --yes copies the repo-shaped subset to
+#      ~/.cursor/plugins/local/squirrel-mode/ (copy, not symlink),
+#      including all ten skills, and does NOT write the old-layout
+#      ~/.cursor/skills/ or ~/.cursor/rules/squirrel-mode.mdc payload.
+#      Uninstall removes the plugin dir and empty plugins/local, never
+#      ~/.cursor.
 # ==========================================================================
 home10c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home10c"
 mkdir -p "$home10c/.cursor"
 if out10c=$(HOME="$home10c" "$cursor_install" --yes 2>&1); then exit10c=0; else exit10c=$?; fi
-assert_eq "0" "$exit10c" "cursor install.sh --yes must exit 0 when installing the Agent Skills -- output: $out10c"
-for pair in $cursor_installed_skill_pairs; do
-  folder=${pair#*:}
-  assert_file_exists "$home10c/.cursor/skills/$folder/SKILL.md" "cursor install must create \$HOME/.cursor/skills/$folder/SKILL.md - Cursor's documented user-level Agent Skill location"
-  if cmp -s "$repo_root/targets/cursor/skills/$folder/SKILL.md" "$home10c/.cursor/skills/$folder/SKILL.md"; then
-    installed_matches=identical
-  else
-    installed_matches=DIFFERS
-  fi
-  assert_eq "identical" "$installed_matches" "the installed \$HOME/.cursor/skills/$folder/SKILL.md must be byte-identical to the generated artifact it came from"
+assert_eq "0" "$exit10c" "cursor install.sh --yes must exit 0 when installing the local plugin copy -- output: $out10c"
+plugin_json10c=$(cursor_plugin_file "$home10c" ".cursor-plugin/plugin.json")
+assert_file_exists "$plugin_json10c" "cursor install must create ~/.cursor/plugins/local/squirrel-mode/.cursor-plugin/plugin.json"
+if [ -L "$plugin_json10c" ]; then plugin_json10c_symlink=yes; else plugin_json10c_symlink=no; fi
+assert_eq "no" "$plugin_json10c_symlink" "the installed plugin.json must be a regular file, not a symlink (Cursor staff: symlink already broke)"
+assert_eq "identical" "$(files_byte_status "$repo_root/.cursor-plugin/plugin.json" "$plugin_json10c")" "the installed plugin.json must be byte-identical to the repo file"
+
+for script_name in $cursor_plugin_scripts; do
+  dest_script=$(cursor_plugin_file "$home10c" "scripts/$script_name")
+  assert_file_exists "$dest_script" "cursor install must copy scripts/$script_name into the plugin tree"
+  if [ -x "$dest_script" ]; then script_exec=yes; else script_exec=no; fi
+  assert_eq "yes" "$script_exec" "installed scripts/$script_name must be executable"
+  assert_eq "identical" "$(files_byte_status "$repo_root/scripts/$script_name" "$dest_script")" "installed scripts/$script_name must be byte-identical to the bundled source"
 done
-assert_file_absent "$home10c/.cursor/skills/squirrel-rules/SKILL.md" "cursor install must not copy squirrel-rules until Task 8 (cursor_installed_skill_pairs stays digest/plan)"
+
+assert_file_exists "$(cursor_plugin_file "$home10c" "targets/cursor/hooks/hooks.json")" "cursor install must copy targets/cursor/hooks/hooks.json into the plugin tree"
+assert_eq "identical" "$(files_byte_status "$repo_root/targets/cursor/hooks/hooks.json" "$(cursor_plugin_file "$home10c" "targets/cursor/hooks/hooks.json")")" "installed hooks.json must be byte-identical to the bundled source"
+assert_file_exists "$(cursor_plugin_file "$home10c" "targets/cursor/squirrel-mode.mdc")" "cursor install must copy targets/cursor/squirrel-mode.mdc into the plugin tree"
+assert_eq "identical" "$(files_byte_status "$repo_root/targets/cursor/squirrel-mode.mdc" "$(cursor_plugin_file "$home10c" "targets/cursor/squirrel-mode.mdc")")" "installed squirrel-mode.mdc must be byte-identical to the bundled source"
+
+for folder in $cursor_plugin_skill_folders; do
+  dest_skill=$(cursor_plugin_file "$home10c" "targets/cursor/skills/$folder/SKILL.md")
+  assert_file_exists "$dest_skill" "cursor install must copy $folder into the plugin tree (including squirrel-rules)"
+  assert_eq "identical" "$(files_byte_status "$repo_root/targets/cursor/skills/$folder/SKILL.md" "$dest_skill")" "installed $folder/SKILL.md must be byte-identical to the bundled source"
+  assert_file_absent "$home10c/.cursor/skills/$folder/SKILL.md" "cursor install must not copy $folder into ~/.cursor/skills/ (that would duplicate slash commands when the plugin loads)"
+done
+assert_file_absent "$home10c/.cursor/rules/squirrel-mode.mdc" "cursor install must not write ~/.cursor/rules/squirrel-mode.mdc on a clean home (rules load from the plugin copy)"
 
 HOME="$home10c" "$cursor_install" --uninstall --yes >/dev/null 2>&1
-for pair in $cursor_installed_skill_pairs; do
-  folder=${pair#*:}
-  assert_file_absent "$home10c/.cursor/skills/$folder/SKILL.md" "cursor uninstall must remove \$HOME/.cursor/skills/$folder/SKILL.md"
-  assert_file_absent "$home10c/.cursor/skills/$folder" "cursor uninstall must remove the now-empty \$HOME/.cursor/skills/$folder directory it created"
-done
-assert_file_absent "$home10c/.cursor/skills" "cursor uninstall must remove the now-empty \$HOME/.cursor/skills directory it created"
+assert_file_absent "$(cursor_plugin_root_for "$home10c")" "cursor uninstall must remove ~/.cursor/plugins/local/squirrel-mode"
+assert_file_absent "$home10c/.cursor/plugins/local" "cursor uninstall must rmdir empty plugins/local"
+if [ -d "$home10c/.cursor/plugins" ]; then cursor_plugins_survived=yes; else cursor_plugins_survived=no; fi
+assert_eq "yes" "$cursor_plugins_survived" "cursor uninstall must NEVER remove ~/.cursor/plugins (only squirrel-mode and empty plugins/local)"
 if [ -d "$home10c/.cursor" ]; then cursor_home_survived=yes; else cursor_home_survived=no; fi
 assert_eq "yes" "$cursor_home_survived" "cursor uninstall must NEVER remove \$HOME/.cursor itself - Cursor creates it, this installer only ever adds to it"
 
-# 10d. The directory cleanup must be gated on having actually removed
-#      one of OUR files. This is the exact bug targets/codex/install.sh
-#      fixed for ~/.agents/skills: an ungated rmdir deletes a
-#      ~/.cursor/skills the user made themselves and squirrel-mode never
-#      installed into. Two shapes, because they fail differently: a
-#      skills directory holding somebody else's skill (rmdir would fail
-#      anyway, so only the SIBLING assertion below discriminates), and an
-#      EMPTY user-made skills directory (rmdir would succeed - this is
-#      the one the gate exists for).
+# 10d. A sibling local plugin must survive uninstall. Ungated recursive
+#      delete of plugins/local would wipe it; rmdir-when-empty must not.
 home10d=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home10d"
-mkdir -p "$home10d/.cursor/skills/my-own-skill"
-printf 'A skill of my own, nothing to do with squirrel-mode.\n' >"$home10d/.cursor/skills/my-own-skill/SKILL.md"
-foreign_sibling_ref=$(snapshot_file "$home10d/.cursor/skills/my-own-skill/SKILL.md")
+mkdir -p "$home10d/.cursor/plugins/local/other-plugin"
+printf 'A local plugin of my own, nothing to do with squirrel-mode.\n' >"$home10d/.cursor/plugins/local/other-plugin/plugin.json"
+foreign_sibling_ref=$(snapshot_file "$home10d/.cursor/plugins/local/other-plugin/plugin.json")
 cleanup_dirs="$cleanup_dirs $foreign_sibling_ref"
 HOME="$home10d" "$cursor_install" --uninstall --yes >/dev/null 2>&1
-assert_eq "identical" "$(files_byte_status "$foreign_sibling_ref" "$home10d/.cursor/skills/my-own-skill/SKILL.md")" "an unrelated skill sitting beside ours in \$HOME/.cursor/skills must survive --uninstall --yes byte-for-byte"
-if [ -d "$home10d/.cursor/skills" ]; then skills_dir_survived_10d=yes; else skills_dir_survived_10d=no; fi
-assert_eq "yes" "$skills_dir_survived_10d" "\$HOME/.cursor/skills must survive uninstall while it still holds somebody else's skill"
+assert_eq "identical" "$(files_byte_status "$foreign_sibling_ref" "$home10d/.cursor/plugins/local/other-plugin/plugin.json")" "an unrelated plugin sitting beside ours in plugins/local must survive --uninstall --yes byte-for-byte"
+if [ -d "$home10d/.cursor/plugins/local" ]; then local_dir_survived_10d=yes; else local_dir_survived_10d=no; fi
+assert_eq "yes" "$local_dir_survived_10d" "\$HOME/.cursor/plugins/local must survive uninstall while it still holds somebody else's plugin"
 
 home10e=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home10e"
-mkdir -p "$home10e/.cursor/skills"
+mkdir -p "$home10e/.cursor/plugins/local"
 HOME="$home10e" "$cursor_install" --uninstall --yes >/dev/null 2>&1
-if [ -d "$home10e/.cursor/skills" ]; then skills_dir_survived_10e=yes; else skills_dir_survived_10e=no; fi
-assert_eq "yes" "$skills_dir_survived_10e" "an EMPTY \$HOME/.cursor/skills the user made themselves, that squirrel-mode never installed into, must survive --uninstall --yes - the cleanup rmdir is gated on this run having actually removed one of OUR files"
+if [ -d "$home10e/.cursor/plugins/local" ]; then local_dir_survived_10e=yes; else local_dir_survived_10e=no; fi
+assert_eq "yes" "$local_dir_survived_10e" "an EMPTY \$HOME/.cursor/plugins/local the user made themselves, that squirrel-mode never installed into, must survive --uninstall --yes - the cleanup rmdir is gated on this run having actually removed one of OUR files"
+
+# 10f. Uninstall removes ~/.cursor/rules/squirrel-profile.mdc when it
+#      carries the frozen projection banner as an exact line; leaves it
+#      when the file is foreign (no banner, or substring-only).
+home10f=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10f"
+mkdir -p "$home10f/.cursor/rules"
+printf '%s\n\nours projection body\n' "$cursor_projection_banner" >"$home10f/.cursor/rules/squirrel-profile.mdc"
+HOME="$home10f" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_file_absent "$home10f/.cursor/rules/squirrel-profile.mdc" "uninstall must remove squirrel-profile.mdc when the frozen projection banner is an exact full line"
+
+home10f2=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10f2"
+mkdir -p "$home10f2/.cursor/rules"
+printf 'foreign profile rule, no banner at all\n' >"$home10f2/.cursor/rules/squirrel-profile.mdc"
+foreign_proj_ref=$(snapshot_file "$home10f2/.cursor/rules/squirrel-profile.mdc")
+cleanup_dirs="$cleanup_dirs $foreign_proj_ref"
+HOME="$home10f2" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$foreign_proj_ref" "$home10f2/.cursor/rules/squirrel-profile.mdc")" "uninstall must leave squirrel-profile.mdc when it has no projection banner"
+
+home10f3=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10f3"
+mkdir -p "$home10f3/.cursor/rules"
+printf 'quoted: %s but not its own line\n' "$cursor_projection_banner" >"$home10f3/.cursor/rules/squirrel-profile.mdc"
+substring_proj_ref=$(snapshot_file "$home10f3/.cursor/rules/squirrel-profile.mdc")
+cleanup_dirs="$cleanup_dirs $substring_proj_ref"
+HOME="$home10f3" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$substring_proj_ref" "$home10f3/.cursor/rules/squirrel-profile.mdc")" "uninstall must leave squirrel-profile.mdc when the frozen banner is only a substring, not an exact full line"
+
+# 10g. Old-layout OURS leftovers are removed by install and by uninstall.
+home10g=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10g"
+mkdir -p "$home10g/.cursor/rules" "$home10g/.cursor/skills/squirrel-digest"
+cp "$repo_root/targets/cursor/squirrel-mode.mdc" "$home10g/.cursor/rules/squirrel-mode.mdc"
+cp "$repo_root/targets/cursor/skills/squirrel-digest/SKILL.md" "$home10g/.cursor/skills/squirrel-digest/SKILL.md"
+HOME="$home10g" "$cursor_install" --yes >/dev/null 2>&1
+assert_file_absent "$home10g/.cursor/rules/squirrel-mode.mdc" "install must remove old-layout ours ~/.cursor/rules/squirrel-mode.mdc"
+assert_file_absent "$home10g/.cursor/skills/squirrel-digest/SKILL.md" "install must remove old-layout ours ~/.cursor/skills/squirrel-digest/SKILL.md"
+assert_file_exists "$(cursor_plugin_file "$home10g" ".cursor-plugin/plugin.json")" "install must still write the plugin copy when old-layout ours files were present"
+
+home10g2=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10g2"
+mkdir -p "$home10g2/.cursor/rules" "$home10g2/.cursor/skills/squirrel-digest"
+cp "$repo_root/targets/cursor/squirrel-mode.mdc" "$home10g2/.cursor/rules/squirrel-mode.mdc"
+cp "$repo_root/targets/cursor/skills/squirrel-digest/SKILL.md" "$home10g2/.cursor/skills/squirrel-digest/SKILL.md"
+HOME="$home10g2" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_file_absent "$home10g2/.cursor/rules/squirrel-mode.mdc" "uninstall must remove old-layout ours ~/.cursor/rules/squirrel-mode.mdc"
+assert_file_absent "$home10g2/.cursor/skills/squirrel-digest/SKILL.md" "uninstall must remove old-layout ours ~/.cursor/skills/squirrel-digest/SKILL.md"
+
+# 10h. Old-layout FOREIGN leftovers survive both install and uninstall,
+#      and must not fail the new plugin install.
+home10h=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10h"
+mkdir -p "$home10h/.cursor/rules" "$home10h/.cursor/skills/squirrel-digest"
+printf 'foreign leftover rule\n' >"$home10h/.cursor/rules/squirrel-mode.mdc"
+printf 'foreign leftover skill\n' >"$home10h/.cursor/skills/squirrel-digest/SKILL.md"
+old_mdc_ref=$(snapshot_file "$home10h/.cursor/rules/squirrel-mode.mdc")
+old_skill_ref=$(snapshot_file "$home10h/.cursor/skills/squirrel-digest/SKILL.md")
+cleanup_dirs="$cleanup_dirs $old_mdc_ref $old_skill_ref"
+if out10h=$(HOME="$home10h" "$cursor_install" --yes 2>&1); then exit10h=0; else exit10h=$?; fi
+assert_eq "0" "$exit10h" "install must succeed even when a foreign leftover sits at an old-layout path -- output: $out10h"
+assert_file_exists "$(cursor_plugin_file "$home10h" ".cursor-plugin/plugin.json")" "install must write the plugin copy despite a foreign old-layout leftover"
+assert_eq "identical" "$(files_byte_status "$old_mdc_ref" "$home10h/.cursor/rules/squirrel-mode.mdc")" "old-layout foreign squirrel-mode.mdc must survive install"
+assert_eq "identical" "$(files_byte_status "$old_skill_ref" "$home10h/.cursor/skills/squirrel-digest/SKILL.md")" "old-layout foreign squirrel-digest must survive install"
+HOME="$home10h" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$old_mdc_ref" "$home10h/.cursor/rules/squirrel-mode.mdc")" "old-layout foreign squirrel-mode.mdc must survive uninstall"
+assert_eq "identical" "$(files_byte_status "$old_skill_ref" "$home10h/.cursor/skills/squirrel-digest/SKILL.md")" "old-layout foreign squirrel-digest must survive uninstall"
 
 # ==========================================================================
 # 11. Each installer reports, rather than fails, when its host
@@ -1193,7 +1287,8 @@ if out11u=$(HOME="$home11" "$cursor_install" --yes 2>&1); then exit11u=0; else e
 assert_eq "0" "$exit11u" "cursor install.sh must exit 0 when ~/.cursor does not exist -- output: $out11u"
 assert_contains "$out11u" "has not been run on this machine yet" "cursor install.sh must report that Cursor has not been run on this machine, not merely exit silently (same re-pinning as the codex assertion above)"
 assert_file_absent "$home11/.cursor" "cursor install.sh must not create ~/.cursor when it does not already exist"
-assert_file_absent "$home11/.cursor/skills" "cursor install.sh must not create ~/.cursor/skills when ~/.cursor is absent - the Agent Skills live INSIDE ~/.cursor, so the host gate covers them too"
+assert_file_absent "$home11/.cursor/plugins" "cursor install.sh must not create ~/.cursor/plugins when ~/.cursor is absent"
+assert_file_absent "$home11/.cursor/plugins/local" "cursor install.sh must not create plugins/local when ~/.cursor is absent - the host gate covers the plugin copy too"
 
 # The same gate covers uninstall, and for Cursor - unlike Codex, whose
 # skills live at the sibling path ~/.agents/skills and must still be
@@ -1261,6 +1356,9 @@ home12help_u=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home12help_u"
 cursor_help_out=$(HOME="$home12help_u" "$cursor_install" --help 2>&1)
 assert_contains "$cursor_help_out" ".squirrel-install.lock" "targets/cursor/install.sh's usage()/--help output must mention the lock (F8)"
+assert_contains "$cursor_help_out" "plugins/local/squirrel-mode" "targets/cursor/install.sh's usage()/--help must name the new dest ~/.cursor/plugins/local/squirrel-mode"
+assert_contains "$cursor_help_out" "Reload Window" "targets/cursor/install.sh's usage()/--help must say Reload Window"
+assert_contains "$other_tools_content" "plugins/local/squirrel-mode" "docs/OTHER-TOOLS.md installer destination must name ~/.cursor/plugins/local/squirrel-mode so it is not still describing ~/.cursor/skills/"
 
 # G7 (invariant 6e - same class as F8 just above): the lock-release-
 # timing wording fix propagated to THREE files (both installer headers
@@ -1383,31 +1481,31 @@ mkdir -p "$home15b/.codex" "$home15b/.agents/skills/digest"
 substring_content_15b="This foreign file quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's digest skill."
 assert_foreign_survives_install_and_uninstall "$home15b" "$codex_install" "$home15b/.agents/skills/digest/SKILL.md" "$substring_content_15b" "Codex ~/.agents/skills/digest/SKILL.md, substring-only (not exact banner line)"
 
-# --- 15c: Cursor, no-marker foreign file at the exact .mdc path --------
+# --- 15c: Cursor, no-marker foreign file at the plugin.json dest -------
 home15c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15c"
-mkdir -p "$home15c/.cursor/rules"
-assert_foreign_survives_install_and_uninstall "$home15c" "$cursor_install" "$home15c/.cursor/rules/squirrel-mode.mdc" "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact .mdc path." "Cursor ~/.cursor/rules/squirrel-mode.mdc, no marker"
+mkdir -p "$home15c/.cursor/plugins/local/squirrel-mode/.cursor-plugin"
+assert_foreign_survives_install_and_uninstall "$home15c" "$cursor_install" "$(cursor_plugin_file "$home15c" ".cursor-plugin/plugin.json")" "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin.json path." "Cursor plugin.json, no marker"
 
 # --- 15d: Cursor, substring-but-not-exact-banner foreign file ----------
 home15d=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15d"
-mkdir -p "$home15d/.cursor/rules"
+mkdir -p "$home15d/.cursor/plugins/local/squirrel-mode/targets/cursor"
 substring_content_15d="This foreign .mdc quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's rules file."
-assert_foreign_survives_install_and_uninstall "$home15d" "$cursor_install" "$home15d/.cursor/rules/squirrel-mode.mdc" "$substring_content_15d" "Cursor ~/.cursor/rules/squirrel-mode.mdc, substring-only (not exact banner line)"
+assert_foreign_survives_install_and_uninstall "$home15d" "$cursor_install" "$(cursor_plugin_file "$home15d" "targets/cursor/squirrel-mode.mdc")" "$substring_content_15d" "Cursor plugin-copy squirrel-mode.mdc, substring-only (not exact banner line)"
 
-# --- 15e: Cursor AGENT SKILL, no-marker foreign file at the exact path -
+# --- 15e: Cursor plugin skill, no-marker foreign file at the exact path -
 home15e=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15e"
-mkdir -p "$home15e/.cursor/skills/squirrel-digest"
-assert_foreign_survives_install_and_uninstall "$home15e" "$cursor_install" "$home15e/.cursor/skills/squirrel-digest/SKILL.md" "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact Cursor digest skill path." "Cursor ~/.cursor/skills/squirrel-digest/SKILL.md, no marker"
+mkdir -p "$home15e/.cursor/plugins/local/squirrel-mode/targets/cursor/skills/squirrel-digest"
+assert_foreign_survives_install_and_uninstall "$home15e" "$cursor_install" "$(cursor_plugin_file "$home15e" "targets/cursor/skills/squirrel-digest/SKILL.md")" "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin digest skill path." "Cursor plugin-copy squirrel-digest/SKILL.md, no marker"
 
-# --- 15f: Cursor AGENT SKILL, substring-but-not-exact-banner foreign ---
+# --- 15f: Cursor plugin skill, substring-but-not-exact-banner foreign ---
 home15f=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15f"
-mkdir -p "$home15f/.cursor/skills/squirrel-plan"
+mkdir -p "$home15f/.cursor/plugins/local/squirrel-mode/targets/cursor/skills/squirrel-plan"
 substring_content_15f="This foreign skill quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's plan skill."
-assert_foreign_survives_install_and_uninstall "$home15f" "$cursor_install" "$home15f/.cursor/skills/squirrel-plan/SKILL.md" "$substring_content_15f" "Cursor ~/.cursor/skills/squirrel-plan/SKILL.md, substring-only (not exact banner line)"
+assert_foreign_survives_install_and_uninstall "$home15f" "$cursor_install" "$(cursor_plugin_file "$home15f" "targets/cursor/skills/squirrel-plan/SKILL.md")" "$substring_content_15f" "Cursor plugin-copy squirrel-plan/SKILL.md, substring-only (not exact banner line)"
 
 # ==========================================================================
 # 16 (C2). Fenced-code-block markers (A1): a BEGIN/END-shaped example
@@ -1493,14 +1591,14 @@ done
 
 home17c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home17c"
-mkdir -p "$home17c/.cursor/rules/squirrel-mode.mdc"
+mkdir -p "$home17c/.cursor/plugins/local/squirrel-mode/.cursor-plugin/plugin.json"
 before17c=$(full_tree_listing "$home17c")
 if out17c=$(HOME="$home17c" "$cursor_install" --yes 2>&1); then exit17c=0; else exit17c=$?; fi
-assert_eq "1" "$exit17c" "cursor install.sh must exit non-zero when \$HOME/.cursor/rules/squirrel-mode.mdc is a directory -- output: $out17c"
+assert_eq "1" "$exit17c" "cursor install.sh must exit non-zero when plugin.json dest is a directory -- output: $out17c"
 leftover17c=$(find "$home17c" -name '.*.tmp.*' 2>/dev/null || true)
-assert_eq "" "$leftover17c" "no orphaned temp file must be left in \$HOME when the cursor .mdc destination is a directory"
+assert_eq "" "$leftover17c" "no orphaned temp file must be left in \$HOME when the cursor plugin.json destination is a directory"
 after17c=$(full_tree_listing "$home17c")
-assert_eq "$before17c" "$after17c" "17c: \$HOME tree must be completely unchanged after the cursor .mdc-is-a-directory refusal"
+assert_eq "$before17c" "$after17c" "17c: \$HOME tree must be completely unchanged after the plugin.json-is-a-directory refusal"
 
 # ==========================================================================
 # 18 (C2). A pre-existing EMPTY AGENTS.md (A5): install then uninstall
@@ -1547,13 +1645,14 @@ assert_eq "-rw-------" "$mode_after_uninstall_19a" "AGENTS.md file mode 600 must
 
 home19c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home19c"
-mkdir -p "$home19c/.cursor/rules"
-cp "$cursor_mdc" "$home19c/.cursor/rules/squirrel-mode.mdc"
-chmod 600 "$home19c/.cursor/rules/squirrel-mode.mdc"
-printf '\nstale trailing line to force an update, not a no-op\n' >>"$home19c/.cursor/rules/squirrel-mode.mdc"
+mkdir -p "$home19c/.cursor/plugins/local/squirrel-mode/targets/cursor"
+plugin_mdc_19c=$(cursor_plugin_file "$home19c" "targets/cursor/squirrel-mode.mdc")
+cp "$cursor_mdc" "$plugin_mdc_19c"
+chmod 600 "$plugin_mdc_19c"
+printf '\nstale trailing line to force an update, not a no-op\n' >>"$plugin_mdc_19c"
 HOME="$home19c" "$cursor_install" --yes >/dev/null 2>&1
-mode_after_update_19c=$(file_mode10 "$home19c/.cursor/rules/squirrel-mode.mdc")
-assert_eq "-rw-------" "$mode_after_update_19c" "cursor .mdc file mode 600 must be preserved after an install-over-existing UPDATE (A6)"
+mode_after_update_19c=$(file_mode10 "$plugin_mdc_19c")
+assert_eq "-rw-------" "$mode_after_update_19c" "cursor plugin-copy .mdc file mode 600 must be preserved after an install-over-existing UPDATE (A6)"
 
 # ==========================================================================
 # 20 (C2). Uninstall-orphan path (A7): after ~/.codex is removed,
@@ -1686,11 +1785,17 @@ assert_eq "$before21d" "$after21d" "21d (G2): \$HOME tree must be completely unc
 # --- 21b: same coverage as 21, for the Cursor installer -----------------
 make_cursor_installer_scratch() {
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-cursor-installer-scratch.XXXXXX")
-  mkdir -p "$scratch/targets/cursor/commands"
-  cp "$repo_root/targets/cursor/squirrel-mode.mdc" "$scratch/targets/cursor/squirrel-mode.mdc"
-  cp "$repo_root/targets/cursor/commands/digest.md" "$scratch/targets/cursor/commands/digest.md"
-  cp "$repo_root/targets/cursor/commands/plan.md" "$scratch/targets/cursor/commands/plan.md"
-  cp "$cursor_install" "$scratch/targets/cursor/install.sh"
+  mkdir -p "$scratch/.cursor-plugin" "$scratch/scripts"
+  cp "$repo_root/.cursor-plugin/plugin.json" "$scratch/.cursor-plugin/plugin.json"
+  for script_name in $cursor_plugin_scripts; do
+    cp "$repo_root/scripts/$script_name" "$scratch/scripts/$script_name"
+    chmod +x "$scratch/scripts/$script_name"
+  done
+  cursor_rel_files=$(cd "$repo_root" && find targets/cursor -type f ! -name '.*')
+  for rel in $cursor_rel_files; do
+    mkdir -p "$scratch/$(dirname "$rel")"
+    cp "$repo_root/$rel" "$scratch/$rel"
+  done
   chmod +x "$scratch/targets/cursor/install.sh"
   printf '%s\n' "$scratch"
 }
@@ -1699,7 +1804,7 @@ installer_scratch_21b=$(make_cursor_installer_scratch)
 cleanup_dirs="$cleanup_dirs $installer_scratch_21b"
 home21b=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home21b"
-mkdir -p "$home21b/.cursor/rules"
+mkdir -p "$home21b/.cursor"
 
 # shellcheck disable=SC2016 # single-quoted deliberately: the literal
 # source text to grep for in the scratch install.sh copy.
@@ -1724,7 +1829,7 @@ assert_eq "143" "$sig_exit_21b" "SIGTERM during a cursor installer write must ma
 
 leftover_21b=$(find "$home21b" -name '.*.tmp.*' 2>/dev/null || true)
 assert_eq "" "$leftover_21b" "no leftover temp file must remain anywhere in \$HOME after a SIGTERM mid-write on the cursor installer (A8)"
-assert_file_absent "$home21b/.cursor/rules/squirrel-mode.mdc" "the cursor .mdc must not exist after a SIGTERM mid-write (the mv never ran, and none existed before)"
+assert_file_absent "$(cursor_plugin_file "$home21b" ".cursor-plugin/plugin.json")" "the cursor plugin.json must not exist after a SIGTERM mid-write (the mv never ran, and none existed before)"
 assert_file_absent "$home21b/.cursor/.squirrel-install.lock" "the A3 lock directory must be released (removed) even after a SIGTERM mid-write on the cursor installer, not left behind forever (F1/F5 - codex has this coverage at scenario 21; cursor did not)"
 
 # ==========================================================================
@@ -1776,8 +1881,8 @@ mtime_ref_23b="$home23b/.mtime-ref"
 touch "$mtime_ref_23b"
 sleep 1
 HOME="$home23b" "$cursor_install" --yes >/dev/null 2>&1
-newer_mdc_23b=$(find "$home23b/.cursor/rules/squirrel-mode.mdc" -newer "$mtime_ref_23b" 2>/dev/null || true)
-assert_eq "" "$newer_mdc_23b" "a second --yes cursor run against an already-up-to-date .mdc must not touch its mtime (C3)"
+newer_mdc_23b=$(find "$(cursor_plugin_file "$home23b" "targets/cursor/squirrel-mode.mdc")" -newer "$mtime_ref_23b" 2>/dev/null || true)
+assert_eq "" "$newer_mdc_23b" "a second --yes cursor run against an already-up-to-date plugin-copy .mdc must not touch its mtime (C3)"
 rm -f "$mtime_ref_23b"
 
 # ==========================================================================
@@ -1942,8 +2047,8 @@ home27c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home27c"
 mkdir -p "$home27c/.cursor"
 (umask 000 && HOME="$home27c" "$cursor_install" --yes) >/dev/null 2>&1
-mode27c=$(file_mode10 "$home27c/.cursor/rules/squirrel-mode.mdc")
-assert_eq "-rw-r--r--" "$mode27c" "F3 (class coverage, not mutation-discriminating): under umask 000, a freshly created cursor .mdc must not be group/world-writable either"
+mode27c=$(file_mode10 "$(cursor_plugin_file "$home27c" "targets/cursor/squirrel-mode.mdc")")
+assert_eq "-rw-r--r--" "$mode27c" "F3 (class coverage, not mutation-discriminating): under umask 000, a freshly created cursor plugin-copy .mdc must not be group/world-writable either"
 
 # ==========================================================================
 # 28 (F4). A symlinked destination must be REFUSED, not replaced - on
@@ -2018,24 +2123,24 @@ assert_file_absent "$home28b/.codex/AGENTS.md" "the symlink refusal for a SKILL 
 
 home28c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home28c"
-mkdir -p "$home28c/.cursor/rules"
-assert_symlink_refused "$home28c" "$cursor_install" "$home28c/.cursor/rules/squirrel-mode.mdc" "$home28c/real-mdc-target.md" "Decoy mdc content that must survive untouched." "Cursor ~/.cursor/rules/squirrel-mode.mdc symlink"
+mkdir -p "$home28c/.cursor/plugins/local/squirrel-mode/.cursor-plugin"
+assert_symlink_refused "$home28c" "$cursor_install" "$(cursor_plugin_file "$home28c" ".cursor-plugin/plugin.json")" "$home28c/real-plugin-json-target.json" "Decoy plugin.json content that must survive untouched." "Cursor plugin.json symlink"
 
-# --- 28d: the same, for a Cursor AGENT SKILL destination ---------------
+# --- 28d: the same, for a Cursor plugin skill destination ---------------
 #
 # This is 28b's argument transplanted to the Cursor installer, and it is
-# the assertion that actually proves the symlink pre-flight covers the
-# NEW paths rather than only the .mdc: the .mdc sits ABOVE the skills
-# loop in this installer's Execution section too, so a symlink check
-# that lived only inside the loop would let install --yes create the
-# .mdc first and refuse only afterwards - "refuses, changing nothing"
-# would already be false. The .mdc did not exist before this scenario
-# ran, so its continued absence is the direct proof.
+# the assertion that actually proves the symlink pre-flight covers every
+# managed plugin path rather than only plugin.json: plugin.json sits
+# first in the copy list, so a symlink check that lived only inside a
+# later loop would let install --yes create plugin.json first and refuse
+# only afterwards - "refuses, changing nothing" would already be false.
+# plugin.json did not exist before this scenario ran, so its continued
+# absence is the direct proof.
 home28d=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home28d"
-mkdir -p "$home28d/.cursor/skills/squirrel-digest"
-assert_symlink_refused "$home28d" "$cursor_install" "$home28d/.cursor/skills/squirrel-digest/SKILL.md" "$home28d/real-cursor-skill-target.md" "Decoy Cursor skill content that must survive untouched." "Cursor ~/.cursor/skills/squirrel-digest/SKILL.md symlink"
-assert_file_absent "$home28d/.cursor/rules/squirrel-mode.mdc" "the symlink refusal for a Cursor AGENT SKILL destination must change NOTHING - the .mdc must not have been created as a side effect before the refusal fired"
+mkdir -p "$home28d/.cursor/plugins/local/squirrel-mode/targets/cursor/skills/squirrel-digest"
+assert_symlink_refused "$home28d" "$cursor_install" "$(cursor_plugin_file "$home28d" "targets/cursor/skills/squirrel-digest/SKILL.md")" "$home28d/real-cursor-skill-target.md" "Decoy Cursor plugin skill content that must survive untouched." "Cursor plugin-copy squirrel-digest/SKILL.md symlink"
+assert_file_absent "$(cursor_plugin_file "$home28d" ".cursor-plugin/plugin.json")" "the symlink refusal for a Cursor plugin skill destination must change NOTHING - plugin.json must not have been created as a side effect before the refusal fired"
 
 # ==========================================================================
 # 29 (F5). A READ-ONLY PARENT directory for the lock (EACCES) must be

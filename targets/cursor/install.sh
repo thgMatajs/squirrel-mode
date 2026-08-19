@@ -1,46 +1,33 @@
 #!/bin/sh
-# install.sh - installs squirrel-mode's Cursor artifacts into the
+# install.sh - installs squirrel-mode's Cursor plugin subset into the
 # user's home directory. The only things it creates or modifies are
 # under $HOME:
 #
-#   1. ~/.cursor/rules/squirrel-mode.mdc - a copy of
-#      targets/cursor/squirrel-mode.mdc next to this script. This is a
-#      squirrel-mode-owned file at a squirrel-mode-owned path (Cursor's
-#      rules directory holds one file per independent rule, unlike
-#      Codex's single shared AGENTS.md, so there is no "merge into a
-#      shared file" step here at all). Ownership of an existing file at
-#      that exact path is decided by an EXACT, FULL-LINE match against
-#      this specific artifact's own GENERATED FILE banner line - read
-#      fresh from the bundled source file next to this script, never
-#      hardcoded (see banner_line_for/classify_dedicated_file below),
-#      so a future change to scripts/build.sh's banner format cannot
-#      desynchronise this installer from what it is actually comparing
-#      against. A file that merely CONTAINS the substring "<!--
-#      GENERATED FILE. Source:" somewhere - e.g. a user's own rule that
-#      quotes squirrel-mode's own docs - is foreign, not ours, and is
-#      never overwritten on install or removed on uninstall. The
-#      asymmetry is deliberate: a false "foreign" verdict only ever
-#      skips an install (safe, and reported in one line); a false
-#      "ours" verdict would destroy user data on the next uninstall.
-#      Every check here is biased toward "foreign" whenever there is
-#      any doubt.
-#   2. ~/.cursor/skills/squirrel-digest/SKILL.md and
-#      ~/.cursor/skills/squirrel-plan/SKILL.md - Cursor AGENT SKILLS,
-#      copied from targets/cursor/skills/<name>/SKILL.md next to this
-#      script. Cursor auto-discovers ~/.cursor/skills/ for EVERY project
-#      on the machine, which is what makes these the user-level half of
-#      Cursor's command story: the project-scoped .cursor/commands/*.md
-#      files (item 4 below) still have to be copied per project, these
-#      do not. Each is a squirrel-mode-owned file at a squirrel-mode-
-#      owned path, decided by exactly the same exact-full-line banner
-#      match described in item 1 - never a substring search, always
-#      biased toward "foreign" on any doubt.
-#      The folder names carry the "squirrel-" prefix because Cursor has
-#      no command namespace at all (no equivalent of Claude Code's
-#      "/squirrel:"), so these sit directly in the user's own global
-#      skill namespace; each skill's frontmatter `name` must match its
-#      folder exactly, and scripts/build.sh generates both from one
-#      expression so they cannot drift apart.
+#   1. ~/.cursor/plugins/local/squirrel-mode/ - a repo-shaped COPY (never
+#      a symlink) of the Cursor plugin subset, so .cursor-plugin/plugin.json
+#      relative paths (targets/cursor/squirrel-mode.mdc, targets/cursor/
+#      skills/, hooks.json, "${CURSOR_PLUGIN_ROOT}"/scripts/...) resolve.
+#      Subset: .cursor-plugin/plugin.json, the four scripts
+#      load-profile/check-off-flag/allow-checkpoint/hoard-search.sh, and
+#      every regular file under targets/cursor/. Copying only .mdc + two
+#      skills into ~/.cursor/skills/ would duplicate slash commands when
+#      the plugin loads; this script no longer writes that old layout as
+#      the payload. Ownership of an existing file at an allowlisted dest
+#      is decided as follows. Generated files (those whose bundled source
+#      carries a GENERATED FILE banner): an EXACT, FULL-LINE match against
+#      that artifact's own banner line - read fresh from the bundled
+#      source, never hardcoded (see banner_line_for/classify_dedicated_file
+#      below). Files with no banner (plugin.json, the four scripts,
+#      install.sh, hooks.json): ours iff byte-identical to the bundled
+#      file; otherwise foreign. A file that merely CONTAINS the substring
+#      "<!-- GENERATED FILE. Source:" somewhere is foreign, not ours, and
+#      is never overwritten on install or removed on uninstall. Every
+#      check here is biased toward "foreign" whenever there is any doubt.
+#   2. On install AND uninstall, leftover old-layout files at
+#      ~/.cursor/rules/squirrel-mode.mdc and
+#      ~/.cursor/skills/squirrel-*/SKILL.md are removed IFF they classify
+#      as ours (exact-full-line banner). A foreign leftover at those paths
+#      is left alone and does NOT fail the new plugin install.
 #   3. ~/.cursor/.squirrel-install.lock - a mutex directory, created
 #      immediately before any read-then-write work begins and held for
 #      the rest of this run - released by the EXIT trap on every exit
@@ -53,28 +40,20 @@
 # $TMPDIR on every invocation, including a dry run (mktemp -d, removed
 # on every exit path, including a caught signal - see the cleanup trap
 # below). That directory is never under $HOME and is not one of the
-# three items enumerated above.
+# items enumerated above.
 #
-# SYMLINK REFUSAL: if any managed destination - ~/.cursor/rules/
-# squirrel-mode.mdc or either ~/.cursor/skills/<name>/SKILL.md - is
-# itself a symlink, this script REFUSES (fails loudly, changes nothing)
-# instead of writing through it, on both install and uninstall. See
+# SYMLINK REFUSAL: if any managed plugin destination is itself a
+# symlink, this script REFUSES (fails loudly, changes nothing) instead
+# of writing through it, on both install and uninstall. See
 # targets/codex/install.sh's identical header note (SYMLINK REFUSAL)
-# for the full rationale (a symlink at the exact managed path is never
-# legitimate for this script's own atomic-rename write to pass through
-# - scripts/allow-checkpoint.sh and ADR-0002 reject the same thing at
-# their own artifact path) - fail_if_symlink below.
+# for the full rationale - fail_if_symlink below. After a successful
+# --yes, installed files are regular files and byte-identical to the
+# bundled sources.
 #
 #   4. Cursor's project-scoped COMMANDS (digest.md, plan.md) are NOT
-#      installed anywhere by this script, and are a SEPARATE mechanism
-#      from the Agent Skills in item 2. Cursor loads commands from a
-#      PROJECT-scoped .cursor/commands/*.md directory (ADR-0004;
-#      PLAN.md's verified host paths); writing them into some project on
-#      this machine would mean guessing which project, and this script
-#      only ever touches paths under $HOME. Item 2 is what covers the
-#      "once, for every project" case; every run still prints the two
-#      command files' paths, for a user who wants /digest and /plan as
-#      project commands in one specific repository as well.
+#      installed into a project by this script. Every install run still
+#      prints the two command files' paths, for a user who wants /digest
+#      and /plan as project commands in one specific repository as well.
 #
 # DRY RUN BY DEFAULT: with no flags, this script prints exactly what it
 # WOULD change and writes nothing under $HOME - not even the lock
@@ -82,10 +61,9 @@
 # targets/codex/install.sh's header comment for the full reasoning
 # (no guaranteed TTY on stdin, so a flag beats an interactive prompt).
 #
-# IDEMPOTENT: the new content is rendered into a temp file and compared
-# byte for byte against what is already on disk before anything is
-# written. Running this script twice (with --yes both times) changes
-# the filesystem only on the first run.
+# IDEMPOTENT: the new content is compared byte for byte against what is
+# already on disk before anything is written. Running this script twice
+# (with --yes both times) changes the filesystem only on the first run.
 #
 # CONCURRENCY: a second install.sh (any action) started with --yes
 # while one is already writing against the same $HOME fails loudly with
@@ -94,18 +72,14 @@
 # a REAL write (--yes) - a dry run changes nothing, so it needs no
 # mutex and never acquires the lock.
 #
-# UNINSTALL: pass --uninstall (with --yes to act on it) to remove
-# ~/.cursor/rules/squirrel-mode.mdc and both
-# ~/.cursor/skills/<name>/SKILL.md files, each if and only if it is
-# squirrel-mode's own file. The directories install created for them -
-# ~/.cursor/skills/<name> and ~/.cursor/skills itself - are removed too,
-# but ONLY once they are empty and ONLY when this run actually removed
-# one of our own files from them: a plain rmdir that is allowed to fail,
-# never a recursive delete, and never applied to a ~/.cursor/skills the
-# user made themselves and this script never installed into (the exact
-# bug targets/codex/install.sh fixed for ~/.agents/skills). ~/.cursor
-# ITSELF is never removed under any circumstances - Cursor creates it,
-# this script only ever adds to it.
+# UNINSTALL: pass --uninstall (with --yes to act on it) to remove only
+# the allowlisted relative paths under the plugin copy when classified
+# ours; then rmdir empty parents (squirrel-mode, plugins/local) only
+# when empty. Never remove ~/.cursor, ~/.cursor/plugins, or a sibling
+# plugin. Also removes ~/.cursor/rules/squirrel-profile.mdc if it
+# carries the frozen projection banner as an exact full line (hooks
+# write that file; this installer does not). Uninstall never rm -rf's
+# the plugin dir.
 #
 # POSIX sh, no network calls, no telemetry, never touches a file it
 # does not fully own.
@@ -122,6 +96,10 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/../.." && pwd)
 
 GENERATED_TAG="<!-- GENERATED FILE. Source:"
+# Frozen: same string as CURSOR_PROFILE_PROJECTION_BANNER in
+# scripts/load-profile.sh. Do not derive it from that file (it may be
+# missing). Exact-full-line match only.
+CURSOR_PROFILE_PROJECTION_BANNER='<!-- GENERATED FILE. Source: ~/.squirrel/profile.md (squirrel-profile projection) -->'
 
 fail() {
   echo "install.sh: ERROR: $1" >&2
@@ -132,17 +110,17 @@ usage() {
   cat <<'USAGE'
 Usage: targets/cursor/install.sh [--yes] [--uninstall] [--help]
 
-Installs squirrel-mode's Cursor artifacts:
-  - ~/.cursor/rules/squirrel-mode.mdc (the always-on base rules)
-  - ~/.cursor/skills/squirrel-digest/SKILL.md and
-    ~/.cursor/skills/squirrel-plan/SKILL.md (Cursor Agent Skills,
-    auto-discovered for every project on this machine, invoked as
-    /squirrel-digest and /squirrel-plan)
+Installs squirrel-mode's Cursor plugin subset as a local copy at
+~/.cursor/plugins/local/squirrel-mode (repo-shaped: .cursor-plugin/
+plugin.json, scripts/, and targets/cursor/). After a real install,
+reload the Cursor window (Reload Window). GitHub shortcut:
+/add-plugin https://github.com/thgMatajs/squirrel-mode (pins a commit;
+the local copy is the stable path).
 
 Cursor's PROJECT-scoped /digest and /plan commands are a separate
 mechanism and are NOT installed by this script - it prints where to
 find them and how to add them to one specific project instead (see
-below). The two Agent Skills above are what covers every project.
+below).
 
 With no flags, this is a DRY RUN: it prints exactly what would change
 and writes nothing.
@@ -150,8 +128,10 @@ and writes nothing.
   --yes         Perform the install (or, with --uninstall, the
                 uninstall) for real. Without this flag, nothing is
                 ever written.
-  --uninstall   Remove squirrel-mode.mdc and both Agent Skills,
-                instead of installing them.
+  --uninstall   Remove the local plugin copy (allowlisted paths that
+                classify as ours), old-layout leftovers that classify
+                as ours, and the profile projection if it is ours,
+                instead of installing.
   --help        Show this message and exit.
 
 The only things this script creates or modifies are under $HOME -
@@ -197,21 +177,21 @@ home_dir="${HOME:-}"
 [ -n "$home_dir" ] || fail '$HOME is not set - cannot determine where to install.'
 
 cursor_home="$home_dir/.cursor"
-rules_dir="$cursor_home/rules"
-rule_file="$rules_dir/squirrel-mode.mdc"
-source_rule_file="$repo_root/targets/cursor/squirrel-mode.mdc"
+plugin_root="$cursor_home/plugins/local/squirrel-mode"
 source_commands_dir="$repo_root/targets/cursor/commands"
-cursor_skills_dir="$cursor_home/skills"
-source_skills_dir="$repo_root/targets/cursor/skills"
-
-# The Cursor Agent Skills this script manages, by folder name. These are
-# folder names, not command names: Cursor requires a skill's frontmatter
-# `name` to match its parent folder exactly, and scripts/build.sh emits
-# both from one expression, so the prefixed spelling is the only one
-# that ever appears on disk. Listed once, here, and iterated by every
-# pass below (pre-flight validation, readability, install, uninstall) so
-# no pass can ever cover a different set of paths than another.
-cursor_skill_names="squirrel-digest squirrel-plan"
+old_layout_rule="$cursor_home/rules/squirrel-mode.mdc"
+old_layout_skills_dir="$cursor_home/skills"
+projection_file="$cursor_home/rules/squirrel-profile.mdc"
+# Derived from the on-disk skill folders rather than a hardcoded name
+# list: a literal `squirrel-dig` token is a false NETWORK_COMMAND_REGEX
+# hit (`grep -w` treats `-` as a word boundary, so the suffix matches
+# `dig`).
+old_layout_skill_folders=""
+for skill_dir in "$repo_root/targets/cursor/skills"/*; do
+  [ -d "$skill_dir" ] || continue
+  old_layout_skill_folders="$old_layout_skill_folders $(basename "$skill_dir")"
+done
+old_layout_skill_folders=${old_layout_skill_folders# }
 
 # --- Host detection --------------------------------------------------
 #
@@ -224,13 +204,10 @@ cursor_skill_names="squirrel-digest squirrel-plan"
 # failure: exit 0, do nothing. Because this gate covers uninstall too
 # (see below), the message covers both actions.
 # Unlike Codex, Cursor has nothing this script manages OUTSIDE
-# ~/.cursor: its Agent Skills live at ~/.cursor/skills/, INSIDE this
-# very directory, not at a sibling path the way Codex's skills live
-# under ~/.agents/skills/. So - unlike targets/codex/install.sh, which
-# must keep running its skills loop on uninstall even after ~/.codex is
-# gone - this gate applies identically to both install and uninstall
-# here: if ~/.cursor is gone, every path this script could clean went
-# with it, and there is never anything left to strand.
+# ~/.cursor: the plugin copy lives at ~/.cursor/plugins/local/, INSIDE
+# this very directory. So this gate applies identically to both install
+# and uninstall: if ~/.cursor is gone, every path this script could
+# clean went with it, and there is never anything left to strand.
 if [ ! -d "$cursor_home" ]; then
   echo "Cursor home directory not found at $cursor_home - Cursor creates that directory the first time it runs, so it has not been run on this machine yet (installing Cursor is not enough on its own). There is nothing here to install into, and nothing to uninstall; if you are installing, open Cursor once, then re-run this script."
   exit 0
@@ -243,7 +220,7 @@ fail_if_symlink() {
   # script's own atomic-rename `mv` to pass through - ADR-0002 and
   # scripts/allow-checkpoint.sh reject the same thing at their own
   # artifact path; only <path> itself is checked, never an ancestor
-  # directory, since a symlinked ~/.cursor/rules is a legitimate
+  # directory, since a symlinked ~/.cursor/plugins is a legitimate
   # dotfiles setup; `[ -L ]` runs before any `[ -e ]`-gated check so a
   # dangling symlink is still caught).
   path=$1
@@ -258,12 +235,7 @@ validate_destination() {
   # condition that must hold BEFORE this script writes anything at all,
   # for a single managed path, expressed exactly ONCE - see
   # targets/codex/install.sh's identical helper (G1, S7 review cycle 3)
-  # for the full rationale. Cursor manages only one destination
-  # (squirrel-mode.mdc), so there is no loop to diverge from here the
-  # way Codex's four skill paths could, but the helper is still
-  # factored out identically: a future third pre-flight condition is
-  # added HERE, in this one function, never duplicated inline again at
-  # this call site.
+  # for the full rationale.
   path=$1
   desc=$2
   fail_if_symlink "$path" "$desc"
@@ -272,35 +244,39 @@ validate_destination() {
   fi
 }
 
-# PRE-FLIGHT, for EVERY managed destination path, for BOTH install and
-# uninstall, before this script writes anything whatsoever - not even
-# the lock directory or the $TMPDIR staging directory have been created
-# yet at this point. This is targets/codex/install.sh's G1 fix applied
-# here: a symlink or a directory sitting at the SECOND managed path must
-# refuse before the FIRST one has already been written, or this script's
-# own "refuses, changing nothing" promise is false for that case.
-validate_destination "$rule_file" "\$HOME/.cursor/rules/squirrel-mode.mdc"
-for skill_name in $cursor_skill_names; do
-  validate_destination "$cursor_skills_dir/$skill_name/SKILL.md" "\$HOME/.cursor/skills/$skill_name/SKILL.md"
-done
+list_plugin_rel_paths() {
+  # Allowlisted repo-root-relative paths that make up the Cursor plugin
+  # subset. Order is load-bearing for pre-flight: plugin.json is first
+  # so a refusal at a later dest cannot have already written it.
+  printf '%s\n' \
+    ".cursor-plugin/plugin.json" \
+    "scripts/load-profile.sh" \
+    "scripts/check-off-flag.sh" \
+    "scripts/allow-checkpoint.sh" \
+    "scripts/hoard-search.sh"
+  (cd "$repo_root" && find targets/cursor -type f ! -name '.*' | LC_ALL=C sort)
+}
 
-# F6 class-closure (see targets/codex/install.sh's identical guard's
-# comment near codex_home_present for the full rationale): a
-# pre-existing managed file this script cannot READ must fail loudly, at
-# the top level, naming the REAL path - never surface a raw
-# permission-denied error from deep inside classify_dedicated_file or
-# write_destination naming an internal staging path instead.
-if [ -f "$rule_file" ] && [ ! -r "$rule_file" ]; then
-  fail "$rule_file exists but is not readable (permission denied) - squirrel-mode needs to read its current content before it can decide whether it owns it. Fix its permissions (e.g. chmod u+r $rule_file) and re-run."
-fi
-for skill_name in $cursor_skill_names; do
-  skill_dest="$cursor_skills_dir/$skill_name/SKILL.md"
-  if [ -f "$skill_dest" ] && [ ! -r "$skill_dest" ]; then
-    fail "$skill_dest exists but is not readable (permission denied) - squirrel-mode needs to read its current content before it can decide whether it owns it. Fix its permissions (e.g. chmod u+r $skill_dest) and re-run."
+plugin_rel_paths=$(list_plugin_rel_paths)
+[ -n "$plugin_rel_paths" ] || fail "could not enumerate the Cursor plugin subset under $repo_root - this checkout looks incomplete."
+
+# PRE-FLIGHT, for EVERY managed plugin destination path, for BOTH
+# install and uninstall, before this script writes anything whatsoever
+# - not even the lock directory or the $TMPDIR staging directory have
+# been created yet. A symlink or a directory sitting at a later path
+# must refuse before an earlier path has already been written.
+while IFS= read -r rel || [ -n "$rel" ]; do
+  [ -n "$rel" ] || continue
+  src="$repo_root/$rel"
+  [ -f "$src" ] || fail "the bundled source $src is missing - this checkout looks incomplete. Re-run 'sh scripts/build.sh' from the repo root to regenerate generated files, then re-run this installer."
+  dest="$plugin_root/$rel"
+  validate_destination "$dest" "\$HOME/.cursor/plugins/local/squirrel-mode/$rel"
+  if [ -f "$dest" ] && [ ! -r "$dest" ]; then
+    fail "$dest exists but is not readable (permission denied) - squirrel-mode needs to read its current content before it can decide whether it owns it. Fix its permissions (e.g. chmod u+r $dest) and re-run."
   fi
-done
-
-[ -f "$source_rule_file" ] || fail "the bundled source $source_rule_file is missing - this checkout looks incomplete. Re-run 'sh scripts/build.sh' from the repo root to regenerate it, then re-run this installer."
+done <<EOF
+$plugin_rel_paths
+EOF
 
 banner_line_for() {
   # banner_line_for <source_path>: prints the exact, full GENERATED
@@ -329,6 +305,23 @@ classify_dedicated_file() {
   expected=$2
   [ -f "$path" ] || { printf 'absent\n'; return 0; }
   if grep -qFx -- "$expected" "$path" 2>/dev/null; then
+    printf 'ours\n'
+  else
+    printf 'foreign\n'
+  fi
+}
+
+classify_plugin_file() {
+  # classify_plugin_file <path> <source_path>: absent | ours | foreign.
+  # Generated sources (banner present): exact-full-line banner match.
+  # Sources with no banner: ours iff byte-identical to the bundled file.
+  path=$1
+  source_path=$2
+  [ -f "$path" ] || { printf 'absent\n'; return 0; }
+  if grep -q -F "$GENERATED_TAG" "$source_path" 2>/dev/null; then
+    expected=$(banner_line_for "$source_path")
+    classify_dedicated_file "$path" "$expected"
+  elif cmp -s "$source_path" "$path"; then
     printf 'ours\n'
   else
     printf 'foreign\n'
@@ -457,104 +450,33 @@ fi
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-cursor-install.XXXXXX")
 
-expected_banner=$(banner_line_for "$source_rule_file")
+removed_own_plugin_file=no
+removed_old_layout_skill=no
+removed_from_rules=no
 
-if [ "$action" = "install" ]; then
-  kind=$(classify_dedicated_file "$rule_file" "$expected_banner")
-  case "$kind" in
-    foreign)
-      echo "Skipping $rule_file: a file already exists there that is not a squirrel-mode file. Remove it by hand first if you want squirrel-mode's rules installed."
-      ;;
-    absent)
-      echo "Would create $rule_file"
-      if [ "$do_write" = "yes" ]; then
-        mkdir -p "$rules_dir"
-        write_destination "$rule_file" "$source_rule_file"
-        echo "Installed: $rule_file"
-      fi
-      ;;
-    ours)
-      if cmp -s "$source_rule_file" "$rule_file"; then
-        echo "$rule_file already up to date - nothing to do."
-      else
-        echo "Would update $rule_file"
-        if [ "$do_write" = "yes" ]; then
-          write_destination "$rule_file" "$source_rule_file"
-          echo "Updated: $rule_file"
-        fi
-      fi
-      ;;
-  esac
+install_or_remove_plugin_file() {
+  # install_or_remove_plugin_file <rel>: one allowlisted dest, using the
+  # same validate/classify/write helpers as the rest of this script.
+  rel=$1
+  src="$repo_root/$rel"
+  dest="$plugin_root/$rel"
 
-else
-  kind=$(classify_dedicated_file "$rule_file" "$expected_banner")
-  case "$kind" in
-    ours)
-      echo "Would remove $rule_file"
-      if [ "$do_write" = "yes" ]; then
-        rm -f "$rule_file"
-        rmdir "$rules_dir" 2>/dev/null || true
-        echo "Uninstalled: removed $rule_file"
-      fi
-      ;;
-    foreign)
-      echo "Not removing $rule_file: it is not a squirrel-mode file."
-      ;;
-    absent)
-      echo "$rule_file does not exist - nothing to uninstall there."
-      ;;
-  esac
-fi
-
-# --- The two Cursor Agent Skills: ~/.cursor/skills/<name>/SKILL.md -----
-#
-# Structurally identical to targets/codex/install.sh's own skills loop,
-# deliberately: same per-artifact banner_line_for, same
-# classify_dedicated_file verdicts, same TOCTOU re-validation, same
-# removed_own_skill gate on the directory cleanup. Duplicated rather
-# than shared from a common lib for the same reason every other helper
-# in these two files is: each installer stays independently readable and
-# runnable without assuming the other exists.
-
-# Set to yes the moment this run actually removes one of OUR skill
-# files, and read only by the directory cleanup at the very bottom.
-# Install creates ~/.cursor/skills (and each ~/.cursor/skills/<name>)
-# with `mkdir -p`, so a complete uninstall owes their removal once they
-# are empty - but ONLY when this run really did take our files out of
-# them. Running the cleanup on any --uninstall --yes whatsoever is
-# exactly the bug targets/codex/install.sh fixed for ~/.agents/skills:
-# it deleted the empty skills directory of a user who had made it
-# themselves and never installed squirrel-mode's skills at all.
-removed_own_skill=no
-
-for skill_name in $cursor_skill_names; do
-  src="$source_skills_dir/$skill_name/SKILL.md"
-  dest="$cursor_skills_dir/$skill_name/SKILL.md"
-  [ -f "$src" ] || continue
-
-  # G1: re-validated here, immediately before this path's own
-  # read/write work, as a narrow TOCTOU guard - the pre-flight pass
-  # above already checked this exact path, but the .mdc's own
-  # read/render/write work (and earlier iterations of this same loop)
-  # have since done real filesystem I/O, so a symlink or a directory
-  # could in principle have been swapped into place at $dest in
-  # between. Calls the SAME validate_destination used in the pre-flight
-  # pass - never a second, divergent copy of either rule.
-  validate_destination "$dest" "\$HOME/.cursor/skills/$skill_name/SKILL.md"
-
-  skill_banner=$(banner_line_for "$src")
-  skill_kind=$(classify_dedicated_file "$dest" "$skill_banner")
+  validate_destination "$dest" "\$HOME/.cursor/plugins/local/squirrel-mode/$rel"
+  kind=$(classify_plugin_file "$dest" "$src")
 
   if [ "$action" = "install" ]; then
-    case "$skill_kind" in
+    case "$kind" in
       foreign)
-        echo "Skipping $dest: a file already exists there that is not a squirrel-mode file. Remove it by hand first if you want squirrel-mode's $skill_name skill installed."
+        echo "Skipping $dest: a file already exists there that is not a squirrel-mode file. Remove it by hand first if you want squirrel-mode's copy installed."
         ;;
       absent)
         echo "Would create $dest"
         if [ "$do_write" = "yes" ]; then
-          mkdir -p "$cursor_skills_dir/$skill_name"
+          mkdir -p "$(dirname "$dest")"
           write_destination "$dest" "$src"
+          if [ -x "$src" ]; then
+            chmod +x "$dest"
+          fi
           echo "Installed: $dest"
         fi
         ;;
@@ -565,19 +487,22 @@ for skill_name in $cursor_skill_names; do
           echo "Would update $dest"
           if [ "$do_write" = "yes" ]; then
             write_destination "$dest" "$src"
+            if [ -x "$src" ]; then
+              chmod +x "$dest"
+            fi
             echo "Updated: $dest"
           fi
         fi
         ;;
     esac
   else
-    case "$skill_kind" in
+    case "$kind" in
       ours)
         echo "Would remove $dest"
         if [ "$do_write" = "yes" ]; then
           rm -f "$dest"
-          removed_own_skill=yes
-          rmdir "$cursor_skills_dir/$skill_name" 2>/dev/null || true
+          removed_own_plugin_file=yes
+          rmdir "$(dirname "$dest")" 2>/dev/null || true
           echo "Uninstalled: removed $dest"
         fi
         ;;
@@ -589,24 +514,104 @@ for skill_name in $cursor_skill_names; do
         ;;
     esac
   fi
-done
+}
 
-if [ "$action" = "uninstall" ] && [ "$do_write" = "yes" ] && [ "$removed_own_skill" = "yes" ]; then
-  # A plain, non-recursive rmdir that tolerates failure: a
-  # ~/.cursor/skills that still holds anything else - another tool's
-  # skill beside ours, a skill the user wrote themselves - makes rmdir
-  # fail, and that failure is the intended outcome, never something to
-  # escalate past with rm -rf. ~/.cursor ITSELF is deliberately absent
-  # from this cleanup, unlike Codex's ~/.agents: Cursor creates
-  # ~/.cursor on first run and this script's own host-detection gate
-  # REFUSES to do anything when it is missing, so it is never a
-  # directory this script created and never one it may remove.
-  rmdir "$cursor_skills_dir" 2>/dev/null || true
+while IFS= read -r rel || [ -n "$rel" ]; do
+  [ -n "$rel" ] || continue
+  install_or_remove_plugin_file "$rel"
+done <<EOF
+$plugin_rel_paths
+EOF
+
+# Empty-parent cleanup for the plugin copy: rmdir only, never rm -rf,
+# and only after this run actually removed one of our files. Walk
+# remaining empty dirs under plugin_root deepest-first, then plugin_root
+# itself, then plugins/local. Never rmdir ~/.cursor/plugins or ~/.cursor.
+if [ "$action" = "uninstall" ] && [ "$do_write" = "yes" ] && [ "$removed_own_plugin_file" = "yes" ]; then
+  if [ -d "$plugin_root" ]; then
+    # POSIX: -depth visits children before parents so a now-empty
+    # targets/cursor/skills/<name> is removed before skills/.
+    find "$plugin_root" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+  fi
+  rmdir "$plugin_root" 2>/dev/null || true
+  rmdir "$cursor_home/plugins/local" 2>/dev/null || true
+fi
+
+# --- Old-layout leftovers: ~/.cursor/rules/squirrel-mode.mdc and
+# ~/.cursor/skills/squirrel-*/SKILL.md. Removed on install AND uninstall
+# when classified ours. Foreign leftovers survive and do not fail the
+# plugin copy. A symlink or directory at an old-layout path is left
+# alone (bias toward foreign) rather than failing the new install.
+clean_old_layout_file() {
+  dest=$1
+  src=$2
+  if [ -L "$dest" ]; then
+    return 0
+  fi
+  if [ -e "$dest" ] && [ ! -f "$dest" ]; then
+    return 0
+  fi
+  [ -f "$dest" ] || return 0
+  if [ ! -r "$dest" ]; then
+    return 0
+  fi
+  kind=$(classify_plugin_file "$dest" "$src")
+  if [ "$kind" != "ours" ]; then
+    return 0
+  fi
+  echo "Would remove $dest (old-layout leftover)"
+  if [ "$do_write" = "yes" ]; then
+    rm -f "$dest"
+    echo "Removed old-layout leftover: $dest"
+    parent=$(dirname "$dest")
+    rmdir "$parent" 2>/dev/null || true
+    case "$dest" in
+      */.cursor/skills/*)
+        removed_old_layout_skill=yes
+        ;;
+      */.cursor/rules/squirrel-mode.mdc)
+        removed_from_rules=yes
+        ;;
+    esac
+  fi
+}
+
+clean_old_layout_file "$old_layout_rule" "$repo_root/targets/cursor/squirrel-mode.mdc"
+for folder in $old_layout_skill_folders; do
+  clean_old_layout_file "$old_layout_skills_dir/$folder/SKILL.md" "$repo_root/targets/cursor/skills/$folder/SKILL.md"
+done
+if [ "$do_write" = "yes" ] && [ "$removed_old_layout_skill" = "yes" ]; then
+  rmdir "$old_layout_skills_dir" 2>/dev/null || true
+fi
+
+# Projection: hooks write ~/.cursor/rules/squirrel-profile.mdc. This
+# installer never writes it. Uninstall removes it only when the frozen
+# banner is an exact full line.
+if [ "$action" = "uninstall" ]; then
+  if [ -L "$projection_file" ]; then
+    :
+  elif [ -f "$projection_file" ]; then
+    if grep -qFx -- "$CURSOR_PROFILE_PROJECTION_BANNER" "$projection_file" 2>/dev/null; then
+      echo "Would remove $projection_file"
+      if [ "$do_write" = "yes" ]; then
+        rm -f "$projection_file"
+        removed_from_rules=yes
+        echo "Uninstalled: removed $projection_file"
+      fi
+    else
+      echo "Not removing $projection_file: it is not a squirrel-mode projection."
+    fi
+  else
+    echo "$projection_file does not exist - nothing to uninstall there."
+  fi
+fi
+if [ "$do_write" = "yes" ] && [ "$removed_from_rules" = "yes" ]; then
+  rmdir "$cursor_home/rules" 2>/dev/null || true
 fi
 
 if [ "$action" = "install" ]; then
   echo ""
-  echo "The two skills above are Cursor AGENT SKILLS: Cursor auto-discovers \$HOME/.cursor/skills/ for every project on this machine, so /squirrel-digest and /squirrel-plan work everywhere once, with nothing to copy per project."
+  echo "Installed a local Cursor plugin copy at $plugin_root. Reload the Cursor window (Reload Window) so Cursor picks it up."
   echo "Cursor's PROJECT-scoped commands are a separate mechanism and are not installed here. If you also want /digest and /plan as project commands in one specific repository, copy these two files into that project's .cursor/commands/ directory:"
   echo "  $source_commands_dir/digest.md"
   echo "  $source_commands_dir/plan.md"

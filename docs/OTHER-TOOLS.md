@@ -166,26 +166,26 @@ targets/cursor/install.sh --yes    # actually install
 
 This touches:
 
-- `~/.cursor/rules/squirrel-mode.mdc` — the always-on base rules, copied in whole. If Cursor has not
-  been run on this machine yet, `~/.cursor` does not exist, and the installer reports exactly that
-  and does nothing, without failing — open Cursor once, then re-run the installer.
-- `~/.cursor/skills/squirrel-digest/SKILL.md` and `~/.cursor/skills/squirrel-plan/SKILL.md` — Cursor
-  **Agent Skills**, auto-discovered from `~/.cursor/skills/` for every project on this machine. The
-  folder names carry a `squirrel-` prefix because Cursor has no command namespace; each one's
-  frontmatter `name` must match its folder exactly, and `scripts/build.sh` generates both from one
-  expression so they cannot drift apart.
+- `~/.cursor/plugins/local/squirrel-mode/` — a repo-shaped **copy** (never a symlink) of the Cursor
+  plugin subset: `.cursor-plugin/plugin.json`,
+  `scripts/{load-profile,check-off-flag,allow-checkpoint,hoard-search}.sh`, and `targets/cursor/**`.
+  After a real install, reload the Cursor window (Reload Window). GitHub shortcut:
+  `/add-plugin https://github.com/thgMatajs/squirrel-mode` (pins a commit; the local copy is the
+  stable path). If Cursor has not been run on this machine yet, `~/.cursor` does not exist, and the
+  installer reports exactly that and does nothing — including not creating `plugins/local` —
+  without failing; open Cursor once, then re-run the installer.
 - `~/.cursor/.squirrel-install.lock` — the same lock mechanism as Codex's above, created and removed
   only during a real write (`--yes`); a dry run never creates it.
 
 Cursor's **project-scoped** commands are a separate mechanism and are still not installed by this
 script — they live in a project's own `.cursor/commands/` directory, and writing them there would
-mean guessing which project. The Agent Skills above are what covers every project. Every **install**
+mean guessing which project. The plugin copy above is what covers every project. Every **install**
 run — dry run included, but never an `--uninstall` run — ends by naming the two command files, as
 absolute paths inside the checkout you ran it from, for anyone who also wants them in one specific
 repository:
 
 ```
-The two skills above are Cursor AGENT SKILLS: Cursor auto-discovers $HOME/.cursor/skills/ for every project on this machine, so /squirrel-digest and /squirrel-plan work everywhere once, with nothing to copy per project.
+Installed a local Cursor plugin copy at $HOME/.cursor/plugins/local/squirrel-mode. Reload the Cursor window (Reload Window) so Cursor picks it up.
 Cursor's PROJECT-scoped commands are a separate mechanism and are not installed here. If you also want /digest and /plan as project commands in one specific repository, copy these two files into that project's .cursor/commands/ directory:
   <your-checkout>/targets/cursor/commands/digest.md
   <your-checkout>/targets/cursor/commands/plan.md
@@ -259,14 +259,17 @@ had, uninstall leaves the file in place, empty (0 bytes), rather than deleting i
 and the safe default is to never delete a user-visible file under `$HOME` it is not certain it created;
 delete the empty file by hand if you don't want it.
 
-Cursor's uninstall removes `squirrel-mode.mdc` **and** both `~/.cursor/skills/squirrel-*/SKILL.md`
-files, plus the directories install created for them — `~/.cursor/rules`, each
-`~/.cursor/skills/<name>`, and `~/.cursor/skills` itself. Every one of those is a plain,
-non-recursive `rmdir` that is allowed to fail, so a directory still holding anything else survives
-untouched, and every one of them runs **only** when that same run actually removed one of
-squirrel-mode's own files from it — so a `~/.cursor/skills` you made yourself and squirrel-mode never
-installed into is never deleted. `~/.cursor` itself is never removed: Cursor creates it, and this
-installer refuses to run at all when it is missing.
+Cursor's uninstall removes only the allowlisted files under
+`~/.cursor/plugins/local/squirrel-mode/` when they classify as squirrel-mode's own, then `rmdir`s
+empty parents (`squirrel-mode`, `plugins/local`) only when empty. It never removes `~/.cursor`,
+`~/.cursor/plugins`, or a sibling plugin. It also removes `~/.cursor/rules/squirrel-profile.mdc` when
+that file carries the frozen projection banner as an exact full line, and leftover old-layout files
+at `~/.cursor/rules/squirrel-mode.mdc` and `~/.cursor/skills/squirrel-*/SKILL.md` when those classify
+as ours (a foreign leftover at those paths is left alone). Every directory removal is a plain,
+non-recursive `rmdir` that is allowed to fail, and those `rmdir`s run **only** when that same run
+actually removed one of squirrel-mode's own files — so a `plugins/local` you made yourself and
+squirrel-mode never installed into is never deleted. `~/.cursor` itself is never removed: Cursor
+creates it, and this installer refuses to run at all when it is missing.
 
 ### Ownership, and the symlink refusal
 
@@ -279,8 +282,8 @@ that quotes squirrel-mode's own docs — does **not** count as a match: it is fo
 and neither installer ever touches a file at that path that does not carry that exact banner line. If
 something else already occupies that exact path, the installer reports it and leaves it alone.
 
-If the exact managed path (`~/.codex/AGENTS.md`, an `~/.agents/skills/<name>/SKILL.md`,
-`~/.cursor/rules/squirrel-mode.mdc`, or a `~/.cursor/skills/<name>/SKILL.md`) is itself a
+If the exact managed path (`~/.codex/AGENTS.md`, an `~/.agents/skills/<name>/SKILL.md`, or a file
+under `~/.cursor/plugins/local/squirrel-mode/` such as `.cursor-plugin/plugin.json`) is itself a
 **symlink**, both installers **refuse** — a loud
 `fail()`, changing nothing — on both install and uninstall, rather than write through it. Either
 installer replaces a destination atomically via `mv` (`rename(2)`), which replaces the *directory
