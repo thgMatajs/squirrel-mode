@@ -108,7 +108,7 @@ make_full_scratch() {
   # B1 fix removed build.sh's tolerance for a missing skills/<name>/SKILL.md,
   # so every scratch fixture in this repo must supply real sources now,
   # not omit them). A copy running from scratch/scripts/build.sh therefore
-  # regenerates all twenty artifacts, never touching the real repo.
+  # regenerates all twenty-one artifacts, never touching the real repo.
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-full-scratch.XXXXXX")
   mkdir -p "$scratch/scripts" "$scratch/rules" "$scratch/skills"
   cp "$build_script" "$scratch/scripts/build.sh"
@@ -124,7 +124,7 @@ make_full_scratch() {
 # --- NO SCENARIO IN THIS FILE MAY INVOKE THE REAL REPO'S build.sh -------
 #
 # build.sh derives its own repo_root from its own location, so running
-# "$build_script" (the repo's own copy) WRITES all sixteen generated
+# "$build_script" (the repo's own copy) WRITES all nineteen generated
 # artifacts into the working tree under test. Scenario 6's idempotence
 # half used to do exactly that; see its own comment for what that cost.
 # Every build.sh invocation in this file goes through make_full_scratch
@@ -142,7 +142,7 @@ make_full_scratch() {
 # hand-edit to any one (say, deleting its disable-model-invocation
 # line, which is the whole reason it behaves as a slash command rather
 # than something Cursor fires on its own) has to fail this file.
-generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/skills/squirrel-init/SKILL.md targets/cursor/skills/squirrel-tune/SKILL.md targets/cursor/skills/squirrel-pickup/SKILL.md targets/cursor/skills/squirrel-stash/SKILL.md targets/cursor/skills/squirrel-dig/SKILL.md targets/cursor/skills/squirrel-off/SKILL.md targets/cursor/skills/squirrel-on/SKILL.md targets/cursor/hooks/hooks.json"
+generated_target_rel_paths="targets/codex/AGENTS.md targets/cursor/squirrel-mode.mdc targets/codex/skills/digest/SKILL.md targets/codex/skills/plan/SKILL.md targets/codex/skills/init/SKILL.md targets/codex/skills/tune/SKILL.md targets/cursor/commands/digest.md targets/cursor/commands/plan.md targets/cursor/skills/squirrel-digest/SKILL.md targets/cursor/skills/squirrel-plan/SKILL.md targets/cursor/skills/squirrel-init/SKILL.md targets/cursor/skills/squirrel-tune/SKILL.md targets/cursor/skills/squirrel-pickup/SKILL.md targets/cursor/skills/squirrel-stash/SKILL.md targets/cursor/skills/squirrel-dig/SKILL.md targets/cursor/skills/squirrel-off/SKILL.md targets/cursor/skills/squirrel-on/SKILL.md targets/cursor/skills/squirrel-rules/SKILL.md targets/cursor/hooks/hooks.json"
 
 # The nine Cursor Agent Skills, as "<source command name>:<folder name>"
 # pairs. Cursor requires a skill's frontmatter `name` to match its parent
@@ -220,9 +220,9 @@ extract_frontmatter_line() {
 
 # ==========================================================================
 # 1. build.sh generates exactly the four Codex skills, two Cursor
-#    commands, and nine Cursor Agent Skills. pickup/stash/dig/off/on are
-#    Cursor Agent Skill only (not Codex, not a project command).
-#    init/tune/pickup/stash/dig/off/on port to Cursor as Agent Skills
+#    commands, and ten Cursor Agent Skills. pickup/stash/dig/off/on/rules
+#    are Cursor Agent Skill only (not Codex, not a project command).
+#    init/tune/pickup/stash/dig/off/on/rules port to Cursor as Agent Skills
 #    only - never as project commands. Project commands stay digest/plan.
 # ==========================================================================
 for cmd_name in digest plan init tune; do
@@ -235,11 +235,12 @@ for pair in $cursor_skill_pairs; do
   folder=${pair#*:}
   assert_file_exists "$repo_root/targets/cursor/skills/$folder/SKILL.md" "targets/cursor/skills/$folder/SKILL.md must exist (the user-level Cursor Agent Skill, installed once for every project)"
 done
-for cmd_name in pickup stash dig off on; do
+assert_file_exists "$repo_root/targets/cursor/skills/squirrel-rules/SKILL.md" "targets/cursor/skills/squirrel-rules/SKILL.md must exist (Cursor recovery for the 15 always-on rules; not a port of skills/rules/SKILL.md)"
+for cmd_name in pickup stash dig off on rules; do
   assert_file_absent "$repo_root/targets/codex/skills/$cmd_name/SKILL.md" "targets/codex/skills/$cmd_name/SKILL.md must NOT exist ($cmd_name is not ported to Codex - see PLAN.md's parity table)"
   assert_file_absent "$repo_root/targets/cursor/commands/$cmd_name.md" "targets/cursor/commands/$cmd_name.md must NOT exist ($cmd_name is not a Cursor project command)"
 done
-for cmd_name in init tune pickup stash dig off on; do
+for cmd_name in init tune pickup stash dig off on rules; do
   assert_file_absent "$repo_root/targets/cursor/commands/$cmd_name.md" "targets/cursor/commands/$cmd_name.md must NOT exist ($cmd_name is a Cursor Agent Skill, not a project command)"
 done
 
@@ -250,7 +251,7 @@ cursor_command_count=$(find "$repo_root/targets/cursor/commands" -maxdepth 1 -ty
 assert_eq "2" "$cursor_command_count" "targets/cursor/commands/ must contain exactly 2 command files (digest and plan only; init/tune are skills, not commands)"
 
 cursor_skill_dir_count=$(find "$repo_root/targets/cursor/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "9" "$cursor_skill_dir_count" "targets/cursor/skills/ must contain exactly 9 skill directories"
+assert_eq "10" "$cursor_skill_dir_count" "targets/cursor/skills/ must contain exactly 10 skill directories"
 
 # ==========================================================================
 # 2. Every generated artifact carries the GENERATED marker, naming
@@ -544,6 +545,55 @@ assert_contains "$claude_on_content" "/squirrel:on" "canonical skills/on/SKILL.m
 assert_contains "$claude_on_content" "next message" "canonical skills/on/SKILL.md must keep Claude's next-message confirmation"
 
 # ==========================================================================
+# 4f. Cursor rules is an Agent Skill only: recovery for the 15 Cursor
+#     rules (print_rules_section cursor), same set as
+#     targets/cursor/squirrel-mode.mdc. Banner source is
+#     rules/base-rules.md, not skills/rules/SKILL.md. After squirrel-off,
+#     or if the always-on Cursor rule is off, the 15 rules apply from
+#     this turn including this reply. Canonical Claude skills/rules
+#     still has 16 headings and still names the output style. Codex does
+#     not get rules. Project commands stay digest/plan only.
+# ==========================================================================
+cursor_rules_this_turn_sentence="These 15 rules apply from this turn, including this reply."
+cursor_rules_mdc_sentence="This rule does not assume a checkpoint, a plan, or any other record exists on any target."
+cursor_rules_defaults_header="| Field | Default | Allowed values |"
+cursor_rules_h1="# squirrel-mode base rules (Cursor)"
+
+cursor_rules_content=$(read_file "$repo_root/targets/cursor/skills/squirrel-rules/SKILL.md")
+assert_contains "$cursor_rules_content" "name: squirrel-rules" "Cursor rules skill frontmatter must set name: squirrel-rules"
+dmi_rules_count=$(printf '%s\n' "$cursor_rules_content" | grep -c -F "disable-model-invocation: true" || true)
+assert_eq "1" "$dmi_rules_count" "Cursor squirrel-rules skill must contain disable-model-invocation: true exactly once"
+assert_contains "$cursor_rules_content" "$cursor_rules_h1" "Cursor rules skill H1 must be '# squirrel-mode base rules (Cursor)' once, with no extra add_title_suffix"
+h1_rules_count=$(printf '%s\n' "$cursor_rules_content" | grep -c -F "$cursor_rules_h1" || true)
+assert_eq "1" "$h1_rules_count" "Cursor rules skill must contain the (Cursor) H1 exactly once"
+assert_not_contains "$cursor_rules_content" "# squirrel-mode base rules (Cursor) (Cursor)" "Cursor rules skill must not run add_title_suffix on an H1 that already has (Cursor)"
+assert_contains "$cursor_rules_content" "GENERATED FILE" "Cursor rules skill must carry a GENERATED marker"
+assert_contains "$cursor_rules_content" "Source: rules/base-rules.md" "Cursor rules skill banner must name rules/base-rules.md as its source (same as the mdc), not skills/rules/SKILL.md"
+assert_not_contains "$cursor_rules_content" "skills/rules/SKILL.md" "Cursor rules skill must not name skills/rules/SKILL.md as its source"
+assert_contains "$cursor_rules_content" "$cursor_rules_this_turn_sentence" "Cursor rules skill must say the 15 rules apply from this turn, including this reply"
+assert_not_contains "$cursor_rules_content" "next message" "Cursor rules skill must not say the rules wait for the next message"
+assert_contains "$cursor_rules_content" "$cursor_rules_defaults_header" "Cursor rules skill must include the defaults table header print_defaults_section already emits"
+assert_contains "$cursor_rules_content" "$cursor_rules_mdc_sentence" "Cursor rules skill must carry a distinctive Cursor-rules sentence also present in targets/cursor/squirrel-mode.mdc (the Cursor 15, not a free rewrite)"
+cursor_mdc_content=$(read_file "$cursor_mdc")
+assert_contains "$cursor_mdc_content" "$cursor_rules_mdc_sentence" "fixture sanity: the distinctive Cursor-rules sentence must live in targets/cursor/squirrel-mode.mdc"
+rules_heading_count=$(printf '%s\n' "$cursor_rules_content" | grep -c '^### [0-9][0-9]*\. ' || true)
+assert_eq "15" "$rules_heading_count" "Cursor squirrel-rules skill must contain exactly 15 rule headings, not 16"
+assert_not_contains "$cursor_rules_content" "### 14. Checkpoint" "Cursor squirrel-rules skill must not contain Claude-only checkpoint rule 14"
+assert_contains "$cursor_rules_content" "squirrel-profile.mdc" "Cursor rules skill must mention the projected squirrel-profile.mdc the same way the mdc does"
+assert_contains "$cursor_rules_content" "only needed after squirrel-off, or if the always-on Cursor rule is off" "Cursor rules skill description must use Cursor off / always-on-rule-off wording"
+assert_not_contains "$cursor_rules_content" "force-for-plugin" "Cursor rules skill must not cite force-for-plugin"
+assert_not_contains "$cursor_rules_content" "forced output style" "Cursor rules skill must not name Claude's forced output style as the mechanism"
+assert_not_contains "$cursor_rules_content" "/squirrel:" "Cursor rules skill must not contain /squirrel:"
+assert_not_contains "$cursor_rules_content" "CLAUDE_PLUGIN_ROOT" "Cursor rules skill must not contain CLAUDE_PLUGIN_ROOT"
+assert_not_contains "$cursor_rules_content" "SessionStart" "Cursor rules skill must not contain SessionStart"
+assert_not_contains "$cursor_rules_content" "UserPromptSubmit" "Cursor rules skill must not contain UserPromptSubmit"
+assert_not_contains "$cursor_rules_content" "PreToolUse" "Cursor rules skill must not contain PreToolUse"
+claude_rules_content=$(read_file "$repo_root/skills/rules/SKILL.md")
+claude_rules_heading_count=$(printf '%s\n' "$claude_rules_content" | grep -c '^### [0-9][0-9]*\. ' || true)
+assert_eq "16" "$claude_rules_heading_count" "canonical skills/rules/SKILL.md must still contain exactly 16 rule headings"
+assert_contains "$claude_rules_content" "output style" "canonical skills/rules/SKILL.md must still mention the output style"
+
+# ==========================================================================
 # 5. Codex skill frontmatter has name + description. Cursor command
 #    files carry NO frontmatter at all - verified against Cursor's own
 #    documented format: plain Markdown, filename is the command name.
@@ -581,7 +631,7 @@ done
 #       - `disable-model-invocation: true` is what makes these behave as
 #         the explicit /squirrel-digest, /squirrel-plan, /squirrel-init,
 #         /squirrel-tune, /squirrel-pickup, /squirrel-stash, /squirrel-dig,
-#         /squirrel-off and /squirrel-on slash commands
+#         /squirrel-off, /squirrel-on and /squirrel-rules slash commands
 #         rather than something the model may fire on its own. Cursor
 #         Agent Skills have NO alwaysApply equivalent, so this field is
 #         the only control over when they run, and it is pinned exactly.
@@ -661,12 +711,12 @@ assert_contains "$cursor_command_plan_body" "$cursor_command_opener_plan" "the C
 #       `alwaysApply: true` to `false` - passed this whole file clean.
 #       The list below is now every generated file under targets/,
 #       whichever source it derives from - which as of Cursor stash/dig
-#       Agent Skills is sixteen files, not fourteen.
+#       Agent Skills is nineteen files, not fourteen.
 #
 #    b) THE TEST MUST NOT WRITE INTO THE TREE IT IS TESTING. The
 #       idempotence half used to invoke "$build_script" - the REPO's own
 #       copy - and build.sh derives its repo_root from its own location,
-#       so that run regenerated all sixteen artifacts straight into the
+#       so that run regenerated all nineteen artifacts straight into the
 #       working tree under test. A genuine drift was therefore
 #       reportable exactly ONCE: the same run that reported it had
 #       already rewritten the file back to canonical, `git status
@@ -719,7 +769,7 @@ $rel $(cksum <"$idem_scratch/$rel")"
 $rel MISSING"
   fi
 done
-assert_eq "$snap_before" "$snap_after" "all sixteen generated targets/ artifacts must be byte-identical across two consecutive build.sh runs (idempotence)"
+assert_eq "$snap_before" "$snap_after" "all nineteen generated targets/ artifacts must be byte-identical across two consecutive build.sh runs (idempotence)"
 
 drift_scratch=$(make_full_scratch)
 cleanup_dirs="$cleanup_dirs $drift_scratch"
@@ -869,7 +919,7 @@ chmod +x "$dmi_scratch/scripts/build.sh"
 # shellcheck disable=SC2016 # same reasoning as the strip above: a
 # literal needle for grep -F, never an expression to expand here.
 dmi_remaining_calls=$(grep -c -F 'check_no_claude_only_syntax "$(cat ' "$dmi_scratch/scripts/build.sh" || true)
-assert_eq "12" "$dmi_remaining_calls" "fixture sanity: stripping the six Codex-skill and Cursor-command call sites must leave exactly twelve check_no_claude_only_syntax call sites (AGENTS.md, the .mdc, the nine Cursor Agent Skills, and Cursor hooks.json)"
+assert_eq "13" "$dmi_remaining_calls" "fixture sanity: stripping the six Codex-skill and Cursor-command call sites must leave exactly thirteen check_no_claude_only_syntax call sites (AGENTS.md, the .mdc, the ten Cursor Agent Skills, and Cursor hooks.json)"
 
 printf '\nA sentence mentioning disable-model-invocation in ordinary prose.\n' >>"$dmi_scratch/skills/digest/SKILL.md"
 if dmi_out=$("$dmi_scratch/scripts/build.sh" 2>&1); then
@@ -1079,6 +1129,7 @@ for pair in $cursor_installed_skill_pairs; do
   fi
   assert_eq "identical" "$installed_matches" "the installed \$HOME/.cursor/skills/$folder/SKILL.md must be byte-identical to the generated artifact it came from"
 done
+assert_file_absent "$home10c/.cursor/skills/squirrel-rules/SKILL.md" "cursor install must not copy squirrel-rules until Task 8 (cursor_installed_skill_pairs stays digest/plan)"
 
 HOME="$home10c" "$cursor_install" --uninstall --yes >/dev/null 2>&1
 for pair in $cursor_installed_skill_pairs; do

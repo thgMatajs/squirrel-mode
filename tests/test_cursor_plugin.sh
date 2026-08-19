@@ -144,7 +144,7 @@ done
 
 # ==========================================================================
 # 3. Cursor skills dir ships digest, plan, init, tune, pickup, stash, dig,
-#    off, on.
+#    off, on, rules.
 # ==========================================================================
 cursor_skills_dir="$repo_root/targets/cursor/skills"
 cursor_skill_count=0
@@ -154,7 +154,7 @@ for d in "$cursor_skills_dir"/*; do
   cursor_skill_count=$((cursor_skill_count + 1))
   cursor_skill_names="$cursor_skill_names $(basename "$d")"
 done
-assert_eq "9" "$cursor_skill_count" "targets/cursor/skills/ must contain exactly 9 skills (squirrel-digest, squirrel-plan, squirrel-init, squirrel-tune, squirrel-pickup, squirrel-stash, squirrel-dig, squirrel-off, squirrel-on)"
+assert_eq "10" "$cursor_skill_count" "targets/cursor/skills/ must contain exactly 10 skills (squirrel-digest, squirrel-plan, squirrel-init, squirrel-tune, squirrel-pickup, squirrel-stash, squirrel-dig, squirrel-off, squirrel-on, squirrel-rules)"
 # Trailing space on the haystack so "squirrel-dig" cannot match as a
 # prefix of "squirrel-digest", and "squirrel-on" cannot match inside
 # "squirrel-tune" or similar.
@@ -167,5 +167,6 @@ assert_contains "$cursor_skill_names " " squirrel-stash " "targets/cursor/skills
 assert_contains "$cursor_skill_names " " squirrel-dig " "targets/cursor/skills/ must include squirrel-dig"
 assert_contains "$cursor_skill_names " " squirrel-off " "targets/cursor/skills/ must include squirrel-off"
 assert_contains "$cursor_skill_names " " squirrel-on " "targets/cursor/skills/ must include squirrel-on"
+assert_contains "$cursor_skill_names " " squirrel-rules " "targets/cursor/skills/ must include squirrel-rules"
 
 assert_report
