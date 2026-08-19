@@ -636,25 +636,26 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no | no |
+| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read | `stash` + `dig` |
 
-**Which commands port, and why the other six cannot.**
+**Which commands port, and why Codex still lacks six.**
 
 | Command | Claude Code | Codex | Cursor | Reason |
 | :-- | :-- | :-- | :-- | :-- |
 | `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the host. |
 | `plan` | ✅ | ✅ | ✅ | Same. |
-| `init` | ✅ | ✅ | ❌ | Writes `~/.squirrel/profile.md`. Codex can run shell commands; Cursor's commands are project-scoped, so a user-level install has nowhere to live. |
-| `tune` | ✅ | ✅ | ❌ | Same as `init`. |
-| `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
-| `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
-| `stash` | ✅ | ❌ | ❌ | Not built for either target in phase 1 of the hoard, and porting it is a rewrite rather than a copy. It writes a memory with Claude Code's `Write` tool, named explicitly because that is what the `PreToolUse` hook auto-approves. Neither other target has that tool name or that auto-approval, so every sentence resting on the mechanism has to be rewritten. The files themselves are plain markdown under `~/.squirrel/hoard/`, readable from anywhere. |
-| `dig` | ✅ | ❌ | ❌ | Same, plus one more reason: its rules for telling squirrel-mode's own injected lines from a profile that copies them are about lines a `SessionStart` hook puts in context, and neither other target has a lifecycle hook to put them there. It also names the `Read` tool for the same auto-approval reason `stash` names `Write`. |
-| `rules` | ✅ | ❌ | ❌ | Pulls the base rules back into one conversation after the forced output style has been turned off. Neither other target has an output style to turn off, so there is nothing to recover from: the rules are a block in `AGENTS.md` or a `.mdc` file, restored by editing the file, not by a command. |
+| `init` | ✅ | ✅ | ✅ | Writes `~/.squirrel/profile.md`. Codex can run shell commands; Cursor writes it through `/squirrel-init`, then a new chat. |
+| `tune` | ✅ | ✅ | ✅ | Same as `init`. |
+| `pickup` | ✅ | ❌ | ✅ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. Cursor `sessionStart` injects that path; Codex has no hook. |
+| `off` / `on` | ✅ | ❌ | ✅ | The sentinel is claimed by a `UserPromptSubmit` / `beforeSubmitPrompt` hook. Codex has neither. Cursor `/squirrel-off` / `/squirrel-on` take effect this turn and write sentinels. |
+| `stash` | ✅ | ❌ | ✅ | Built for Cursor as `/squirrel-stash`; Codex still has no port in phase 1, and porting it is a rewrite rather than a copy. It writes a memory with Claude Code's `Write` tool, named explicitly because that is what the `PreToolUse` hook auto-approves. Cursor auto-allow is `Write`/`Read`, not `StrReplace`. Codex has neither that tool name nor that auto-approval, so every sentence resting on the mechanism has to be rewritten. The files themselves are plain markdown under `~/.squirrel/hoard/`, readable from anywhere. |
+| `dig` | ✅ | ❌ | ✅ | Same, plus one more reason: its rules for telling squirrel-mode's own injected lines from a profile that copies them are about lines a `SessionStart` / `sessionStart` hook puts in context, and Codex has no lifecycle hook to put them there. It also names the `Read` tool for the same auto-approval reason `stash` names `Write`. |
+| `rules` | ✅ | ❌ | ✅ | Pulls the base rules back into one conversation. Cursor `/squirrel-rules` loads the 15 always-on rules this turn. Codex has no output style to recover from: the rules are a block in `AGENTS.md`, restored by editing the file, not by a command. |
 
 One consequence worth stating plainly in `docs/OTHER-TOOLS.md`: because all three targets read the
-**same** `~/.squirrel/profile.md`, running `/squirrel:init` once in Claude Code or Codex
-calibrates every target on that machine — including Cursor, which cannot run the interview itself.
+**same** `~/.squirrel/profile.md`, running `/squirrel:init` once in Claude Code, Codex, or Cursor
+calibrates every target on that machine — including Cursor, which then needs a new chat for the
+profile to apply.
 
 Facts the older draft got wrong: Codex skills live in **`~/.agents/skills/`**, not `~/.codex/skills/`,
 and Codex **custom prompts are deprecated** in favour of skills. Codex loads `AGENTS.md` in layers

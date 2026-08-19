@@ -11,21 +11,21 @@ feature set; this page states the practical consequences plainly, with no hedgin
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
-| Cursor | `~/.cursor/rules/*.mdc`, `alwaysApply: true` | **2** in `~/.cursor/skills/squirrel-<name>/SKILL.md`, machine-wide, explicit invocation only | no | no | no |
+| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read | `stash` + `dig` |
 
-## Which commands port, and why the other six cannot
+## Which commands port, and why Codex still lacks six
 
 | Command | Claude Code | Codex | Cursor | Reason |
 | :-- | :-- | :-- | :-- | :-- |
 | `digest` | ✅ | ✅ | ✅ | Pure prose transformation. Needs nothing from the target. |
 | `plan` | ✅ | ✅ | ✅ | Same. |
-| `init` | ✅ | ✅ | ❌ | Writes `~/.squirrel/profile.md`. Codex can run shell commands. No Cursor artifact is built for this one: the reason recorded when the port set was settled — Cursor had no user-level place to install a command — stopped being true when Agent Skills landed, since `~/.cursor/skills/` is exactly that. What has *not* been established is whether a Cursor Agent Skill can write that file at all, so it stays unported rather than shipped on an assumption. |
-| `tune` | ✅ | ✅ | ❌ | Same as `init`. |
-| `pickup` | ✅ | ❌ | ❌ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. |
-| `off` / `on` | ✅ | ❌ | ❌ | The sentinel is claimed by a `UserPromptSubmit` hook. No hook, no claim, and nothing to turn off anyway: Codex users edit `AGENTS.md`, Cursor users flip `alwaysApply` or delete the `.mdc`. |
-| `stash` | ✅ | ❌ | ❌ | Not built for either target in phase 1 of the hoard, and porting it is a rewrite rather than a copy. It writes a memory with Claude Code's `Write` tool, which it names explicitly because that is what the `PreToolUse` hook auto-approves — the memory *write* therefore costs no permission prompt there, though the command still costs one for the `date` stamp it builds, which is a `Bash` call: squirrel-mode registers its `PreToolUse` hook for `Write|Edit|Read` only, so none of its hooks runs on that call — a choice of this plugin's configuration, not a limit of Claude Code, as README.md sets out. Neither other target has that tool name or that auto-approval, so every sentence resting on the mechanism has to be rewritten for what the target actually does. The files themselves are plain markdown under `~/.squirrel/hoard/`, so a memory written on Claude Code is readable from anywhere. |
-| `dig` | ✅ | ❌ | ❌ | Same, plus one more reason: its rules for telling squirrel-mode's own injected lines from a profile that copies them are about lines a Claude Code `SessionStart` hook puts in context, and neither other target has a lifecycle hook to put them there. It also names the `Read` tool for the same auto-approval reason `stash` names `Write`. |
-| `rules` | ✅ | ❌ | ❌ | Pulls the base rules back into one conversation after Claude Code's forced output style has been turned off. Neither other target has an output style to turn off, so there is nothing for this to recover from: on Codex the rules are a block in `AGENTS.md`, on Cursor a `.mdc` rules file, and both are re-applied by restoring the file rather than by a command. |
+| `init` | ✅ | ✅ | ✅ | Writes `~/.squirrel/profile.md`. Codex can run shell commands. Cursor writes the same file through `/squirrel-init`, then a **new chat** for the profile to apply. |
+| `tune` | ✅ | ✅ | ✅ | Same as `init`. |
+| `pickup` | ✅ | ❌ | ✅ | Needs the checkpoint path injected by a hook. Recomputing the slug is forbidden — that is the drift failure ADR-0003 and the S5 review both hit. Cursor `sessionStart` injects that path; Codex has no hook to. |
+| `off` / `on` | ✅ | ❌ | ✅ | The sentinel is claimed by a `UserPromptSubmit` / `beforeSubmitPrompt` hook. Codex has neither, so Codex users edit `AGENTS.md`. Cursor `/squirrel-off` and `/squirrel-on` take effect this turn and write PENDING/CLEAR sentinels for the next prompt's off check, if it runs. |
+| `stash` | ✅ | ❌ | ✅ | Built for Cursor as `/squirrel-stash`; Codex still has no port in phase 1, and porting it is a rewrite rather than a copy. It writes a memory with Claude Code's `Write` tool, which it names explicitly because that is what the `PreToolUse` hook auto-approves — the memory *write* therefore costs no permission prompt there, though the command still costs one for the `date` stamp it builds, which is a `Bash` call: squirrel-mode registers its `PreToolUse` hook for `Write|Edit|Read` only, so none of its hooks runs on that call — a choice of this plugin's configuration, not a limit of Claude Code, as README.md sets out. Cursor auto-allow is `Write`/`Read`, not `StrReplace`. Codex has neither that tool name nor that auto-approval, so every sentence resting on the mechanism has to be rewritten for what Codex actually does. The files themselves are plain markdown under `~/.squirrel/hoard/`, so a memory written on Claude Code or Cursor is readable from anywhere. |
+| `dig` | ✅ | ❌ | ✅ | Same, plus one more reason: its rules for telling squirrel-mode's own injected lines from a profile that copies them are about lines a Claude Code `SessionStart` / Cursor `sessionStart` hook puts in context, and Codex has no lifecycle hook to put them there. It also names the `Read` tool for the same auto-approval reason `stash` names `Write`. |
+| `rules` | ✅ | ❌ | ✅ | Pulls the base rules back into one conversation. Cursor `/squirrel-rules` loads the 15 always-on rules this turn from the plugin `.mdc`. Codex has no output style to recover from: the rules are a block in `AGENTS.md`, restored by editing the file, not by a command. |
 
 ## What each target loses, explicitly
 
@@ -43,11 +43,11 @@ feature set; this page states the practical consequences plainly, with no hedgin
 - **The calibration interview's automatic follow-through.** `init` and `tune` both run as skills, but
   nothing on Codex reminds you they exist the way Claude Code's `SessionStart` hook does when no
   profile is found yet.
-- **The hoard commands.** No `stash`, no `dig`. Phase 1 of the hoard builds them for Claude Code
-  only. What is *not* lost is the data: memories are plain markdown files under
-  `~/.squirrel/hoard/`, so anything recorded from Claude Code can be read on Codex by asking it to
-  read the file. The port table above says why copying the two skills across would not work as
-  written.
+- **The hoard commands.** No `stash`, no `dig`. Cursor ships both as Agent Skills; Codex still
+  does not. What is *not* lost is the data: memories are plain markdown files under
+  `~/.squirrel/hoard/`, so anything recorded from Claude Code or Cursor can be read on Codex by
+  asking it to read the file. The port table above says why copying the two skills across would not
+  work as written.
 - **A hard block against starting calibration unprompted.** Claude Code's `disable-model-invocation:
   true` is a harness-level guarantee: the model cannot invoke `init` or `tune` on its own, full stop.
   Codex has no equivalent field. Each skill's description says, in prose, never to run unprompted —
@@ -55,44 +55,30 @@ feature set; this page states the practical consequences plainly, with no hedgin
   unprompted the way Claude Code's harness does. It is instruction only, not enforcement, and that is
   a smaller guarantee than Claude Code's, worth knowing plainly rather than discovering by surprise.
 
-**Cursor loses everything Codex loses, plus:**
+**Cursor still loses these remaining gaps** (it does **not** lose init/tune, pickup, stash/dig, off/on, or rules — those ship as Agent Skills from `~/.cursor/plugins/local/squirrel-mode`):
 
-- **No calibration interview at all.** Cursor gets no `init` and no `tune`. You cannot run the
-  seven-question interview from inside Cursor, and you cannot hand-tune a single field from inside
-  Cursor either — both would need to write `~/.squirrel/profile.md`, and squirrel-mode builds no
-  Cursor artifact that does. The port table above states what is and is not known about why.
-- **No personalization, period, on Cursor alone.** The `.mdc` rules file applies the same fixed
-  defaults to everyone. It cannot read the profile, because Cursor rules cannot execute anything —
-  they are static text injected into context, not a skill that can open a file.
-- **`digest` and `plan` never fire on their own.** They install once, machine-wide, as Cursor
-  **Agent Skills** at `~/.cursor/skills/squirrel-digest/` and `~/.cursor/skills/squirrel-plan/`,
-  invoked explicitly as `/squirrel-digest` and `/squirrel-plan`. Both carry
-  `disable-model-invocation: true`, so Cursor never applies them on its own the way Claude Code's
-  model-invocable `digest` still can — where "still can" is itself narrow, and worth stating as it
-  ships: there, an ordinary-language "what should I do with this?" fires `digest` unprompted **only**
-  when what was pasted alongside is recognisably a ticket, an email, or a written note, and never
-  when it is code, a stack trace, a log, a diff, a config, or command output. Narrow or not, that is
-  a mode Cursor does not have at all: Cursor Agent Skills have no `alwaysApply` equivalent, so
-  explicit invocation is the only mode available; each one's "Trigger on…" description therefore
-  describes when *you* should reach for the command, not something Cursor will act on by itself. The
-  project-scoped `.cursor/commands/*.md` copies still exist for anyone who also wants `/digest` and
-  `/plan` inside one specific repository.
+- **Cloud Agent.** The local plugin copy is for the Cursor app on this machine. A Cloud Agent does not load `~/.cursor/plugins/local/squirrel-mode`.
+- **beforeSubmitPrompt does not inject.** The adapter may print a profile reinjection on stdout; Cursor does not apply that as injected context the way Claude Code's `UserPromptSubmit` does. After `/squirrel-tune` or `/squirrel-init`, start a **new chat**. The `squirrel-profile.mdc` projection is what carries field overrides into later chats.
+- **Auto-allow is `Write`/`Read`, not `StrReplace`.** Cursor's `preToolUse` matcher is `Write|Read`. A `StrReplace` on a checkpoint or hoard path still goes through the normal permission prompt.
+- **`sessionStart` injection is best-effort.** Stdout context can fail to land; the projection `.mdc` (`~/.cursor/rules/squirrel-profile.mdc`, `alwaysApply: true`) mitigates that for the profile. Pickup still needs the injected checkpoint path when `sessionStart` does land.
+- **`digest` and `plan` never fire on their own.** They ship as Cursor Agent Skills, invoked explicitly as `/squirrel-digest` and `/squirrel-plan` (and the other eight as `/squirrel-<name>`). Cursor Agent Skills have no `alwaysApply` equivalent, so explicit invocation is the only mode available. Claude Code's model-invocable `digest` still can fire unprompted, and where "still can" is itself narrow, and worth stating as it ships: there, an ordinary-language "what should I do with this?" fires `digest` unprompted **only** when what was pasted alongside is recognisably a ticket, an email, or a written note, and never when it is code, a stack trace, a log, a diff, a config, or command output. Each Cursor skill's "Trigger on…" description therefore describes when *you* should reach for the command, not something Cursor will act on by itself. The project-scoped `.cursor/commands/*.md` copies still exist for anyone who also wants `/digest` and `/plan` inside one specific repository.
 
 ## The one consequence worth knowing before you install anything
 
 All three targets read the **same** file: `~/.squirrel/profile.md`. Nothing about the path
-changes per target. This means **one** calibration run — `/squirrel:init` in Claude Code, or asking
-Codex in plain language to run squirrel init (Codex's skills are flat-named and invoked that way,
-not as `/squirrel:`-namespaced commands) — calibrates every target installed on that machine —
-Cursor included, even though Cursor cannot run the interview itself and has no way to read the file
-automatically. If you want Cursor's fixed defaults to reflect your own calibration, calibrate in
-Claude Code or Codex first, then open `~/.squirrel/profile.md` and use its values to hand-edit
-`~/.cursor/rules/squirrel-mode.mdc` yourself — Cursor will never do this for you.
+changes per target. This means **one** calibration run — `/squirrel:init` in Claude Code,
+`/squirrel-init` in Cursor (then a new chat), or asking Codex in plain language to run squirrel
+init (Codex's skills are flat-named and invoked that way, not as `/squirrel:`-namespaced
+commands) — calibrates every target installed on that machine. Cursor `sessionStart` projects
+that file to `~/.cursor/rules/squirrel-profile.mdc` with `alwaysApply: true` so field values
+override the plugin defaults; that projection is best-effort, which is why a new chat after
+init/tune is the reliable follow-through.
 
 Claude Code reinjects an updated `profile.md` into already-open sessions on the next prompt
-(`UserPromptSubmit` mtime check). Cursor and Codex do not get that reinjection: a tune (or hand
-edit) elsewhere can leave their view stale until their own cadence re-reads the file or the user
-restarts — there is no cross-tool hook to engineer.
+(`UserPromptSubmit` mtime check). Cursor `beforeSubmitPrompt` does not inject that reinjection,
+and Codex has no hook: a tune (or hand edit) elsewhere can leave their view stale until a new
+chat, their own cadence re-reads the file, or the projection is rewritten — there is no
+cross-tool hook to engineer.
 
 ## Install
 
@@ -195,23 +181,25 @@ Repeat that copy for every project where you want the project-scoped `/digest` a
 
 ### One honest caveat about `~/.cursor/rules/`
 
+Always-on rules come from the **plugin** `.mdc` inside
+`~/.cursor/plugins/local/squirrel-mode/` (loaded after Reload Window), not from installing
+`squirrel-mode.mdc` into `~/.cursor/rules/`. What squirrel-mode does write under `~/.cursor/rules/`
+is the **projection**: `squirrel-profile.mdc`, with `alwaysApply: true`, so calibrated field values
+override the plugin defaults. Hooks write that file; the installer does not.
+
 Cursor's own documentation describes `.mdc` rule files at **project** level only — project rules live
 in `.cursor/rules` as `.mdc` files — and describes user-level rules only as global preferences set in
 Customize → Rules, a screen with no documented filesystem path. The **user-level** directory
-`~/.cursor/rules/`, where squirrel-mode installs `squirrel-mode.mdc`, appears nowhere in those docs.
+`~/.cursor/rules/` appears nowhere in those docs. Absence from the documentation is not a documented
+denial. The projection works today. If a future Cursor release stops reading `~/.cursor/rules/`,
+the symptom is that field overrides quietly stop applying while the plugin `.mdc` and
+`/squirrel-<name>` skills keep working. The fallback is to paste the projection body into Cursor's
+Customize → Rules screen by hand, or to rely on `/squirrel-rules` for the 15 rules this turn.
 
-That is absence from the documentation, not a documented denial. It works today, and it is the only
-mechanism on Cursor that applies squirrel-mode's base rules to every turn without being asked.
-Cursor's documented user-level file mechanism is Agent Skills (`~/.cursor/skills/`), which
-squirrel-mode also installs — but Agent Skills are never always-on: they are applied when the agent
-judges them relevant, or, with `disable-model-invocation: true`, only when you type their slash
-command. There is no `alwaysApply` for an Agent Skill, so Agent Skills cannot carry the base rules.
-
-squirrel-mode therefore ships both: the documented mechanism for the two commands, and the
-undocumented-but-working one for the always-on rules. If a future Cursor release stops reading
-`~/.cursor/rules/`, the symptom is that the base rules quietly stop applying while `/squirrel-digest`
-and `/squirrel-plan` keep working. The fallback is to paste the contents of
-`~/.cursor/rules/squirrel-mode.mdc` into Cursor's Customize → Rules screen by hand.
+Cursor Agent Skills are never always-on: they are applied when the agent judges them relevant, or,
+with `disable-model-invocation: true`, only when you type their slash command. There is no
+`alwaysApply` for an Agent Skill, so Agent Skills cannot carry the base rules; that stays the
+plugin `.mdc`'s job.
 
 ## Concurrency
 
@@ -273,14 +261,26 @@ creates it, and this installer refuses to run at all when it is missing.
 
 ### Ownership, and the symlink refusal
 
-Ownership of an existing file at the exact path either installer manages is decided by an **exact,
-full-line match** against that specific artifact's own `GENERATED FILE` banner line — read fresh from
-the bundled source next to each installer, never a fixed literal, so a change to `scripts/build.sh`'s
-banner format cannot desynchronise the installers from what they compare against. A file that merely
-*contains* the substring `<!-- GENERATED FILE. Source:` somewhere — for example, a file of your own
-that quotes squirrel-mode's own docs — does **not** count as a match: it is foreign, not squirrel-mode's,
-and neither installer ever touches a file at that path that does not carry that exact banner line. If
-something else already occupies that exact path, the installer reports it and leaves it alone.
+Ownership of an existing file at the exact path either installer manages is decided differently
+for Codex than for Cursor `--yes`.
+
+**Codex** (and Cursor **uninstall**): an **exact, full-line match** against that specific artifact's
+own `GENERATED FILE` banner line — read fresh from the bundled source next to each installer, never
+a fixed literal, so a change to `scripts/build.sh`'s banner format cannot desynchronise the
+installers from what they compare against. Files with no banner (`plugin.json`, the four scripts,
+`install.sh`, `hooks.json`) count as ours on uninstall iff they are byte-identical to the current
+bundle. A file that merely *contains* the substring `<!-- GENERATED FILE. Source:` somewhere — for
+example, a file of your own that quotes squirrel-mode's own docs — does **not** count as a match: it
+is foreign, not squirrel-mode's. Uninstall still deletes only ours (banner or byte-identical). If
+something else already occupies that exact path and does not classify as ours, uninstall reports it
+and leaves it alone.
+
+**Cursor `--yes`:** overwrites allowlisted regular files in the plugin tree. Absent creates; an
+existing regular file at an allowlisted dest is updated to the bundled bytes even when it would
+classify as foreign (a newer bundle will not match an older dest). Extra files that are not on the
+allowlist are not touched. A symlink or non-regular file at a managed dest is still refused. Codex
+`--yes` is unchanged: it still will not overwrite a file that does not carry that exact banner
+line.
 
 If the exact managed path (`~/.codex/AGENTS.md`, an `~/.agents/skills/<name>/SKILL.md`, or a file
 under `~/.cursor/plugins/local/squirrel-mode/` such as `.cursor-plugin/plugin.json`) is itself a
@@ -310,9 +310,10 @@ Claude Code's concern (ADR-0003) and survive independently of any target's insta
 ## Turning the rules off
 
 Claude Code has `/squirrel:off` and `/squirrel:on` — a per-session flag, described in
-[ADR-0005](./adr/0005-session-flag-off-switch.md). Neither exists on Codex or Cursor, because both
-depend on a `UserPromptSubmit` hook that only Claude Code has. There is nothing to turn off
-automatically there — turn it off by removing or disabling the thing that is actually applying it:
+[ADR-0005](./adr/0005-session-flag-off-switch.md). Codex has no off switch: there is no
+`UserPromptSubmit` hook to claim a sentinel. Cursor has `/squirrel-off` and `/squirrel-on` (this
+turn, plus PENDING/CLEAR sentinels). Codex users turn the rules off by removing or disabling the
+block that is actually applying them:
 
 - **Codex:** run `targets/codex/install.sh --uninstall --yes` to remove the block from `AGENTS.md`
   entirely, or open `~/.codex/AGENTS.md` yourself and delete these two lines *and* everything between
@@ -328,13 +329,12 @@ automatically there — turn it off by removing or disabling the thing that is a
   between them: a marker pair left sitting around content squirrel-mode did not write is exactly what
   the installer refuses to touch afterwards. Either way takes effect the next time Codex reads
   `AGENTS.md` (its next session).
-- **Cursor:** open `~/.cursor/rules/squirrel-mode.mdc` and change `alwaysApply: true` to
-  `alwaysApply: false` in the frontmatter (Cursor stops applying it automatically, but you can still
-  invoke it manually), or delete the file entirely (`targets/cursor/install.sh --uninstall --yes`), or
-  turn it off from Cursor's own Rules settings UI if your version exposes one. Any of the three takes
-  effect immediately for new context Cursor builds. The two Agent Skills are unaffected by any of
-  this — they only ever run when you type `/squirrel-digest` or `/squirrel-plan`, so there is nothing
-  to turn off there; delete their folders, or run the uninstall, if you want them gone.
+- **Cursor:** type `/squirrel-off` to suppress the base rules from this turn in this chat (and
+  `/squirrel-on` to restore them). That is the session off switch. For a hard off, run
+  `targets/cursor/install.sh --uninstall --yes`, or disable the local plugin in Cursor. The
+  projection at `~/.cursor/rules/squirrel-profile.mdc` uses `alwaysApply: true`; deleting that file,
+  or changing `alwaysApply` to `false` in its frontmatter, stops field overrides without removing
+  the plugin `.mdc`. Agent Skills only run when you type `/squirrel-<name>`.
 
 ## Privacy
 

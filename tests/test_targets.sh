@@ -1338,9 +1338,30 @@ assert_file_absent "$home11/.cursor" "cursor install.sh --uninstall must not cre
 # ==========================================================================
 assert_file_exists "$other_tools_doc" "docs/OTHER-TOOLS.md must exist"
 other_tools_content=$(read_file "$other_tools_doc")
-assert_contains "$other_tools_content" "No calibration interview" "docs/OTHER-TOOLS.md must state plainly that Cursor gets no calibration interview"
-assert_contains "$other_tools_content" "Automatic checkpoints" "docs/OTHER-TOOLS.md must state plainly that Codex/Cursor get no automatic checkpoints"
-assert_contains "$other_tools_content" "off switch" "docs/OTHER-TOOLS.md must mention the lack of a session off-switch on the other targets"
+readme_content_12=$(read_file "$readme_doc")
+adr4_doc="$repo_root/docs/adr/0004-tiered-parity-across-targets.md"
+adr4_content=$(read_file "$adr4_doc")
+# Cursor now ships init/tune. The remaining honest Cursor gaps replace
+# the retired "No calibration interview" needle: a deleted sentence with
+# no replacement would leave this scenario green on a lying doc.
+assert_contains "$other_tools_content" "Cloud Agent" "docs/OTHER-TOOLS.md must state a remaining Cursor gap: Cloud Agent does not get the local plugin copy"
+assert_contains "$other_tools_content" "beforeSubmitPrompt does not inject" "docs/OTHER-TOOLS.md must state that Cursor beforeSubmitPrompt does not inject"
+assert_contains "$other_tools_content" "StrReplace" "docs/OTHER-TOOLS.md must state that Cursor auto-allow is Write/Read, not StrReplace"
+assert_not_contains "$other_tools_content" "No calibration interview" "docs/OTHER-TOOLS.md must not still claim Cursor gets no calibration interview"
+assert_not_contains "$other_tools_content" "Cursor gets no \`init\`" "docs/OTHER-TOOLS.md must not still claim Cursor has no init"
+assert_not_contains "$readme_content_12" "\`digest\` and \`plan\` only" "README.md must not still claim Cursor gets digest and plan only"
+# shellcheck disable=SC2088 # double-quoted deliberately: literal markdown
+# path as written in README.md, never a path this shell expands.
+assert_not_contains "$readme_content_12" "~/.cursor/skills/squirrel-digest" "README.md must not still describe installing into ~/.cursor/skills/"
+assert_contains "$readme_content_12" "plugins/local/squirrel-mode" "README.md Cursor install must name the plugin copy at ~/.cursor/plugins/local/squirrel-mode"
+assert_contains "$readme_content_12" "Reload Window" "README.md Cursor install must say Reload Window"
+assert_contains "$adr4_content" "Amendment (cursor native plugin)" "ADR-0004 must carry an Amendment (cursor native plugin)"
+assert_not_contains "$adr4_content" "Agent Skills in \`~/.cursor/skills/\`" "ADR-0004's Cursor row must not still say Agent Skills live only under ~/.cursor/skills/"
+assert_contains "$other_tools_content" "overwrites allowlisted regular files" "docs/OTHER-TOOLS.md must say Cursor --yes overwrites allowlisted regular files in the plugin tree (T8 dest-doc residue)"
+assert_contains "$other_tools_content" "squirrel-profile.mdc" "docs/OTHER-TOOLS.md must name squirrel-profile.mdc as the projection, not as a second copy of the always-on rules"
+assert_not_contains "$other_tools_content" "where squirrel-mode installs \`squirrel-mode.mdc\`" "docs/OTHER-TOOLS.md must not still describe installing squirrel-mode.mdc into ~/.cursor/rules/"
+assert_contains "$other_tools_content" "Automatic checkpoints" "docs/OTHER-TOOLS.md must state plainly that Codex gets no automatic checkpoints"
+assert_contains "$other_tools_content" "off switch" "docs/OTHER-TOOLS.md must mention the lack of a session off-switch on Codex"
 assert_contains "$other_tools_content" "## Turning the rules off" "docs/OTHER-TOOLS.md must have a section on turning the rules off"
 assert_contains "$other_tools_content" "AGENTS.md" "docs/OTHER-TOOLS.md's turn-off section must mention editing AGENTS.md for Codex"
 assert_contains "$other_tools_content" "alwaysApply" "docs/OTHER-TOOLS.md's turn-off section must mention Cursor's alwaysApply flag"
@@ -2475,6 +2496,22 @@ assert_eq "5" "$other_tools_parity_line_count" "parsing docs/OTHER-TOOLS.md's pa
 assert_eq "$other_tools_parity_table" "$readme_parity_table" "README.md's parity table must match docs/OTHER-TOOLS.md's parity table exactly, line for line"
 assert_eq "$other_tools_parity_table" "$plan_parity_table" "PLAN.md Section 3's parity table must match docs/OTHER-TOOLS.md's parity table exactly, line for line (the third copy of the same table)"
 
+# shellcheck disable=SC2016 # single-quoted deliberately: markdown table
+# cells, backticks included, never command substitution.
+expected_claude_parity_row='| Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |'
+# shellcheck disable=SC2016 # same: literal table row, backticks included.
+expected_codex_parity_row='| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |'
+# shellcheck disable=SC2016 # same: the Cursor row scenario 33 pins verbatim.
+expected_cursor_parity_row='| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read | `stash` + `dig` |'
+assert_contains "$other_tools_parity_table" "$expected_claude_parity_row" "Claude Code parity row must stay byte-identical to today's pinned line"
+assert_contains "$other_tools_parity_table" "$expected_codex_parity_row" "Codex parity row must stay byte-identical to today's pinned line"
+assert_contains "$other_tools_parity_table" "$expected_cursor_parity_row" "Cursor parity row must be the exact line scenario 33 pins (plugin .mdc, 10 Agent Skills, sessionStart, preToolUse Write/Read, stash+dig)"
+assert_not_contains "$other_tools_parity_table" "**2**" "Cursor parity row must not still claim **2** commands"
+assert_not_contains "$other_tools_parity_table" "no hooks" "parity table must not still say no hooks"
+# shellcheck disable=SC2088 # double-quoted deliberately: literal table
+# cell text, never a path this shell expands.
+assert_not_contains "$other_tools_parity_table" "~/.cursor/skills/squirrel-<name>" "Cursor parity row must not still name ~/.cursor/skills/squirrel-<name>"
+
 # --- Failure proof: a scratch copy of README.md with one cell of its ---
 #     parity table edited must no longer match docs/OTHER-TOOLS.md's.
 parity_mutant_dir=$(mktemp -d "${TMPDIR:-/tmp}/squirrel-readme-parity-mutant.XXXXXX")
@@ -2557,16 +2594,21 @@ assert_eq "0" "$plan_mutant_line_count" "FAILURE PROOF (scenario 33, PLAN.md): r
 #
 #      THE HEADING'S NUMBER IS PINNED TWICE, on purpose. Once across the
 #      two files (they must agree), and once against the table itself
-#      (the word must be the number of COMMANDS marked ❌ for both Codex
-#      and Cursor). Cross-file equality alone would pass if both copies
-#      went stale together, which is the more likely next failure now
-#      that one of them is being kept in step by hand. Deriving it from
-#      the table is what makes the heading a claim about the rows rather
-#      than a sentence nobody re-counts.
+#      (the word must be the number of COMMANDS marked ❌ on Codex).
+#      Cursor is ✅ on every command row after native plugin parity, so
+#      counting ❌ for both Codex and Cursor would derive zero while the
+#      heading still says six. Cross-file equality alone would pass if
+#      both copies went stale together, which is the more likely next
+#      failure now that one of them is being kept in step by hand.
+#      Deriving it from the table is what makes the heading a claim
+#      about the rows rather than a sentence nobody re-counts.
 #
 #      COMMANDS, NOT ROWS: `off` / `on` is one row naming two commands,
-#      which is why nine rows and six unported commands are both correct
-#      at once. The first cell is split on " / " and each name counted.
+#      which is why nine rows and six Codex-unported commands are both
+#      correct at once (pickup, off, on, stash, dig, rules). The first
+#      cell is split on " / " and each name counted. The heading text
+#      grep-able in both files is "Which commands port, and why Codex
+#      still lacks six".
 # ==========================================================================
 extract_port_table() {
   # extract_port_table <file> - prints the "| Command | Claude Code |
@@ -2586,26 +2628,28 @@ extract_port_table() {
 
 port_heading_word() {
   # port_heading_word <file> - the number word in that file's "Which
-  # commands port, and why the other <word> cannot" heading. Matched
+  # commands port, and why Codex still lacks <word>" heading. Matched
   # without anchoring to the surrounding markup, because the two files
   # render the same sentence differently on purpose: a `##` heading in
   # docs/OTHER-TOOLS.md, a bolded line ending in a full stop in PLAN.md.
-  grep -o 'Which commands port, and why the other [a-z][a-z]* cannot' "$1" 2>/dev/null \
-    | sed 's/^.*why the other //; s/ cannot$//' | head -n 1
+  grep -o 'Which commands port, and why Codex still lacks [a-z][a-z]*' "$1" 2>/dev/null \
+    | sed 's/^.*lacks //' | head -n 1
 }
 
 port_unported_command_count() {
   # port_unported_command_count <file> - how many COMMANDS the table
-  # marks ❌ for both Codex and Cursor. `index()` against the literal
-  # character, not a regex and not a \x escape: the first keeps any awk's
-  # regex engine from having an opinion about a multi-byte character
-  # under any locale, and the second is a non-POSIX awk extension this
-  # file has no reason to depend on when the character itself is already
-  # written literally in the sed patterns below.
+  # marks ❌ on Codex. Cursor is ✅ on every row; the heading's "six"
+  # is Codex-only (pickup, off, on, stash, dig, rules). `index()`
+  # against the literal character, not a regex and not a \x escape: the
+  # first keeps any awk's regex engine from having an opinion about a
+  # multi-byte character under any locale, and the second is a
+  # non-POSIX awk extension this file has no reason to depend on when
+  # the character itself is already written literally in the sed
+  # patterns below.
   # Fields: $1 is empty (before the leading `|`), $2 Command, $3 Claude
   # Code, $4 Codex, $5 Cursor.
   extract_port_table "$1" | awk -F'|' '
-    NF >= 5 && index($4, "❌") > 0 && index($5, "❌") > 0 {
+    NF >= 5 && index($4, "❌") > 0 {
       total += split($2, port_cmds, " / ")
     }
     END { print total + 0 }
@@ -2640,13 +2684,17 @@ assert_eq "11" "$other_tools_port_line_count" "parsing docs/OTHER-TOOLS.md's por
 
 assert_eq "$other_tools_port_table" "$plan_port_table" "PLAN.md Section 3's port table must match docs/OTHER-TOOLS.md's, command for command and ✅/❌ for ✅/❌ (the Reason column is deliberately not compared)"
 
+# Cursor must be ✅ on every data row; Codex stays as today (six ❌).
+cursor_port_x_count=$(printf '%s\n' "$other_tools_port_table" | awk -F'|' 'NR > 2 && index($5, "❌") > 0 { c++ } END { print c + 0 }')
+assert_eq "0" "$cursor_port_x_count" "Cursor column of the port table must be ✅ on every command row (digest plan init tune pickup off/on stash dig rules)"
+
 other_tools_port_word=$(port_heading_word "$other_tools_doc")
 plan_port_word=$(port_heading_word "$plan_doc")
 assert_eq "six" "$other_tools_port_word" "docs/OTHER-TOOLS.md's port heading must name a number word this scenario can read - a heading that stopped matching would make the two comparisons below vacuous"
-assert_eq "$other_tools_port_word" "$plan_port_word" "PLAN.md's 'why the other <N> cannot' heading must name the same number as docs/OTHER-TOOLS.md's"
+assert_eq "$other_tools_port_word" "$plan_port_word" "PLAN.md's 'why Codex still lacks <N>' heading must name the same number as docs/OTHER-TOOLS.md's"
 
 other_tools_unported=$(port_unported_command_count "$other_tools_doc")
-assert_eq "$(port_number_word "$other_tools_unported")" "$other_tools_port_word" "docs/OTHER-TOOLS.md's heading number must equal the commands its own table marks ❌ for both Codex and Cursor ($other_tools_unported), so the sentence is a claim about the rows rather than one nobody re-counts"
+assert_eq "$(port_number_word "$other_tools_unported")" "$other_tools_port_word" "docs/OTHER-TOOLS.md's heading number must equal the commands its own table marks ❌ on Codex ($other_tools_unported), so the sentence is a claim about the rows rather than one nobody re-counts"
 
 # --- Failure proof (a): a scratch copy of PLAN.md with one ✅/❌ cell of ---
 #     its port table flipped must stop matching docs/OTHER-TOOLS.md's. The
@@ -2658,7 +2706,7 @@ cleanup_dirs="$cleanup_dirs $port_mutant_dir"
 port_cell_mutant="$port_mutant_dir/PLAN-cell.md"
 # shellcheck disable=SC2016 # single-quoted deliberately: the backticks below are
 # literal characters in PLAN.md's own markdown table cell, not command substitution.
-sed 's/^| `stash` | ✅ | ❌ | ❌ |/| `stash` | ✅ | ✅ | ❌ |/' "$plan_doc" >"$port_cell_mutant"
+sed 's/^| `stash` | ✅ | ❌ | ✅ |/| `stash` | ✅ | ✅ | ✅ |/' "$plan_doc" >"$port_cell_mutant"
 if cmp -s "$plan_doc" "$port_cell_mutant"; then port_cell_differs=no; else port_cell_differs=yes; fi
 assert_eq "yes" "$port_cell_differs" "FAILURE PROOF (scenario 33b), control: the cell mutation must genuinely change PLAN.md - if it does not, PLAN.md no longer carries the row this proof mutates and the proof below is passing for a reason nobody chose"
 if [ "$(extract_port_table "$port_cell_mutant")" = "$other_tools_port_table" ]; then
@@ -2673,10 +2721,10 @@ assert_eq "no" "$port_cell_mutant_matches" "FAILURE PROOF (scenario 33b): flippi
 #     nine rows - must be caught, both against docs/OTHER-TOOLS.md and
 #     against the table's own ❌/❌ count.
 port_word_mutant="$port_mutant_dir/PLAN-four.md"
-sed 's/why the other six cannot/why the other four cannot/' "$plan_doc" >"$port_word_mutant"
+sed 's/why Codex still lacks six/why Codex still lacks four/' "$plan_doc" >"$port_word_mutant"
 if cmp -s "$plan_doc" "$port_word_mutant"; then port_word_differs=no; else port_word_differs=yes; fi
 assert_eq "yes" "$port_word_differs" "FAILURE PROOF (scenario 33b), control: the heading mutation must genuinely change PLAN.md"
-assert_eq "four" "$(port_heading_word "$port_word_mutant")" "FAILURE PROOF (scenario 33b): the stale 'why the other four cannot' heading must be readable as such in the mutant"
+assert_eq "four" "$(port_heading_word "$port_word_mutant")" "FAILURE PROOF (scenario 33b): the stale 'why Codex still lacks four' heading must be readable as such in the mutant"
 if [ "$(port_heading_word "$port_word_mutant")" = "$other_tools_port_word" ]; then
   port_word_mutant_matches=yes
 else
@@ -2689,7 +2737,7 @@ assert_eq "no" "$port_word_mutant_matches" "FAILURE PROOF (scenario 33b): PLAN.m
 #     heading is pinned to the rows and not merely to the other file.
 port_row_mutant="$port_mutant_dir/OTHER-TOOLS-norow.md"
 # shellcheck disable=SC2016 # literal markdown, see above.
-sed '/^| `dig` | ✅ | ❌ | ❌ |/d' "$other_tools_doc" >"$port_row_mutant"
+sed '/^| `dig` | ✅ | ❌ | ✅ |/d' "$other_tools_doc" >"$port_row_mutant"
 if cmp -s "$other_tools_doc" "$port_row_mutant"; then port_row_differs=no; else port_row_differs=yes; fi
 assert_eq "yes" "$port_row_differs" "FAILURE PROOF (scenario 33b), control: the row deletion must genuinely change docs/OTHER-TOOLS.md"
 assert_eq "5" "$(port_unported_command_count "$port_row_mutant")" "FAILURE PROOF (scenario 33b): with the \`dig\` row deleted the derived count must fall to 5, so the 'six' in the heading no longer matches the table it describes"
@@ -2772,7 +2820,7 @@ assert_eq "" "$(port_reason_false_cost_hits "$other_tools_doc")" "docs/OTHER-TOO
 port_reason_mutant="$port_mutant_dir/PLAN-zero-cost.md"
 awk 'BEGIN { FS = "|"; OFS = "|" }
   /^\| `stash` \| / {
-    print "| `stash` | ✅ | ❌ | ❌ | A stash costs ZERO permission prompts on Claude Code. |"
+    print "| `stash` | ✅ | ❌ | ✅ | A stash costs ZERO permission prompts on Claude Code. |"
     next
   }
   { print }
@@ -2806,7 +2854,7 @@ assert_eq "" "$(port_reason_false_cost_hits "$port_reason_joined")" "FAILURE PRO
 port_reason_split="$port_mutant_dir/PLAN-zero-cost-split.md"
 awk 'BEGIN { FS = "|"; OFS = "|" }
   /^\| `stash` \| / {
-    print "| `stash` | ✅ | ❌ | ❌ | A stash is instant on Claude Code. It costs zero permission prompts. |"
+    print "| `stash` | ✅ | ❌ | ✅ | A stash is instant on Claude Code. It costs zero permission prompts. |"
     next
   }
   { print }
@@ -2823,7 +2871,7 @@ assert_eq "yes" "$port_split_new" "FAILURE PROOF (scenario 33b, two sentences), 
 port_reason_hedged="$port_mutant_dir/PLAN-zero-cost-hedged.md"
 awk 'BEGIN { FS = "|"; OFS = "|" }
   /^\| `stash` \| / {
-    print "| `stash` | ✅ | ❌ | ❌ | A stash costs zero permission prompts. Reading one back costs one. |"
+    print "| `stash` | ✅ | ❌ | ✅ | A stash costs zero permission prompts. Reading one back costs one. |"
     next
   }
   { print }
