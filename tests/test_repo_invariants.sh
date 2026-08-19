@@ -246,9 +246,9 @@ scratch_before=$(scratch_snapshot)
 #             targets/codex/AGENTS.md, targets/cursor/*.mdc, and the Cursor
 #             squirrel-rules recovery skill) says "a checkpoint, a plan, or any
 #             other record". NOT CAUGHT: "record" used as a noun for a memory.
-#           - "namespace" (Layer) — glossary-cost namespace: 2 hits across 2 in-scope files, and
-#             both are a true statement about a real product surface, not a synonym for a hoard
-#             layer: README.md and docs/OTHER-TOOLS.md each say "Cursor has no command namespace",
+#           - "namespace" (Layer) — glossary-cost namespace: 1 hits across 1 in-scope files, and
+#             it is a true statement about a real product surface, not a synonym for a hoard
+#             layer: README.md says "Cursor has no command namespace",
 #             which is why the Cursor skills are named `squirrel-digest` rather than
 #             `/squirrel:digest`. Same shape as the "/config" collision recorded above. NOT CAUGHT:
 #             "namespace" used for `global` or `projects/<slug>`.
