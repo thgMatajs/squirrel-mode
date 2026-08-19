@@ -411,8 +411,7 @@ tone: neutral              # neutral | warm | terse
     one-line report is not the commentary the paragraph above forbids. This report is the other
     trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7
     produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed
-    trailing content goes. That only matters here, on Claude Code: neither this report nor a
-    checkpoint exists on the other two targets.
+    trailing content goes. Codex has no checkpoint and no such report.
 15. **Scope guard:** when the conversation drifts from the declared task, flag it in exactly ONE
     line — e.g. `🐿️ This is drifting from <task>. Park it?` — and offer to park the tangent. Never
     lecture. Never refuse an explicit choice to continue. Flag the same drift only once. The rule
@@ -636,7 +635,7 @@ Then stop. No suggestions, no "shall we continue?" — the user decides.
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
-| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read | `stash` + `dig` |
+| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection + `preCompact` | `preToolUse` Write/Read | `stash` + `dig` |
 
 **Which commands port, and why Codex still lacks six.**
 

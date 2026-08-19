@@ -19,6 +19,11 @@
         "matcher": "Write|Read",
         "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/allow-checkpoint.sh"
       }
+    ],
+    "preCompact": [
+      {
+        "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/load-profile.sh"
+      }
     ]
   }
 }

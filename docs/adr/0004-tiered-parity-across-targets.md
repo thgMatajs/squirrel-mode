@@ -6,7 +6,7 @@ squirrel-mode installs into Claude Code, Codex, and Cursor, but the three cannot
 | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | 10 namespaced skills | `SessionStart` hook | `PreToolUse` hook |
 | Codex | `~/.codex/AGENTS.md` global layer | skills in `~/.agents/skills/` | instructed file read only | no |
-| Cursor | plugin `.mdc`, `alwaysApply: true` | 10 Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read |
+| Cursor | plugin `.mdc`, `alwaysApply: true` | 10 Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection + `preCompact` | `preToolUse` Write/Read |
 
 ## Consequences
 
@@ -47,8 +47,8 @@ error about how many Cursor commands ship, and would disagree with the three pin
 
 What Cursor has: plugin `.mdc` with `alwaysApply: true`; `/squirrel-<name>` for all ten commands
 (init and tune write `~/.squirrel/profile.md`, then a new chat; pickup; stash and dig; off and on
-this turn plus sentinels; rules loads the 15 Cursor rules this turn); `sessionStart` plus the
-`squirrel-profile.mdc` projection; `preToolUse` on `Write`/`Read`.
+this turn plus sentinels; rules loads the 16 Cursor rules this turn); `sessionStart` plus the
+`squirrel-profile.mdc` projection; `preCompact` user_message pointing at `/squirrel-pickup`; `preToolUse` on `Write`/`Read`; checkpoint rule 14 in the `.mdc`.
 
 What Cursor still does not have: Cloud Agent loading of that local copy; `beforeSubmitPrompt` does
 not inject; auto-allow is `Write`/`Read` not `StrReplace`; `sessionStart` injection is best-effort

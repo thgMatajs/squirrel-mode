@@ -95,7 +95,7 @@ assert_file_absent "$repo_root/.cursor-plugin/marketplace.json" ".cursor-plugin/
 assert_json_valid "$cursor_hooks_json" "targets/cursor/hooks/hooks.json must be valid JSON"
 assert_json_eq "$cursor_hooks_json" '.version' "1" "targets/cursor/hooks/hooks.json .version must be 1"
 
-for event in sessionStart beforeSubmitPrompt preToolUse; do
+for event in sessionStart beforeSubmitPrompt preToolUse preCompact; do
   event_present=$(jq -r --arg e "$event" '(.hooks[$e] // []) | length > 0' "$cursor_hooks_json" 2>/dev/null) || event_present="<jq error>"
   assert_eq "true" "$event_present" "targets/cursor/hooks/hooks.json must define at least one '$event' hook entry"
 done
@@ -124,7 +124,12 @@ for cmd in $cursor_hook_commands; do
 done
 IFS=$old_ifs
 
-assert_eq "4" "$#" "targets/cursor/hooks/hooks.json must define exactly 4 hook commands (sessionStart load-profile, beforeSubmitPrompt check-off-flag + load-profile, preToolUse allow-checkpoint)"
+assert_eq "5" "$#" "targets/cursor/hooks/hooks.json must define exactly 5 hook commands (sessionStart load-profile, beforeSubmitPrompt check-off-flag + load-profile, preToolUse allow-checkpoint, preCompact load-profile)"
+precompact_cmd=$(jq -r '.hooks.preCompact[0].command // "<missing>"' "$cursor_hooks_json" 2>/dev/null) || precompact_cmd="<jq error>"
+assert_contains "$precompact_cmd" 'load-profile.sh' "Cursor preCompact must run load-profile.sh (user_message nudge; it cannot write Doing/Next)"
+assert_contains "$(jq -c '.hooks.preCompact[0]' "$cursor_hooks_json" 2>/dev/null || true)" '"command"' "Cursor preCompact entry must be a command object"
+precompact_has_matcher=$(jq -r '.hooks.preCompact[0] | has("matcher")' "$cursor_hooks_json" 2>/dev/null) || precompact_has_matcher="<jq error>"
+assert_eq "false" "$precompact_has_matcher" "Cursor preCompact must not carry a matcher (Cursor docs: observational, no tool matcher)"
 
 for cmd in "$@"; do
   assert_contains "$cmd" "$quoted_cursor_root" "Cursor hooks.json command '$cmd' must quote \${CURSOR_PLUGIN_ROOT} exactly as \"\${CURSOR_PLUGIN_ROOT}\""

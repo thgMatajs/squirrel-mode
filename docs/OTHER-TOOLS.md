@@ -11,7 +11,7 @@ feature set; this page states the practical consequences plainly, with no hedgin
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
-| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read | `stash` + `dig` |
+| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection + `preCompact` | `preToolUse` Write/Read | `stash` + `dig` |
 
 ## Which commands port, and why Codex still lacks six
 

@@ -120,7 +120,7 @@ Tool calls are always visible in the transcript; this rule promises no prose abo
 
 If the read or the write fails, say so in one line: a failure is reported, never absorbed silently, and that one-line report is not the commentary the paragraph above forbids.
 
-This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. That only matters here, on Claude Code: neither this report nor a checkpoint exists on the other two targets.
+This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. Codex has no checkpoint and no such report.
 
 ### 15. Scope guard
 

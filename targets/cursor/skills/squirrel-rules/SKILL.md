@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 # squirrel-mode base rules (Cursor)
 
-After squirrel-off, or if the always-on Cursor rule is off, follow the 15 squirrel-mode rules below. These 15 rules apply from this turn, including this reply.
+After squirrel-off, or if the always-on Cursor rule is off, follow the 16 squirrel-mode rules below. These 16 rules apply from this turn, including this reply.
 
 If ~/.squirrel/profile.md exists, squirrel-mode projects it to ~/.cursor/rules/squirrel-profile.mdc with alwaysApply so those field values override the defaults below. If no profile exists yet, the defaults apply as-is. To hand-tune them, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
 
@@ -104,6 +104,20 @@ Respond in `language`. When `language` is set to auto, mirror the language the u
 These brevity rules never suppress warnings about destructive operations, security issues, or data loss. State the warning in full, even if it breaks a length or list limit set elsewhere in these rules. Clarity beats compression whenever safety is at stake.
 
 This rule takes precedence over rules 1 through 12 and rule 16 wherever they conflict with it. This explicitly includes rule 7's `extras_section` gate: when `extras_section` is no, a warning about a destructive operation, a security issue, or data loss is still stated in full; it is never omitted because the Extra section is turned off. Whenever following another rule's letter would suppress such a warning, this rule wins and the warning is stated anyway.
+
+### 14. Checkpoint maintenance
+
+When a meaningful unit of work completes, update this session's own checkpoint file with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries in that file. The file is named for you in context, on the `Project checkpoint path:` line injected at the start of the session: use that path exactly as given, and never compute, guess, or re-derive one. Every other file in that project's checkpoint directory belongs to a different session; leave them alone, and let `/squirrel-pickup` be the one that reads across them. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
+
+Give the file these `##` sections, in this order: `Doing` (one line), `Next` (the single startable step), `Open decisions` (only when there are any), `Done` (the finished items). `/squirrel-pickup` folds these files by heading across sessions, so never leave a heading with nothing under it: omit that section instead. Anything above the first heading is free-form.
+
+Use the `Read` and `Write` tools on this file, never a shell command: only those carry its auto-approval, so a shell write stops to ask for the permission this rule promises it will not need.
+
+Tool calls are always visible in the transcript; this rule promises no prose about the write in the response, not invisibility.
+
+If the read or the write fails, say so in one line: a failure is reported, never absorbed silently, and that one-line report is not the commentary the paragraph above forbids.
+
+This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. Codex has no checkpoint and no such report.
 
 ### 15. Scope guard
 

@@ -7,8 +7,8 @@
 #   - output-styles/squirrel-mode.md   (all 16 rules, targets: claude-code)
 #   - skills/rules/SKILL.md            (all 16 rules, targets: claude-code)
 #   - targets/codex/AGENTS.md          (15 rules, targets: codex)
-#   - targets/cursor/squirrel-mode.mdc (15 rules, targets: cursor)
-#   - targets/cursor/skills/squirrel-rules/SKILL.md (same 15 Cursor rules;
+#   - targets/cursor/squirrel-mode.mdc (16 rules, targets: cursor; includes rule 14)
+#   - targets/cursor/skills/squirrel-rules/SKILL.md (same 16 Cursor rules;
 #     recovery after squirrel-off or if the always-on Cursor rule is off.
 #     Not a port of skills/rules/SKILL.md.)
 #
@@ -38,7 +38,7 @@
 # PENDING./CLEAR. sentinels, and the model ignores or resumes squirrel
 # rules from this turn. Codex does not get off or on.
 # squirrel-rules is a Cursor Agent Skill only, composed from the same
-# 15 Cursor rules as the always-on .mdc (print_rules_section cursor),
+# 16 Cursor rules as the always-on .mdc (print_rules_section cursor),
 # not from the 16-rule Claude skills/rules/SKILL.md. Codex does not
 # get /rules. Do not emit targets/cursor/commands/rules.md.
 #
@@ -541,6 +541,14 @@ print_rules_section() {
   done
 }
 
+# print_cursor_rules_section: print_rules_section cursor, then rewrite
+# the Claude slash form that rule 14 carries. Cursor artifacts cannot
+# contain /squirrel: (check_no_claude_only_syntax).
+print_cursor_rules_section() {
+  rules=$(print_rules_section cursor)
+  literal_replace "$rules" "/squirrel:pickup" "/squirrel-pickup"
+}
+
 # --- Cross-target-reference guard (S10 review cycle 2, AC2) --------------
 #
 # A `targets: all` rule ships, verbatim, into EVERY generated artifact -
@@ -548,9 +556,9 @@ print_rules_section() {
 # both filtered purely by each rule's own targets value in
 # print_rules_section above, with no rewriting of what a rule's prose
 # happens to say. A `targets: all` rule that names a non-`all` rule BY
-# NUMBER (today: rule 14, `targets: claude-code`) therefore ships a
+# NUMBER (today: rule 14, `targets: claude-code, cursor`) therefore ships a
 # definitive, numbered cross-reference into a document where the cited
-# rule is entirely absent - a Codex or Cursor user reads "...then rule
+# rule is entirely absent - a Codex user reads "...then rule
 # 14's ... report..." with no rule 14 anywhere in the file they are
 # reading. AB2 found this for rules 2 and 7 citing rule 14 specifically
 # and fixed those two instances (AD3, S10 cycle 3 final gate, narrowed
@@ -734,11 +742,11 @@ BANNER
 CURSOR_SKILL_INVOCATION_LINE="disable-model-invocation: true"
 
 # Cursor squirrel-rules is recovery, not a port of skills/rules/SKILL.md:
-# after squirrel-off, or if the always-on Cursor rule is off, the 15
+# after squirrel-off, or if the always-on Cursor rule is off, the 16
 # Cursor rules apply from this turn. Held once so write_cursor_rules_skill
 # and the tests that pin these strings can never disagree.
 CURSOR_RULES_SKILL_DESCRIPTION="Manually load the squirrel-mode base rules (only needed after squirrel-off, or if the always-on Cursor rule is off)."
-CURSOR_RULES_THIS_TURN_SENTENCE="These 15 rules apply from this turn, including this reply."
+CURSOR_RULES_THIS_TURN_SENTENCE="These 16 rules apply from this turn, including this reply."
 
 # Cursor init/tune closing instruction after a successful Write of
 # ~/.squirrel/profile.md. Cursor has no mid-session profile re-injection,
@@ -1614,18 +1622,18 @@ BODY
   printf '\n'
   print_defaults_section
   printf '\n## Rules\n\n'
-  print_rules_section cursor
+  print_cursor_rules_section
   printf '\n'
 }
 
 write_cursor_rules_skill() {
   # write_cursor_rules_skill: composes
   # targets/cursor/skills/squirrel-rules/SKILL.md. This is recovery for
-  # the 15 Cursor rules (print_rules_section cursor), the same set as
+  # the 16 Cursor rules (print_cursor_rules_section), the same set as
   # squirrel-mode.mdc, after squirrel-off or if the always-on Cursor
   # rule is off. Not write_cursor_skill rules: that would port
-  # skills/rules/SKILL.md (16 Claude rules, checkpoint rule 14, and
-  # output-style wording) and fail check_no_claude_only_syntax.
+  # skills/rules/SKILL.md (Claude output-style wording) and fail
+  # check_no_claude_only_syntax.
   # Banner source is rules/base-rules.md. Do not add_title_suffix: the
   # H1 already includes (Cursor).
   printf '%s\n' "---"
@@ -1639,14 +1647,14 @@ write_cursor_rules_skill() {
   cat <<BODY
 # squirrel-mode base rules (Cursor)
 
-After squirrel-off, or if the always-on Cursor rule is off, follow the 15 squirrel-mode rules below. $CURSOR_RULES_THIS_TURN_SENTENCE
+After squirrel-off, or if the always-on Cursor rule is off, follow the 16 squirrel-mode rules below. $CURSOR_RULES_THIS_TURN_SENTENCE
 
 If ~/.squirrel/profile.md exists, squirrel-mode projects it to ~/.cursor/rules/squirrel-profile.mdc with alwaysApply so those field values override the defaults below. If no profile exists yet, the defaults apply as-is. To hand-tune them, see docs/OTHER-TOOLS.md in the squirrel-mode repository.
 BODY
   printf '\n'
   print_defaults_section
   printf '\n## Rules\n\n'
-  print_rules_section cursor
+  print_cursor_rules_section
   printf '\n'
 }
 
@@ -1672,6 +1680,11 @@ write_cursor_hooks() {
       {
         "matcher": "Write|Read",
         "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/allow-checkpoint.sh"
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "\"${CURSOR_PLUGIN_ROOT}\"/scripts/load-profile.sh"
       }
     ]
   }

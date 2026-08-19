@@ -704,6 +704,8 @@ assert_eq "1" "$pretooluse_count" "hooks.json must define exactly one PreToolUse
 all_commands=$(jq -r '.hooks[][] | .hooks[]?.command // empty' "$hooks_json" 2>/dev/null) || all_commands=""
 command_count=$(printf '%s\n' "$all_commands" | grep -c '.' || true)
 assert_eq "4" "$command_count" "hooks.json must define exactly 4 hook commands total (SessionStart load-profile, UserPromptSubmit check-off-flag + load-profile, PreToolUse allow-checkpoint)"
+claude_has_precompact=$(jq -r '.hooks | has("preCompact")' "$hooks_json" 2>/dev/null) || claude_has_precompact="<jq error>"
+assert_eq "false" "$claude_has_precompact" "Claude hooks/hooks.json must not gain a Cursor preCompact event"
 
 # Collect commands into positional parameters (never a piped while-read
 # loop, which would fork a subshell and silently discard every
@@ -11854,6 +11856,62 @@ outC7=$(capture_stdout "$load_profile_script" "$homeC7" "$stdinC7")
 exitC7=$(capture_exit "$load_profile_script" "$homeC7" "$stdinC7")
 assert_eq "0" "$exitC7" "C7: when projection cannot be written, load-profile.sh must still exit 0"
 assert_contains "$(extract_ctx "$outC7")" "CURSOR_PROJECTION_FAIL_C7" "C7: when projection fails, SessionStart must still emit profile context"
+
+# C8. When Cursor omits cwd and workspace_roots, CURSOR_PROJECT_DIR (hook
+#     env, always present per Cursor docs) is the cwd used for the slug.
+#     Empty cwd without that env still hashes as root-<cksum> — the bug
+#     this fallback closes.
+homeC8=$(new_home)
+mkdir -p "$homeC8/.squirrel"
+printf '%s\n' '# squirrel-mode profile' 'language: en' >"$homeC8/.squirrel/profile.md"
+projC8="$homeC8/real-cursor-project"
+stdinC8_empty=$(jq -n --arg cid "sess-cursor-c8" \
+  '{conversation_id:$cid, hook_event_name:"sessionStart"}')
+stdinC8_cwd=$(jq -n --arg cid "sess-cursor-c8" --arg cwd "$projC8" \
+  '{conversation_id:$cid, cwd:$cwd, hook_event_name:"sessionStart"}')
+outC8_cwd=$(capture_stdout "$load_profile_script" "$homeC8" "$stdinC8_cwd")
+outC8_env=$(printf '%s' "$stdinC8_empty" | HOME="$homeC8" CURSOR_PROJECT_DIR="$projC8" "$load_profile_script" 2>/dev/null) || true
+pathC8_cwd=$(extract_checkpoint_path_line "$(extract_ctx "$outC8_cwd")")
+pathC8_env=$(extract_checkpoint_path_line "$(extract_ctx "$outC8_env")")
+assert_eq "$pathC8_cwd" "$pathC8_env" "C8: empty cwd + CURSOR_PROJECT_DIR must resolve the same Project checkpoint path as cwd set to that directory"
+assert_contains "$pathC8_env" "real-cursor-project" "C8: the fallback slug must use CURSOR_PROJECT_DIR's basename, not root-"
+
+outC8_noenv=$(capture_stdout "$load_profile_script" "$homeC8" "$stdinC8_empty")
+pathC8_noenv=$(extract_checkpoint_path_line "$(extract_ctx "$outC8_noenv")")
+assert_contains "$pathC8_noenv" "/checkpoints/root-" "C8b: empty cwd without CURSOR_PROJECT_DIR still uses the root-<hash> slug (do not invent a directory)"
+wdC8_noenv=$(printf '%s\n' "$(extract_ctx "$outC8_noenv")" | sed -n 's/^Session working directory: //p' | tail -n 1)
+assert_eq "" "$wdC8_noenv" "C8b: Session working directory stays empty when neither cwd, workspace_roots, nor CURSOR_PROJECT_DIR is available"
+
+# C8c. A real cwd still wins over CURSOR_PROJECT_DIR (Claude payloads
+#      must not be re-homed by a leftover Cursor env var).
+projC8c_cwd="$homeC8/preferred-cwd-project"
+projC8c_env="$homeC8/env-must-not-win"
+stdinC8c=$(jq -n --arg cid "sess-cursor-c8c" --arg cwd "$projC8c_cwd" \
+  '{conversation_id:$cid, cwd:$cwd, hook_event_name:"sessionStart"}')
+outC8c=$(printf '%s' "$stdinC8c" | HOME="$homeC8" CURSOR_PROJECT_DIR="$projC8c_env" "$load_profile_script" 2>/dev/null) || true
+pathC8c=$(extract_checkpoint_path_line "$(extract_ctx "$outC8c")")
+assert_contains "$pathC8c" "preferred-cwd-project" "C8c: when cwd is present it wins over CURSOR_PROJECT_DIR"
+assert_not_contains "$pathC8c" "env-must-not-win" "C8c: CURSOR_PROJECT_DIR must not override a present cwd"
+
+# C8d. A relative CURSOR_PROJECT_DIR is ignored (same as a non-absolute
+#      cwd: never guess).
+outC8d=$(printf '%s' "$stdinC8_empty" | HOME="$homeC8" CURSOR_PROJECT_DIR="relative/project" "$load_profile_script" 2>/dev/null) || true
+pathC8d=$(extract_checkpoint_path_line "$(extract_ctx "$outC8d")")
+assert_contains "$pathC8d" "/checkpoints/root-" "C8d: a relative CURSOR_PROJECT_DIR must not become the slug"
+
+# C9. Cursor preCompact is observational: load-profile.sh emits
+#     user_message pointing at /squirrel-pickup, not SessionStart JSON.
+#     Doing/Next are not invented here — the model already wrote them.
+stdinC9=$(jq -n '{hook_event_name:"preCompact", trigger:"auto"}')
+outC9=$(capture_stdout "$load_profile_script" "$homeC8" "$stdinC9")
+exitC9=$(capture_exit "$load_profile_script" "$homeC8" "$stdinC9")
+assert_eq "0" "$exitC9" "C9: preCompact must exit 0"
+c9_user_message=$(printf '%s' "$outC9" | jq -r '.user_message // empty' 2>/dev/null) || c9_user_message=""
+assert_contains "$c9_user_message" "/squirrel-pickup" "C9: preCompact user_message must tell the user to run /squirrel-pickup after compaction"
+c9_additional=$(printf '%s' "$outC9" | jq -r '.additional_context // empty' 2>/dev/null) || c9_additional=""
+assert_eq "" "$c9_additional" "C9: preCompact must not emit additional_context (Cursor's preCompact schema is user_message only)"
+c9_nested=$(printf '%s' "$outC9" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null) || c9_nested=""
+assert_eq "" "$c9_nested" "C9: preCompact must not emit SessionStart hookSpecificOutput (wrong event schema)"
 
 # ==========================================================================
 # SCRATCH-LEAK. Every path this run put in $TMPDIR is on the trap's list.

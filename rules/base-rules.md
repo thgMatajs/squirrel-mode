@@ -124,7 +124,7 @@ This rule takes precedence over rules 1 through 12 and rule 16 wherever they con
 
 ### 14. Checkpoint maintenance
 
-<!-- targets: claude-code -->
+<!-- targets: claude-code, cursor -->
 
 When a meaningful unit of work completes, update this session's own checkpoint file with the new Doing and Next state, and append finished items to the Done log, keeping only the last 10 entries in that file. The file is named for you in context, on the `Project checkpoint path:` line injected at the start of the session: use that path exactly as given, and never compute, guess, or re-derive one. Every other file in that project's checkpoint directory belongs to a different session; leave them alone, and let `/squirrel:pickup` be the one that reads across them. Write with no commentary in the response: do not announce the write and do not ask permission first. Make at most one such write per turn, and only when Doing or Next actually changed.
 
@@ -136,7 +136,7 @@ Tool calls are always visible in the transcript; this rule promises no prose abo
 
 If the read or the write fails, say so in one line: a failure is reported, never absorbed silently, and that one-line report is not the commentary the paragraph above forbids.
 
-This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. That only matters here, on Claude Code: neither this report nor a checkpoint exists on the other two targets.
+This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. Codex has no checkpoint and no such report.
 
 ### 15. Scope guard
 

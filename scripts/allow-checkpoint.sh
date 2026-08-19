@@ -1288,7 +1288,7 @@ decide() {
   #
   #   rename-cost literal-occurrences: 122
   #   rename-cost identifier-occurrences: 198
-  #   rename-cost test-file-lines: 11877
+  #   rename-cost test-file-lines: 11935
   checkpoints_dir=$(normalize_path "$home_dir/.squirrel/checkpoints") || checkpoints_dir="$home_dir/.squirrel/checkpoints"
   hoard_dir=$(normalize_path "$home_dir/.squirrel/hoard") || hoard_dir="$home_dir/.squirrel/hoard"
 

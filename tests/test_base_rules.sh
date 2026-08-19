@@ -152,12 +152,12 @@ $heading_records
 EOF
 assert_eq "" "$bad_target_value_headings" "every targets value must be 'all' or a comma-separated subset of {claude-code, codex, cursor}; an unknown target name must fail"
 
-# --- 6. Rules 1-13, 15 and 16 are 'all'; rule 14 is 'claude-code' -------
+# --- 6. Rules 1-13, 15 and 16 are 'all'; rule 14 is 'claude-code,cursor'
 bad_assignment_headings=""
 while read -r num mcount targets; do
   [ -n "$num" ] || continue
   if [ "$num" = "14" ]; then
-    expected="claude-code"
+    expected="claude-code,cursor"
   else
     expected="all"
   fi
@@ -167,7 +167,7 @@ while read -r num mcount targets; do
 done <<EOF
 $heading_records
 EOF
-assert_eq "" "$bad_assignment_headings" "rules 1-13, 15 and 16 must be marked 'all'; rule 14 must be marked 'claude-code'"
+assert_eq "" "$bad_assignment_headings" "rules 1-13, 15 and 16 must be marked 'all'; rule 14 must be marked 'claude-code,cursor'"
 
 # --- 7. Defaults table lists exactly 11 fields, matching PLAN.md's
 # profile field names exactly ---------------------------------------
@@ -803,6 +803,14 @@ assert_contains "$rule_13_body" "rule 16" "rule 13's canonical body must name ru
 # 3/rule 6's per-sub-answer sentence), pinned in both directions the same way every other rule
 # amendment in this build has been.
 rule_14_body=$(get_rule_body_prose 14)
+rule_14_targets=$(awk '
+  $0 ~ "^### 14\\. " { in_rule = 1; next }
+  in_rule && /^### [0-9]+\. / { exit }
+  in_rule && /^<!-- targets:/ { print; exit }
+' "$base_rules_file")
+assert_contains "$rule_14_targets" "claude-code" "rule 14's targets marker must still include claude-code"
+assert_contains "$rule_14_targets" "cursor" "rule 14's targets marker must include cursor (compaction gap: auto checkpoint writes)"
+assert_not_contains "$rule_14_targets" "codex" "rule 14 must stay off Codex"
 RULE14_FAILURE_PHRASE="a failure is reported, never absorbed silently"
 assert_contains "$rule_14_body" "$RULE14_FAILURE_PHRASE" "rule 14's canonical body must license a one-line report when the checkpoint read or write fails (S10-1: this is the narration a live probe found the model doing, unlicensed, before this fix)"
 
@@ -939,6 +947,8 @@ assert_contains "$rule_2_body" "$RULE2_GENERIC_DEFER_PHRASE" "AD3: rule 2's cano
 
 RULE14_SLOT_PHRASE="the other trailing content rule 7's ordering makes room for"
 assert_contains "$rule_14_body" "$RULE14_SLOT_PHRASE" "AD3: rule 14's canonical body must state that its failure report is the 'other trailing content' rule 7's generic ordering makes room for, and place it explicitly between any Extra section and rule 15's flag"
+assert_contains "$rule_14_body" "Codex has no checkpoint and no such report" "rule 14 ships to Claude Code and Cursor; the Codex exclusion must stay explicit"
+assert_not_contains "$rule_14_body" "other two targets" "rule 14 must not still claim the checkpoint exists on Claude Code only"
 
 # Cross-file: PLAN.md items 2, 7, and 14 restate the AD3 fix identically
 # (plan_rule_2_flat / plan_rule_7_flat / plan_rule_14_flat are already
@@ -949,6 +959,7 @@ assert_contains "$plan_rule_2_flat" "$RULE2_DEFERS_TO_RULE7_PHRASE" "PLAN.md's r
 assert_contains "$plan_rule_2_flat" "$RULE2_GENERIC_DEFER_PHRASE" "PLAN.md's rule-2 summary must defer GENERICALLY, matching rules/base-rules.md (AD3, cross-file agreement, invariant 6e)"
 assert_contains "$plan_rule_7_flat" "$RULE7_GENERIC_ORDER_PHRASE" "PLAN.md's rule-7 summary must state the same GENERIC ordering as rules/base-rules.md (AD3, cross-file agreement, invariant 6e)"
 assert_contains "$plan_rule_14_flat" "$RULE14_SLOT_PHRASE" "PLAN.md's rule-14 summary must state the same generic-slot placement as rules/base-rules.md (AD3, cross-file agreement, invariant 6e)"
+assert_contains "$plan_rule_14_flat" "Codex has no checkpoint and no such report" "PLAN.md's rule-14 summary must keep the Codex exclusion in the same words as rules/base-rules.md"
 assert_not_contains "$plan_rule_2_flat" "$RULE2_SINGULAR_RETIRED" "PLAN.md's rule-2 summary must not carry the retired singular-exception wording either (AB2)"
 assert_not_contains "$plan_rule_7_flat" "$RULE7_SINGULAR_RETIRED" "PLAN.md's rule-7 summary must not carry the retired singular-exception wording either (AB2)"
 assert_not_contains "$plan_rule_2_flat" "checkpoint" "AD3: PLAN.md's rule-2 summary must not mention checkpoints either, matching rules/base-rules.md"
@@ -963,7 +974,7 @@ assert_not_contains "$plan_rule_7_flat" "checkpoint" "AD3: PLAN.md's rule-7 summ
 # assertion 32 already uses for rule 14's failure-report sentence.
 RULE2_NEW_PARA="None of that bans the trailing content another rule expressly licenses. Rule 7 states what may trail the answer and in what order; this rule does not restate it. The clearest example is rule 15's scope-guard flag: when rule 15 fires, its one line follows the completed answer as the final line of the response, and it is never the postamble this rule bans."
 RULE7_NEW_PARA="This rule states, once, the order that applies on every target: the \`Extra\` section comes first, then whichever other trailing content another rule licenses for this response; when rule 15's scope-guard flag also fires in the same response, that flag becomes the actual final line, after the Extra section and after any such other trailing content. Rule 2 defers to this ordering rather than restating it."
-RULE14_NEW_PARA="This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. That only matters here, on Claude Code: neither this report nor a checkpoint exists on the other two targets."
+RULE14_NEW_PARA="This report is the other trailing content rule 7's ordering makes room for: it falls after any Extra section rule 7 produces and before rule 15's scope-guard flag, exactly where rule 7 says other rule-licensed trailing content goes. Codex has no checkpoint and no such report."
 
 extract_rule_body_from_content() {
   # extract_rule_body_from_content <content> <n> - same delimiter logic as
@@ -1208,9 +1219,8 @@ assert_eq "Doing Next Open decisions Done" "$plan_template_heading_order" "PLAN.
 # `Bash` heredoc first" - so the rule's own "do not ask permission
 # first" promise silently failed whenever it did. skills/pickup already
 # names `Read` for the read side; rule 14 now names both for the write
-# side. Rule 14 is `targets: claude-code`, so naming a Claude Code tool
-# in it is legitimate in a way it would not be in a rule that also ships
-# to Codex and Cursor.
+# side. Rule 14 is `targets: claude-code, cursor`. Both of those hosts
+# name Read and Write; Codex does not get this rule.
 # shellcheck disable=SC2016 # single-quoted deliberately: literal
 # backtick-quoted tool names searched for in the rule's own markdown, not
 # command substitution.

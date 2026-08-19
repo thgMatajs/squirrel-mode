@@ -561,16 +561,16 @@ assert_contains "$claude_on_content" "/squirrel:on" "canonical skills/on/SKILL.m
 assert_contains "$claude_on_content" "next message" "canonical skills/on/SKILL.md must keep Claude's next-message confirmation"
 
 # ==========================================================================
-# 4f. Cursor rules is an Agent Skill only: recovery for the 15 Cursor
+# 4f. Cursor rules is an Agent Skill only: recovery for the 16 Cursor
 #     rules (print_rules_section cursor), same set as
 #     targets/cursor/squirrel-mode.mdc. Banner source is
 #     rules/base-rules.md, not skills/rules/SKILL.md. After squirrel-off,
-#     or if the always-on Cursor rule is off, the 15 rules apply from
+#     or if the always-on Cursor rule is off, the 16 rules apply from
 #     this turn including this reply. Canonical Claude skills/rules
 #     still has 16 headings and still names the output style. Codex does
 #     not get rules. Project commands stay digest/plan only.
 # ==========================================================================
-cursor_rules_this_turn_sentence="These 15 rules apply from this turn, including this reply."
+cursor_rules_this_turn_sentence="These 16 rules apply from this turn, including this reply."
 cursor_rules_mdc_sentence="This rule does not assume a checkpoint, a plan, or any other record exists on any target."
 cursor_rules_defaults_header="| Field | Default | Allowed values |"
 cursor_rules_h1="# squirrel-mode base rules (Cursor)"
@@ -586,15 +586,16 @@ assert_not_contains "$cursor_rules_content" "# squirrel-mode base rules (Cursor)
 assert_contains "$cursor_rules_content" "GENERATED FILE" "Cursor rules skill must carry a GENERATED marker"
 assert_contains "$cursor_rules_content" "Source: rules/base-rules.md" "Cursor rules skill banner must name rules/base-rules.md as its source (same as the mdc), not skills/rules/SKILL.md"
 assert_not_contains "$cursor_rules_content" "skills/rules/SKILL.md" "Cursor rules skill must not name skills/rules/SKILL.md as its source"
-assert_contains "$cursor_rules_content" "$cursor_rules_this_turn_sentence" "Cursor rules skill must say the 15 rules apply from this turn, including this reply"
+assert_contains "$cursor_rules_content" "$cursor_rules_this_turn_sentence" "Cursor rules skill must say the 16 rules apply from this turn, including this reply"
 assert_not_contains "$cursor_rules_content" "next message" "Cursor rules skill must not say the rules wait for the next message"
 assert_contains "$cursor_rules_content" "$cursor_rules_defaults_header" "Cursor rules skill must include the defaults table header print_defaults_section already emits"
-assert_contains "$cursor_rules_content" "$cursor_rules_mdc_sentence" "Cursor rules skill must carry a distinctive Cursor-rules sentence also present in targets/cursor/squirrel-mode.mdc (the Cursor 15, not a free rewrite)"
+assert_contains "$cursor_rules_content" "$cursor_rules_mdc_sentence" "Cursor rules skill must carry a distinctive Cursor-rules sentence also present in targets/cursor/squirrel-mode.mdc (the Cursor 16, not a free rewrite)"
 cursor_mdc_content=$(read_file "$cursor_mdc")
 assert_contains "$cursor_mdc_content" "$cursor_rules_mdc_sentence" "fixture sanity: the distinctive Cursor-rules sentence must live in targets/cursor/squirrel-mode.mdc"
 rules_heading_count=$(printf '%s\n' "$cursor_rules_content" | grep -c '^### [0-9][0-9]*\. ' || true)
-assert_eq "15" "$rules_heading_count" "Cursor squirrel-rules skill must contain exactly 15 rule headings, not 16"
-assert_not_contains "$cursor_rules_content" "### 14. Checkpoint" "Cursor squirrel-rules skill must not contain Claude-only checkpoint rule 14"
+assert_eq "16" "$rules_heading_count" "Cursor squirrel-rules skill must contain exactly 16 rule headings, including checkpoint rule 14"
+assert_contains "$cursor_rules_content" "### 14. Checkpoint maintenance" "Cursor squirrel-rules skill must contain checkpoint rule 14"
+assert_contains "$cursor_rules_content" "/squirrel-pickup" "Cursor squirrel-rules skill rule 14 must name /squirrel-pickup"
 assert_contains "$cursor_rules_content" "squirrel-profile.mdc" "Cursor rules skill must mention the projected squirrel-profile.mdc the same way the mdc does"
 assert_contains "$cursor_rules_content" "only needed after squirrel-off, or if the always-on Cursor rule is off" "Cursor rules skill description must use Cursor off / always-on-rule-off wording"
 assert_not_contains "$cursor_rules_content" "force-for-plugin" "Cursor rules skill must not cite force-for-plugin"
@@ -2502,10 +2503,10 @@ expected_claude_parity_row='| Claude Code | output style, `force-for-plugin` | *
 # shellcheck disable=SC2016 # same: literal table row, backticks included.
 expected_codex_parity_row='| Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |'
 # shellcheck disable=SC2016 # same: the Cursor row scenario 33 pins verbatim.
-expected_cursor_parity_row='| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read | `stash` + `dig` |'
+expected_cursor_parity_row='| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection + `preCompact` | `preToolUse` Write/Read | `stash` + `dig` |'
 assert_contains "$other_tools_parity_table" "$expected_claude_parity_row" "Claude Code parity row must stay byte-identical to today's pinned line"
 assert_contains "$other_tools_parity_table" "$expected_codex_parity_row" "Codex parity row must stay byte-identical to today's pinned line"
-assert_contains "$other_tools_parity_table" "$expected_cursor_parity_row" "Cursor parity row must be the exact line scenario 33 pins (plugin .mdc, 10 Agent Skills, sessionStart, preToolUse Write/Read, stash+dig)"
+assert_contains "$other_tools_parity_table" "$expected_cursor_parity_row" "Cursor parity row must be the exact line scenario 33 pins (plugin .mdc, 10 Agent Skills, sessionStart+preCompact, preToolUse Write/Read, stash+dig)"
 assert_not_contains "$other_tools_parity_table" "**2**" "Cursor parity row must not still claim **2** commands"
 assert_not_contains "$other_tools_parity_table" "no hooks" "parity table must not still say no hooks"
 # shellcheck disable=SC2088 # double-quoted deliberately: literal table

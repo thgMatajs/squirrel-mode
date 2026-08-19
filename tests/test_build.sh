@@ -328,13 +328,15 @@ for target_label_content in "output style:$output_style_content" "skill:$skill_c
 done
 
 # ==========================================================================
-# 5. Rule exclusion per target: rule 14 must be absent from Codex/Cursor,
-#    checked by its distinctive BODY text, not merely its heading.
+# 5. Rule exclusion per target: rule 14 is Claude Code + Cursor, absent
+#    from Codex. Checked by distinctive BODY text, not merely heading.
 # ==========================================================================
-assert_not_contains "$codex_content" "$RULE14_NOT_INVISIBILITY_SENTENCE" "Codex AGENTS.md must NOT contain rule 14's body text (rule 14 is targets:claude-code)"
-assert_not_contains "$cursor_content" "$RULE14_NOT_INVISIBILITY_SENTENCE" "Cursor .mdc must NOT contain rule 14's body text (rule 14 is targets:claude-code)"
+assert_not_contains "$codex_content" "$RULE14_NOT_INVISIBILITY_SENTENCE" "Codex AGENTS.md must NOT contain rule 14's body text (rule 14 is not a Codex target)"
+assert_contains "$cursor_content" "$RULE14_NOT_INVISIBILITY_SENTENCE" "Cursor .mdc must contain rule 14's body text (rule 14 is targets:claude-code, cursor)"
 assert_not_contains "$codex_content" "### 14. Checkpoint maintenance" "Codex AGENTS.md must NOT contain rule 14's heading either"
-assert_not_contains "$cursor_content" "### 14. Checkpoint maintenance" "Cursor .mdc must NOT contain rule 14's heading either"
+assert_contains "$cursor_content" "### 14. Checkpoint maintenance" "Cursor .mdc must contain rule 14's heading"
+assert_contains "$cursor_content" "/squirrel-pickup" "Cursor .mdc rule 14 must name /squirrel-pickup, not the Claude slash form"
+assert_not_contains "$cursor_content" "/squirrel:" "Cursor .mdc must not contain /squirrel: after the pickup substitution"
 
 # ==========================================================================
 # 5b (AD3, S10 review cycle 3 final gate). AC2's fix stopped rules 2 and 7
@@ -342,25 +344,24 @@ assert_not_contains "$cursor_content" "### 14. Checkpoint maintenance" "Cursor .
 #    naming rule 14 BY NUMBER, but left the checkpoint-failure-report
 #    CONCEPT described in their prose - so a Codex/Cursor user still read
 #    a definitive ordering statement for an event those targets
-#    structurally cannot produce (README's parity table: "Auto
-#    checkpoints: no"; docs/OTHER-TOOLS.md: nothing writes to a
-#    checkpoints directory on either target). Fixed by making rules 2 and
-#    7's ordering GENERIC and moving the report's own concept into rule
-#    14 alone (targets:claude-code, absent from both artifacts). Checked
+#    structurally cannot produce (README's parity table: Codex
+#    "Auto checkpoints: no"; Cursor now ships rule 14). Fixed by making
+#    rules 2 and 7's ordering GENERIC and moving the report's own concept
+#    into rule 14 alone. Checked
 #    here on the GENERATED artifacts directly, not merely on rule 14's
-#    own absence (already covered above) - this is what actually proves
-#    the CONCEPT is gone, not just the rule NUMBER. Scoped to the specific
-#    retired phrases, not a blanket "checkpoint" ban: rule 15 (also
-#    targets:all) legitimately says "This rule does not assume a
-#    checkpoint... exists on any target", and that correct, cross-target
-#    disclaimer must keep shipping into both artifacts unaffected.
+#    presence or absence (already covered above) - this is what actually
+#    proves the CONCEPT is gone from Codex, not just the rule NUMBER.
+#    Scoped to the specific retired phrases, not a blanket "checkpoint"
+#    ban: rule 15 (also targets:all) legitimately says "This rule does
+#    not assume a checkpoint... exists on any target", and that correct,
+#    cross-target disclaimer must keep shipping into both artifacts.
 # ==========================================================================
 for target_label_content in "Codex AGENTS.md:$codex_content" "Cursor .mdc:$cursor_content"; do
   target_label=${target_label_content%%:*}
   target_content=${target_label_content#*:}
-  assert_not_contains "$target_content" "checkpoint update failed" "$target_label must not mention a 'checkpoint update failed' report (AD3) - that concept only exists on Claude Code (rule 14), and neither Codex nor Cursor has a checkpoint feature at all"
-  assert_not_contains "$target_content" "checkpoint-failure" "$target_label must not mention a checkpoint-failure report or its ordering (AD3) - same reason"
-  assert_not_contains "$target_content" "checkpoint-update-failure" "$target_label must not mention a checkpoint-update-failure report (AD3, the exact retired AB2-era phrasing) - same reason"
+  assert_not_contains "$target_content" "checkpoint update failed" "$target_label must not mention a 'checkpoint update failed' report (AD3) - that phrase lives in neither rule 14 nor Codex/Cursor extras"
+  assert_not_contains "$target_content" "checkpoint-failure" "$target_label must not mention a checkpoint-failure report or its ordering (AD3)"
+  assert_not_contains "$target_content" "checkpoint-update-failure" "$target_label must not mention a checkpoint-update-failure report (AD3, the exact retired AB2-era phrasing)"
   # The legitimate, cross-target-correct disclaimer (rule 15) must still
   # be present and unaffected by the negative pins above - proving they
   # are scoped to the retired phrases, not a blanket word ban that would
@@ -369,8 +370,7 @@ for target_label_content in "Codex AGENTS.md:$codex_content" "Cursor .mdc:$curso
 done
 
 # ==========================================================================
-# 6. Rule count per artifact: 16 for the two Claude Code artifacts, 15
-#    for Codex and Cursor.
+# 6. Rule count per artifact: 16 for Claude Code and Cursor, 15 for Codex.
 # ==========================================================================
 count_rule_headings() {
   grep -c '^### [0-9][0-9]*\. ' "$1" 2>/dev/null || true
@@ -378,8 +378,8 @@ count_rule_headings() {
 assert_eq "16" "$(count_rule_headings "$output_style_file")" "output-styles/squirrel-mode.md must contain exactly 16 rule headings"
 assert_eq "16" "$(count_rule_headings "$skill_file")" "skills/rules/SKILL.md must contain exactly 16 rule headings"
 assert_eq "15" "$(count_rule_headings "$codex_file")" "targets/codex/AGENTS.md must contain exactly 15 rule headings"
-assert_eq "15" "$(count_rule_headings "$cursor_file")" "targets/cursor/squirrel-mode.mdc must contain exactly 15 rule headings"
-assert_eq "15" "$(count_rule_headings "$repo_root/targets/cursor/skills/squirrel-rules/SKILL.md")" "targets/cursor/skills/squirrel-rules/SKILL.md must contain exactly 15 rule headings"
+assert_eq "16" "$(count_rule_headings "$cursor_file")" "targets/cursor/squirrel-mode.mdc must contain exactly 16 rule headings"
+assert_eq "16" "$(count_rule_headings "$repo_root/targets/cursor/skills/squirrel-rules/SKILL.md")" "targets/cursor/skills/squirrel-rules/SKILL.md must contain exactly 16 rule headings"
 
 # ==========================================================================
 # 7. Frontmatter validity: the output style's and the .mdc's frontmatter

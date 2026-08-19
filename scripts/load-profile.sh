@@ -695,7 +695,23 @@ extract_cwd() {
     printf '%s' "$val"
     return 0
   fi
-  extract_workspace_roots_0 "$json"
+  val=$(extract_workspace_roots_0 "$json")
+  if [ -n "$val" ]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  # Cursor hook env (docs: always present). Used only when the payload
+  # omitted both cwd and workspace_roots — otherwise slug becomes
+  # root-<cksum("")> and checkpoints land in the wrong directory.
+  # Absolute paths only: a relative value is ignored, same as a
+  # non-absolute cwd. A present cwd still wins (Claude must not be
+  # re-homed by a leftover CURSOR_PROJECT_DIR).
+  env_dir=${CURSOR_PROJECT_DIR:-}
+  case "$env_dir" in
+    /*)
+      printf '%s' "$env_dir"
+      ;;
+  esac
 }
 
 # --- Project slug (tech-lead Decision 1 support) ---------------------
@@ -3734,6 +3750,12 @@ case "$hook_event_name" in
     if [ -n "$output" ]; then
       printf '%s\n' "$output"
     fi
+    exit 0
+    ;;
+  preCompact)
+    # Cursor observational hook. Cannot inject additional_context or
+    # invent Doing/Next. user_message is the documented output field.
+    printf '%s\n' '{"user_message":"squirrel-mode: context will compact. After it finishes, run /squirrel-pickup to restore Doing and Next from the project checkpoint on disk."}'
     exit 0
     ;;
 esac

@@ -115,7 +115,7 @@ type it.
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | Claude Code | output style, `force-for-plugin` | **10** namespaced skills | `SessionStart` hook | `PreToolUse` hook | `stash` + `dig` |
 | Codex | `~/.codex/AGENTS.md` global layer | **4** in `~/.agents/skills/<name>/SKILL.md` | instructed file read only, best-effort | no | no |
-| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection | `preToolUse` Write/Read | `stash` + `dig` |
+| Cursor | plugin `.mdc`, `alwaysApply: true` | **10** Agent Skills `/squirrel-<name>` | `sessionStart` + profile projection + `preCompact` | `preToolUse` Write/Read | `stash` + `dig` |
 
 The hoard's own files are plain markdown under `~/.squirrel/`, so any target can read them; what
 Codex lacks is the two commands, which this phase ships for Claude Code and Cursor.
