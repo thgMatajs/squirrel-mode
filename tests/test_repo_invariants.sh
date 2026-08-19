@@ -238,12 +238,13 @@ scratch_before=$(scratch_snapshot)
 #             targets/cursor/skills/squirrel-stash/SKILL.md copy carries those same four lines.
 #             Banning the word would fail on the file that teaches it. NOT CAUGHT: "fact" used as a
 #             synonym for the memory rather than for what it records.
-#           - "record" (Memory) — glossary-cost record: 33 hits across 9 in-scope files, the worst
+#           - "record" (Memory) — glossary-cost record: 34 hits across 10 in-scope files, the worst
 #             of the five, because it is a VERB in shipped product text: skills/stash/SKILL.md's
 #             frontmatter description opens "Record one durable memory" (and the Cursor
 #             squirrel-stash copy of that same line), and rules/base-rules.md
 #             (plus every artifact scripts/build.sh generates from it — output-styles/,
-#             targets/codex/AGENTS.md, targets/cursor/*.mdc) says "a checkpoint, a plan, or any
+#             targets/codex/AGENTS.md, targets/cursor/*.mdc, and the Cursor
+#             squirrel-rules recovery skill) says "a checkpoint, a plan, or any
 #             other record". NOT CAUGHT: "record" used as a noun for a memory.
 #           - "namespace" (Layer) — glossary-cost namespace: 2 hits across 2 in-scope files, and
 #             both are a true statement about a real product surface, not a synonym for a hoard
