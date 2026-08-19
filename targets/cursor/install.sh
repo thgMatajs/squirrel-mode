@@ -12,17 +12,22 @@
 #      every regular file under targets/cursor/. Copying only .mdc + two
 #      skills into ~/.cursor/skills/ would duplicate slash commands when
 #      the plugin loads; this script no longer writes that old layout as
-#      the payload. Ownership of an existing file at an allowlisted dest
-#      is decided as follows. Generated files (those whose bundled source
-#      carries a GENERATED FILE banner): an EXACT, FULL-LINE match against
-#      that artifact's own banner line - read fresh from the bundled
-#      source, never hardcoded (see banner_line_for/classify_dedicated_file
-#      below). Files with no banner (plugin.json, the four scripts,
-#      install.sh, hooks.json): ours iff byte-identical to the bundled
-#      file; otherwise foreign. A file that merely CONTAINS the substring
-#      "<!-- GENERATED FILE. Source:" somewhere is foreign, not ours, and
-#      is never overwritten on install or removed on uninstall. Every
-#      check here is biased toward "foreign" whenever there is any doubt.
+#      the payload. Install --yes OVERWRITES every allowlisted regular
+#      file in this tree (absent creates; an existing regular file is
+#      updated to the bundled bytes even if classify_plugin_file would
+#      call it foreign - a newer bundle will not match an older dest).
+#      A symlink or non-file at the dest is still refused
+#      (fail_if_symlink / validate_destination). Extra files that are
+#      not on the allowlist are not touched.
+#      Uninstall ownership is stricter, and biased toward foreign:
+#      generated files (bundled source carries a GENERATED FILE banner)
+#      are ours on an EXACT, FULL-LINE banner match - read fresh from
+#      the bundled source (see banner_line_for/classify_dedicated_file).
+#      Files with no banner (plugin.json, the four scripts, install.sh,
+#      hooks.json): ours iff byte-identical to the current bundled file.
+#      A dest that differs and has no banner stays. A file that merely
+#      CONTAINS the substring "<!-- GENERATED FILE. Source:" somewhere
+#      is foreign, not ours, and is never removed on uninstall.
 #   2. On install AND uninstall, leftover old-layout files at
 #      ~/.cursor/rules/squirrel-mode.mdc and
 #      ~/.cursor/skills/squirrel-*/SKILL.md are removed IFF they classify
@@ -465,36 +470,30 @@ install_or_remove_plugin_file() {
   kind=$(classify_plugin_file "$dest" "$src")
 
   if [ "$action" = "install" ]; then
-    case "$kind" in
-      foreign)
-        echo "Skipping $dest: a file already exists there that is not a squirrel-mode file. Remove it by hand first if you want squirrel-mode's copy installed."
-        ;;
-      absent)
+    # This tree is ours to manage: overwrite every allowlisted regular
+    # file. classify_plugin_file is not consulted here - a mutated or
+    # older dest would look "foreign" and skip the upgrade.
+    if [ -f "$dest" ] && cmp -s "$src" "$dest"; then
+      echo "$dest already up to date - nothing to do."
+    else
+      if [ -f "$dest" ]; then
+        echo "Would update $dest"
+      else
         echo "Would create $dest"
-        if [ "$do_write" = "yes" ]; then
-          mkdir -p "$(dirname "$dest")"
-          write_destination "$dest" "$src"
-          if [ -x "$src" ]; then
-            chmod +x "$dest"
-          fi
+      fi
+      if [ "$do_write" = "yes" ]; then
+        mkdir -p "$(dirname "$dest")"
+        write_destination "$dest" "$src"
+        if [ -x "$src" ]; then
+          chmod +x "$dest"
+        fi
+        if [ "$kind" = "absent" ]; then
           echo "Installed: $dest"
-        fi
-        ;;
-      ours)
-        if cmp -s "$src" "$dest"; then
-          echo "$dest already up to date - nothing to do."
         else
-          echo "Would update $dest"
-          if [ "$do_write" = "yes" ]; then
-            write_destination "$dest" "$src"
-            if [ -x "$src" ]; then
-              chmod +x "$dest"
-            fi
-            echo "Updated: $dest"
-          fi
+          echo "Updated: $dest"
         fi
-        ;;
-    esac
+      fi
+    fi
   else
     case "$kind" in
       ours)

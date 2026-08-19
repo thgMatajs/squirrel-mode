@@ -1262,6 +1262,39 @@ HOME="$home10h" "$cursor_install" --uninstall --yes >/dev/null 2>&1
 assert_eq "identical" "$(files_byte_status "$old_mdc_ref" "$home10h/.cursor/rules/squirrel-mode.mdc")" "old-layout foreign squirrel-mode.mdc must survive uninstall"
 assert_eq "identical" "$(files_byte_status "$old_skill_ref" "$home10h/.cursor/skills/squirrel-digest/SKILL.md")" "old-layout foreign squirrel-digest must survive uninstall"
 
+# 10i. A second --yes must restore a mutated no-banner dest (plugin.json)
+#      to the bundled bytes. classify_plugin_file would call the mutant
+#      foreign; the plugin tree is still ours to manage on install.
+home10i=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10i"
+mkdir -p "$home10i/.cursor"
+if out10i1=$(HOME="$home10i" "$cursor_install" --yes 2>&1); then exit10i1=0; else exit10i1=$?; fi
+assert_eq "0" "$exit10i1" "10i: first --yes must exit 0 -- output: $out10i1"
+plugin_json10i=$(cursor_plugin_file "$home10i" ".cursor-plugin/plugin.json")
+assert_file_exists "$plugin_json10i" "10i fixture: first --yes must have installed plugin.json"
+printf '\nmutated-by-hand-10i\n' >>"$plugin_json10i"
+assert_eq "DIFFERS" "$(files_byte_status "$repo_root/.cursor-plugin/plugin.json" "$plugin_json10i")" "10i fixture: the dest must actually differ from the bundle before the second --yes"
+if out10i2=$(HOME="$home10i" "$cursor_install" --yes 2>&1); then exit10i2=0; else exit10i2=$?; fi
+assert_eq "0" "$exit10i2" "10i: second --yes must exit 0 after a hand-edit inside the plugin copy -- output: $out10i2"
+assert_not_contains "$out10i2" "Skipping $plugin_json10i" "10i: second --yes must not skip the mutated plugin.json as a foreign leftover"
+assert_eq "identical" "$(files_byte_status "$repo_root/.cursor-plugin/plugin.json" "$plugin_json10i")" "10i: second --yes must restore plugin.json byte-identical to the bundled file"
+assert_file_absent "$home10i/.cursor/skills/squirrel-digest/SKILL.md" "10i: restoring the plugin copy must not start writing ~/.cursor/skills/"
+
+# 10j. The same mutation must survive --uninstall --yes: no-banner dest
+#      that is not byte-identical to the current bundle is foreign.
+home10j=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home10j"
+mkdir -p "$home10j/.cursor"
+HOME="$home10j" "$cursor_install" --yes >/dev/null 2>&1
+plugin_json10j=$(cursor_plugin_file "$home10j" ".cursor-plugin/plugin.json")
+printf '\nmutated-by-hand-10j\n' >>"$plugin_json10j"
+mutated10j=$(snapshot_file "$plugin_json10j")
+cleanup_dirs="$cleanup_dirs $mutated10j"
+if out10j=$(HOME="$home10j" "$cursor_install" --uninstall --yes 2>&1); then exit10j=0; else exit10j=$?; fi
+assert_eq "0" "$exit10j" "10j: --uninstall --yes must exit 0 against a mutated plugin.json -- output: $out10j"
+assert_file_exists "$plugin_json10j" "10j: uninstall must leave the mutated plugin.json (foreign / not byte-identical to the current bundle)"
+assert_eq "identical" "$(files_byte_status "$mutated10j" "$plugin_json10j")" "10j: the mutated plugin.json must be byte-unchanged after uninstall"
+
 # ==========================================================================
 # 11. Each installer reports, rather than fails, when its host
 #     directory is absent, and exits 0.
@@ -1481,31 +1514,84 @@ mkdir -p "$home15b/.codex" "$home15b/.agents/skills/digest"
 substring_content_15b="This foreign file quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's digest skill."
 assert_foreign_survives_install_and_uninstall "$home15b" "$codex_install" "$home15b/.agents/skills/digest/SKILL.md" "$substring_content_15b" "Codex ~/.agents/skills/digest/SKILL.md, substring-only (not exact banner line)"
 
-# --- 15c: Cursor, no-marker foreign file at the plugin.json dest -------
+# --- 15c: Cursor plugin dest is ours to manage on install. A no-marker
+#     file already sitting at plugin.json is overwritten by --yes.
+#     Uninstall-only (no prior install that would have restored ours)
+#     still leaves that foreign file: classification is unchanged.
 home15c=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15c"
 mkdir -p "$home15c/.cursor/plugins/local/squirrel-mode/.cursor-plugin"
-assert_foreign_survives_install_and_uninstall "$home15c" "$cursor_install" "$(cursor_plugin_file "$home15c" ".cursor-plugin/plugin.json")" "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin.json path." "Cursor plugin.json, no marker"
+printf '%s' "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin.json path." >"$(cursor_plugin_file "$home15c" ".cursor-plugin/plugin.json")"
+if out15c=$(HOME="$home15c" "$cursor_install" --yes 2>&1); then exit15c=0; else exit15c=$?; fi
+assert_eq "0" "$exit15c" "15c: --yes must exit 0 over a no-marker file at plugin.json -- output: $out15c"
+assert_not_contains "$out15c" "Skipping $(cursor_plugin_file "$home15c" ".cursor-plugin/plugin.json")" "15c: --yes must not skip plugin.json as foreign; this tree is ours to manage"
+assert_eq "identical" "$(files_byte_status "$repo_root/.cursor-plugin/plugin.json" "$(cursor_plugin_file "$home15c" ".cursor-plugin/plugin.json")")" "15c: --yes must overwrite plugin.json to the bundled bytes"
 
-# --- 15d: Cursor, substring-but-not-exact-banner foreign file ----------
+home15c_un=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home15c_un"
+mkdir -p "$home15c_un/.cursor/plugins/local/squirrel-mode/.cursor-plugin"
+printf '%s' "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin.json path." >"$(cursor_plugin_file "$home15c_un" ".cursor-plugin/plugin.json")"
+seed15c_un=$(snapshot_file "$(cursor_plugin_file "$home15c_un" ".cursor-plugin/plugin.json")")
+cleanup_dirs="$cleanup_dirs $seed15c_un"
+HOME="$home15c_un" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$seed15c_un" "$(cursor_plugin_file "$home15c_un" ".cursor-plugin/plugin.json")")" "15c: uninstall-only must leave a no-marker plugin.json (not byte-identical to the bundle)"
+
+# --- 15d: substring-only at the plugin-copy .mdc: install overwrites;
+#     uninstall-only leaves it (no exact banner line).
 home15d=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15d"
 mkdir -p "$home15d/.cursor/plugins/local/squirrel-mode/targets/cursor"
 substring_content_15d="This foreign .mdc quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's rules file."
-assert_foreign_survives_install_and_uninstall "$home15d" "$cursor_install" "$(cursor_plugin_file "$home15d" "targets/cursor/squirrel-mode.mdc")" "$substring_content_15d" "Cursor plugin-copy squirrel-mode.mdc, substring-only (not exact banner line)"
+printf '%s' "$substring_content_15d" >"$(cursor_plugin_file "$home15d" "targets/cursor/squirrel-mode.mdc")"
+HOME="$home15d" "$cursor_install" --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$repo_root/targets/cursor/squirrel-mode.mdc" "$(cursor_plugin_file "$home15d" "targets/cursor/squirrel-mode.mdc")")" "15d: --yes must overwrite a substring-only file at the plugin-copy .mdc dest"
 
-# --- 15e: Cursor plugin skill, no-marker foreign file at the exact path -
+home15d_un=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home15d_un"
+mkdir -p "$home15d_un/.cursor/plugins/local/squirrel-mode/targets/cursor"
+printf '%s' "$substring_content_15d" >"$(cursor_plugin_file "$home15d_un" "targets/cursor/squirrel-mode.mdc")"
+seed15d_un=$(snapshot_file "$(cursor_plugin_file "$home15d_un" "targets/cursor/squirrel-mode.mdc")")
+cleanup_dirs="$cleanup_dirs $seed15d_un"
+HOME="$home15d_un" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$seed15d_un" "$(cursor_plugin_file "$home15d_un" "targets/cursor/squirrel-mode.mdc")")" "15d: uninstall-only must leave a substring-only plugin-copy .mdc (not an exact banner line)"
+
+# --- 15e: no-marker at the plugin digest skill dest: install overwrites;
+#     uninstall-only leaves it.
 home15e=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15e"
 mkdir -p "$home15e/.cursor/plugins/local/squirrel-mode/targets/cursor/skills/squirrel-digest"
-assert_foreign_survives_install_and_uninstall "$home15e" "$cursor_install" "$(cursor_plugin_file "$home15e" "targets/cursor/skills/squirrel-digest/SKILL.md")" "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin digest skill path." "Cursor plugin-copy squirrel-digest/SKILL.md, no marker"
+printf '%s' "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin digest skill path." >"$(cursor_plugin_file "$home15e" "targets/cursor/skills/squirrel-digest/SKILL.md")"
+HOME="$home15e" "$cursor_install" --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$repo_root/targets/cursor/skills/squirrel-digest/SKILL.md" "$(cursor_plugin_file "$home15e" "targets/cursor/skills/squirrel-digest/SKILL.md")")" "15e: --yes must overwrite a no-marker file at the plugin digest skill dest"
+assert_file_absent "$home15e/.cursor/skills/squirrel-digest/SKILL.md" "15e: overwriting the plugin copy must not write ~/.cursor/skills/"
 
-# --- 15f: Cursor plugin skill, substring-but-not-exact-banner foreign ---
+home15e_un=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home15e_un"
+mkdir -p "$home15e_un/.cursor/plugins/local/squirrel-mode/targets/cursor/skills/squirrel-digest"
+printf '%s' "This is a foreign file with no squirrel-mode marker at all, sitting at squirrel-mode's exact plugin digest skill path." >"$(cursor_plugin_file "$home15e_un" "targets/cursor/skills/squirrel-digest/SKILL.md")"
+seed15e_un=$(snapshot_file "$(cursor_plugin_file "$home15e_un" "targets/cursor/skills/squirrel-digest/SKILL.md")")
+cleanup_dirs="$cleanup_dirs $seed15e_un"
+HOME="$home15e_un" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$seed15e_un" "$(cursor_plugin_file "$home15e_un" "targets/cursor/skills/squirrel-digest/SKILL.md")")" "15e: uninstall-only must leave a no-marker plugin digest skill"
+
+# --- 15f: substring-only at the plugin plan skill dest: install
+#     overwrites; uninstall-only leaves it.
 home15f=$(make_temp_home)
 cleanup_dirs="$cleanup_dirs $home15f"
 mkdir -p "$home15f/.cursor/plugins/local/squirrel-mode/targets/cursor/skills/squirrel-plan"
 substring_content_15f="This foreign skill quotes squirrel-mode's own docs, including the substring: <!-- GENERATED FILE. Source: something-else-entirely.md. Generator: scripts/build.sh. -- but it is not actually squirrel-mode's plan skill."
-assert_foreign_survives_install_and_uninstall "$home15f" "$cursor_install" "$(cursor_plugin_file "$home15f" "targets/cursor/skills/squirrel-plan/SKILL.md")" "$substring_content_15f" "Cursor plugin-copy squirrel-plan/SKILL.md, substring-only (not exact banner line)"
+printf '%s' "$substring_content_15f" >"$(cursor_plugin_file "$home15f" "targets/cursor/skills/squirrel-plan/SKILL.md")"
+HOME="$home15f" "$cursor_install" --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$repo_root/targets/cursor/skills/squirrel-plan/SKILL.md" "$(cursor_plugin_file "$home15f" "targets/cursor/skills/squirrel-plan/SKILL.md")")" "15f: --yes must overwrite a substring-only file at the plugin plan skill dest"
+
+home15f_un=$(make_temp_home)
+cleanup_dirs="$cleanup_dirs $home15f_un"
+mkdir -p "$home15f_un/.cursor/plugins/local/squirrel-mode/targets/cursor/skills/squirrel-plan"
+printf '%s' "$substring_content_15f" >"$(cursor_plugin_file "$home15f_un" "targets/cursor/skills/squirrel-plan/SKILL.md")"
+seed15f_un=$(snapshot_file "$(cursor_plugin_file "$home15f_un" "targets/cursor/skills/squirrel-plan/SKILL.md")")
+cleanup_dirs="$cleanup_dirs $seed15f_un"
+HOME="$home15f_un" "$cursor_install" --uninstall --yes >/dev/null 2>&1
+assert_eq "identical" "$(files_byte_status "$seed15f_un" "$(cursor_plugin_file "$home15f_un" "targets/cursor/skills/squirrel-plan/SKILL.md")")" "15f: uninstall-only must leave a substring-only plugin plan skill"
 
 # ==========================================================================
 # 16 (C2). Fenced-code-block markers (A1): a BEGIN/END-shaped example
